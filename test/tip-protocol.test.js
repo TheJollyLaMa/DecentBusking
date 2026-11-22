@@ -54,3 +54,25 @@ test('unrecognized caller-supplied context remains a real tip event but cannot b
   assert.equal(tip.context, null);
   assert.match(tip.contextError, /not recognized/);
 });
+
+test('split tips mirror the router rounding and require one exact event per owner', async () => {
+  const { TIP_ABI, createTipContext, normalizeTipSplit, splitTipAmounts, verifySplitTipReceipt } = await import('../js/tip-protocol.mjs');
+  const coOwner = `0x${'77'.repeat(20)}`;
+  assert.throws(() => normalizeTipSplit([recipient, recipient], [5000, 5000]), /cannot receive/);
+  assert.throws(() => normalizeTipSplit([recipient, coOwner], [5000, 4000]), /cannot receive/);
+  const splits = normalizeTipSplit([recipient, coOwner], [3333n, 6667n]);
+  assert.deepEqual(splitTipAmounts(10n, splits), [3n, 7n]);
+  assert.throws(() => splitTipAmounts(1n, splits), /too small/);
+  const context = createTipContext({ source: 'radio', nftId });
+  const iface = new ethers.Interface(TIP_ABI);
+  const log = (to, amount, index) => ({ ...iface.encodeEventLog('TipSent', [payer, to, ethers.id(context.contextRef),
+    context.sourceKind, amount, context.contextRef]), address: router, index });
+  const intent = { source: 'radio', nftId, payer, amountWei: '10', splits };
+  const receipt = logs => ({ status: 1, hash, logs });
+  assert.equal(verifySplitTipReceipt({ receipt: receipt([log(recipient, 3n, 0), log(coOwner, 7n, 1)]),
+    routerAddress: router, intent, ethers }).length, 2);
+  for (const logs of [[log(recipient, 3n, 0)], [log(recipient, 5n, 0), log(coOwner, 5n, 1)],
+    [log(recipient, 3n, 0), log(payer, 7n, 1)]]) {
+    assert.throws(() => verifySplitTipReceipt({ receipt: receipt(logs), routerAddress: router, intent, ethers }), /every song owner/);
+  }
+});

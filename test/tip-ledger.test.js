@@ -208,6 +208,22 @@ test('context resolver binds NFT recipient and existence to the tip block, never
   assert.equal((await resolver({ ...event, context: { source: 'live', bookingId: 'unknown' } })).status, 'unavailable');
 });
 
+test('context resolver accepts shared-song owners only from the song split at the tip block', async () => {
+  const { createTipContextResolver } = await import('../discord-bot/tip-context.js');
+  const coOwner = `0x${'77'.repeat(20)}`;
+  let owners = [recipient, coOwner];
+  const resolver = createTipContextResolver({ collections: [collection],
+    readNft: async () => ({ uri: 'ipfs://metadata', supply: 1n }),
+    fetchMetadata: async () => ({ artistName: 'Artist', name: 'Recording', tipWallet: recipient, audioUrl: 'ipfs://audio' }),
+    readSongSplit: async ({ blockNumber }) => { assert.equal(blockNumber, 3); return owners; },
+  });
+  const event = { context: { source: 'radio', nftId: `8453:${collection}:80` }, recipient: coOwner, blockNumber: 3 };
+  assert.equal((await resolver(event)).status, 'verified');
+  assert.equal((await resolver({ ...event, recipient: sender })).status, 'mismatch');
+  owners = undefined;
+  assert.equal((await resolver(event)).status, 'unavailable');
+});
+
 test('historical booking reader reuses the real escrow ABI and exact booking key at the receipt block', async () => {
   const { createHistoricalTipBookingReader } = await import('../discord-bot/tip-context.js');
   const { LIVE_ESCROW_ABI } = await import('../js/live-bookings.mjs');

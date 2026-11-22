@@ -6,7 +6,7 @@ const SOURCES = ['Live performance', 'Radio recording', 'Archive recording'];
 export async function fetchTipLedger({ serviceUrl, routerAddress, address, offset = 0, fetchImpl = fetch }) {
   if (!serviceUrl || !ADDRESS.test(routerAddress || '') || !ADDRESS.test(address || '')) throw new Error('Tip ledger configuration is unavailable');
   const response = await fetchImpl(`${String(serviceUrl).replace(/\/$/, '')}/api/tips/ledger?${new URLSearchParams({
-    wallet: address, offset, limit: 25,
+    wallet: address, router: routerAddress, offset, limit: 25,
   })}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) });
   const state = await response.json();
   if (!response.ok || state.ready !== true) throw new Error(state.error || state.lastError || `Tip ledger unavailable (${response.status})`);
@@ -33,6 +33,16 @@ export async function fetchTipLedger({ serviceUrl, routerAddress, address, offse
 }
 
 export function renderTipLedger({ container, config, address, ethers, isCurrent = () => true }) {
+  const sections = [renderRouterLedger({ container, config, address, ethers, isCurrent,
+    routerAddress: config.tipRouterAddress, heading: 'Native ETH tips' })];
+  if (config.tipRouterAddress && ADDRESS.test(config.tipSplitRouterAddress || '')) {
+    sections.push(renderRouterLedger({ container, config, address, ethers, isCurrent,
+      routerAddress: config.tipSplitRouterAddress, heading: 'Shared-song ETH tips' }));
+  }
+  container.replaceChildren(...sections);
+}
+
+function renderRouterLedger({ container, config, address, ethers, isCurrent, routerAddress, heading }) {
   const document = container.ownerDocument;
   const details = document.createElement('details'), summary = document.createElement('summary');
   const status = document.createElement('p'), list = document.createElement('ol'), more = document.createElement('button');
@@ -41,7 +51,7 @@ export function renderTipLedger({ container, config, address, ethers, isCurrent 
   title.className = 'creator-dropdown-title';
   details.className = 'creator-dropdown';
   body.className = 'creator-dropdown-body';
-  title.textContent = 'Native ETH tips';
+  title.textContent = heading;
   summary.append(title);
   details.style.overflowWrap = 'anywhere';
   status.setAttribute('role', 'status');
@@ -50,10 +60,9 @@ export function renderTipLedger({ container, config, address, ethers, isCurrent 
   more.hidden = true;
   body.append(status, list, more);
   details.append(summary, body);
-  container.replaceChildren(details);
-  if (config.tipRouterAddress === '' || config.tipRouterAddress === undefined) {
+  if (routerAddress === '' || routerAddress === undefined) {
     status.textContent = 'Contract attribution is not enabled. Earlier direct wallet transfers are not included in this ledger.';
-    return;
+    return details;
   }
   let nextOffset = 0, loading = false, loaded = false;
   const seen = new Set();
@@ -64,9 +73,9 @@ export function renderTipLedger({ container, config, address, ethers, isCurrent 
     status.textContent = 'Reading the separate native ETH tip ledger...';
     try {
       const state = await fetchTipLedger({ serviceUrl: config.ipfsUploadServiceUrl,
-        routerAddress: config.tipRouterAddress, address, offset: nextOffset });
+        routerAddress, address, offset: nextOffset });
       if (!isCurrent()) return;
-      title.textContent = `Native ETH tips - ${ethers.formatEther(state.attributedWei)} ETH attributed`;
+      title.textContent = `${heading} - ${ethers.formatEther(state.attributedWei)} ETH attributed`;
       status.textContent = `${state.total} tip receipt(s). ${ethers.formatEther(state.unattributedWei)} ETH has unverified source context. ` +
         `${!state.caughtUp || state.restoringCount ? 'Index recovery is in progress; totals are incomplete. ' : ''}` +
         `Checked ${state.lastCheckedAt || 'time unavailable'}. Not combined with USDC payroll or supporter gifts.`;
@@ -106,4 +115,5 @@ export function renderTipLedger({ container, config, address, ethers, isCurrent 
   };
   details.addEventListener('toggle', () => { if (details.open && !loaded) void load(); });
   more.addEventListener('click', () => { more.textContent = 'More tip receipts'; void load(); });
+  return details;
 }

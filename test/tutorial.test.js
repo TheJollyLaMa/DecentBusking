@@ -614,13 +614,12 @@ test('split tutorial resumes furthest card, hides all bunny controls on leave, a
   assert.match(about, /startTutorial\(\{ card: 'splits' \}\)/);
 });
 
-test('split tutorial explains current payee consent, exact totals and separate on-chain confirmation', () => {
+test('split tutorial explains admin approval, exact totals and separate on-chain confirmation', () => {
   const { context } = createTutorialContext();
   const copy = vm.runInContext('SPLIT_HOPS.map(step => step.body).join(" ")', context);
   assert.match(copy, /total exactly 100%/);
-  assert.match(copy, /Every current payee must approve/);
-  assert.match(copy, /Newly added payees are not required/);
-  assert.match(copy, /sole current payee/);
+  assert.match(copy, /straight to the admin/);
+  assert.match(copy, /Other payees do not need to sign/);
   assert.match(copy, /separate Base transaction, which requires gas/);
   assert.match(copy, /already purchased requests keep their original snapshot/);
   assert.match(copy, /Album inheritance is not part/);

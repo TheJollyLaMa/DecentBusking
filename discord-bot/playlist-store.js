@@ -840,6 +840,11 @@ export function getWeeklyPlayWeeks() {
   return [...new Set(_playlist.flatMap((track) => [...Object.keys(track.weeklyPlays || {}), ...Object.keys(track.weeklyVotes || {})]))].sort();
 }
 
+function payrollSplitSnapshot(track) {
+  const splits = Array.isArray(track.creatorSplits) ? track.creatorSplits : [];
+  return splits.length > 1 ? { splits: splits.map(entry => ({ wallet: entry.wallet, shareBps: entry.shareBps })) } : {};
+}
+
 export function getWeeklyPlayHistory({ weeks = 12, now = Date.now(), wallet, includeAllTime = false, calendar } = {}) {
   if (calendar === 'new-york') {
     const current = currentPayrollPeriod(now);
@@ -847,7 +852,7 @@ export function getWeeklyPlayHistory({ weeks = 12, now = Date.now(), wallet, inc
       const tracks = _playlist.filter(track => !wallet || track.mintRecipient?.toLowerCase() === wallet.toLowerCase())
         .filter(track => (track.payrollPlays?.[period.week] || 0) > 0 || Boolean(track.payrollVotes?.[period.week]))
         .map(track => ({ trackId: track.trackId, title: track.title, artist: track.uploader, wallet: track.mintRecipient || null,
-          ipfsCid: track.ipfsCid || null,
+          ipfsCid: track.ipfsCid || null, ...payrollSplitSnapshot(track),
           uploadedAt: track.addedAt || null, plays: track.payrollPlays?.[period.week] || 0, votes: track.payrollVotes?.[period.week] || 0,
           likes: track.likes || 0, dislikes: track.dislikes || 0 }));
       const startedAt = _playlist.map(track => track.payrollTrackingStartedAt).filter(Boolean).sort()[0] || new Date(now).toISOString();

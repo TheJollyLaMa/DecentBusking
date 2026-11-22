@@ -1,6 +1,6 @@
 import { BASE_USDC_ADDRESS } from './settlement-funds.mjs?v=20261017-mercury-release';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { previewTopTenSongPayroll } from './top-ten-prizes.mjs';
+import { previewTopTenSongPayroll, songPayoutSplits } from './top-ten-prizes.mjs';
 import { formatUsdcUnits as formatUsdc } from './usdc-format.mjs?v=20261017-mercury-release';
 import { payrollPeriodFromKey, PAYROLL_TIME_ZONE, overlappingUtcWeeks } from './payroll-week.mjs';
 
@@ -16,18 +16,25 @@ export function playbackArtistKey(track) {
   return `unlinked:${artist ? `artist:${artist}` : `track:${String(track?.trackId || '').toLowerCase()}`}`;
 }
 
-function eligibleArtists(tracks) {
+// Each payee earns plays weighted by its song share (basis points); single-wallet songs weigh 10000 per play.
+function eligibleArtists(tracks, splitSongs = false) {
   const artists = new Map();
   for (const track of tracks) {
-    if (!hasPayoutWallet(track.wallet) || !Number.isSafeInteger(track.plays) || track.plays <= 0) continue;
-    const key = track.wallet.toLowerCase();
-    const artist = artists.get(key) || { wallet: track.wallet, artist: track.artist, plays: 0, tracks: 0 };
-    artist.plays += track.plays;
-    if (!Number.isSafeInteger(artist.plays)) throw new Error('Playback total exceeds safe accounting precision');
-    artist.tracks++;
-    artists.set(key, artist);
+    if (!Number.isSafeInteger(track.plays) || track.plays <= 0) continue;
+    const splits = splitSongs ? songPayoutSplits(track) : null;
+    const payees = splits || (hasPayoutWallet(track.wallet) ? [{ wallet: track.wallet, shareBps: 10000 }] : []);
+    for (const payee of payees) {
+      const key = payee.wallet.toLowerCase();
+      const artist = artists.get(key) || { wallet: payee.wallet, artist: track.artist, plays: 0, tracks: 0, weightBps: 0n };
+      artist.plays += track.plays;
+      artist.weightBps += BigInt(track.plays) * BigInt(payee.shareBps);
+      if (!Number.isSafeInteger(artist.plays)) throw new Error('Playback total exceeds safe accounting precision');
+      artist.tracks++;
+      artists.set(key, artist);
+    }
   }
-  return [...artists.values()].sort((first, second) => second.plays - first.plays || first.wallet.localeCompare(second.wallet));
+  return [...artists.values()].sort((first, second) => (second.weightBps > first.weightBps ? 1 : second.weightBps < first.weightBps ? -1 : 0) ||
+    second.plays - first.plays || first.wallet.localeCompare(second.wallet));
 }
 
 function checkBudget(budgetUnits, minimumUnits) {
@@ -36,12 +43,12 @@ function checkBudget(budgetUnits, minimumUnits) {
   }
 }
 
-export function previewPlaybackPayroll({ tracks, budgetUnits, minimumUnits = 0n }) {
+export function previewPlaybackPayroll({ tracks, budgetUnits, minimumUnits = 0n, splitSongs = false }) {
   checkBudget(budgetUnits, minimumUnits);
-  const artists = eligibleArtists(tracks);
+  const artists = eligibleArtists(tracks, splitSongs);
   const unlinkedArtists = new Map();
   for (const track of tracks) {
-    if (hasPayoutWallet(track.wallet) || !Number.isSafeInteger(track.plays) || track.plays <= 0) continue;
+    if (hasPayoutWallet(track.wallet) || (splitSongs && songPayoutSplits(track)) || !Number.isSafeInteger(track.plays) || track.plays <= 0) continue;
     const artist = String(track.artist || '');
     const key = playbackArtistKey(track);
     const entry = unlinkedArtists.get(key) || { wallet: '', artist, plays: 0, tracks: 0, shareKey: key };
@@ -53,8 +60,8 @@ export function previewPlaybackPayroll({ tracks, budgetUnits, minimumUnits = 0n 
   const totalPlays = tracks.reduce((total, track) =>
     total + (Number.isSafeInteger(track.plays) && track.plays > 0 ? BigInt(track.plays) : 0n), 0n);
   let allocated = 0n;
-  const entries = artists.map(artist => {
-    const amountUnits = totalPlays ? budgetUnits * BigInt(artist.plays) / totalPlays : 0n;
+  const entries = artists.map(({ weightBps, ...artist }) => {
+    const amountUnits = totalPlays ? budgetUnits * weightBps / (totalPlays * 10000n) : 0n;
     const payable = amountUnits > 0n && amountUnits >= minimumUnits;
     if (payable) allocated += amountUnits;
     return { ...artist, amountUnits, payable };
@@ -143,16 +150,44 @@ export function radioWorkReferenceText({ week, category, wallet, trackId }) {
   return `decentbusking:radio:${ny ? 'v3' : 'v1'}:8453:${week}:${category}:${wallet.toLowerCase()}`;
 }
 
+function isSongPrizeAllocation(allocation) {
+  return allocation?.category === 'top10' && allocation.schemaVersion >= 5;
+}
+
+// Schema 6 receipts freeze each song's split, so later split changes cannot alter a closed week.
+function withFrozenSplits(tracks, allocation) {
+  if (!(allocation.schemaVersion >= 6)) return tracks;
+  const frozen = new Map((Array.isArray(allocation.songSplits) ? allocation.songSplits : []).map(song => [song.trackId, song.splits]));
+  return tracks.map(track => {
+    const { splits, ...rest } = track;
+    return frozen.has(track.trackId) ? { ...rest, splits: frozen.get(track.trackId) } : rest;
+  });
+}
+
+// Rebuild one chart row per song from a frozen receipt whose split prizes have one entry per payee.
+export function tracksFromAllocationEntries(allocation) {
+  if (allocation.schemaVersion < 6 || allocation.category !== 'top10') return allocation.entries;
+  const songs = new Map();
+  for (const entry of allocation.entries || []) if (!songs.has(entry.trackId)) songs.set(entry.trackId, entry);
+  return withFrozenSplits([...songs.values()], allocation);
+}
+
+function frozenReport(report, allocation) {
+  return report || { week: allocation.week, current: false, tracks: tracksFromAllocationEntries(allocation) };
+}
+
 export function radioAllocationMatchesReport(report, allocation) {
   try {
     if (!report || !allocation || report.current || report.week !== allocation.week || !Array.isArray(report.tracks)) return false;
     const budgetUnits = BigInt(allocation.budgetUnits);
     const minimumUnits = BigInt(allocation.minimumUnits);
     const ranking = allocation.schemaVersion === 1 ? 'plays' : normalizeTopTenRanking(allocation.ranking);
+    const splitSongs = allocation.schemaVersion >= 6;
+    const tracks = withFrozenSplits(report.tracks, allocation);
     const plan = allocation.category === 'playback'
-      ? previewPlaybackPayroll({ tracks: report.tracks, budgetUnits, minimumUnits })
+      ? previewPlaybackPayroll({ tracks, budgetUnits, minimumUnits, splitSongs })
       : (allocation.schemaVersion >= 5
-        ? previewTopTenSongPayroll({ tracks: report.tracks, budgetUnits, minimumUnits })
+        ? previewTopTenSongPayroll({ tracks, budgetUnits, minimumUnits, splitSongs })
         : allocation.schemaVersion < 4
         ? previewLegacyTopTenPayroll({ tracks: report.tracks, budgetUnits, minimumUnits, ranking })
         : previewTopTenPayroll({ tracks: report.tracks, budgetUnits, minimumUnits, ranking }));
@@ -164,17 +199,17 @@ export function radioAllocationMatchesReport(report, allocation) {
       return actual.wallet?.toLowerCase() === expected.wallet.toLowerCase() && actual.plays === expected.plays &&
         (expected.votes === undefined || actual.votes === expected.votes) &&
         (expected.rank === undefined || actual.rank === expected.rank) &&
-        (allocation.schemaVersion < 5 || actual.trackId === expected.trackId) &&
+        (!isSongPrizeAllocation(allocation) || actual.trackId === expected.trackId) &&
         BigInt(actual.amountUnits) === expected.amountUnits &&
         actual.workReferenceText === radioWorkReferenceText({ week: report.week, category: allocation.category, wallet: expected.wallet,
-          ...(allocation.schemaVersion >= 5 ? { trackId: expected.trackId } : {}) });
+          ...(isSongPrizeAllocation(allocation) ? { trackId: expected.trackId } : {}) });
     });
   } catch {
     return false;
   }
 }
 
-export function finalizeRadioAllocation({ report, category, budgetUnits, minimumUnits, fundSlug, routerAddress, assetAddress, ranking = 'votes', topTenScheduleVersion = 2, now = Date.now() }) {
+export function finalizeRadioAllocation({ report, category, budgetUnits, minimumUnits, fundSlug, routerAddress, assetAddress, ranking = 'votes', topTenScheduleVersion = 2, splitSongs = false, now = Date.now() }) {
   if (!report || report.current || report.week === 'all-time') throw new Error('Only a completed week can be finalized');
   radioWorkReferenceText({ week: report.week, category, wallet: `0x${'1'.repeat(40)}` });
   const period = report.week.startsWith('NY-') ? payrollPeriodFromKey(report.week) : null;
@@ -189,9 +224,10 @@ export function finalizeRadioAllocation({ report, category, budgetUnits, minimum
   }
   if (!WALLET.test(routerAddress || '') || !WALLET.test(assetAddress || '') || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(fundSlug || '')) throw new Error('Invalid settlement configuration');
   if (budgetUnits <= 0n) throw new Error('Set a positive reviewed budget');
-  const plan = category === 'playback' ? previewPlaybackPayroll({ tracks: report.tracks, budgetUnits, minimumUnits })
+  if (splitSongs && category === 'top10' && topTenScheduleVersion < 3) throw new Error('Song splits require song-based Top 10 prizes');
+  const plan = category === 'playback' ? previewPlaybackPayroll({ tracks: report.tracks, budgetUnits, minimumUnits, splitSongs })
     : (topTenScheduleVersion >= 3
-      ? previewTopTenSongPayroll({ tracks: report.tracks, budgetUnits, minimumUnits })
+      ? previewTopTenSongPayroll({ tracks: report.tracks, budgetUnits, minimumUnits, splitSongs })
       : topTenScheduleVersion === 1
       ? previewLegacyTopTenPayroll({ tracks: report.tracks, budgetUnits, minimumUnits, ranking })
       : previewTopTenPayroll({ tracks: report.tracks, budgetUnits, minimumUnits, ranking }));
@@ -199,13 +235,16 @@ export function finalizeRadioAllocation({ report, category, budgetUnits, minimum
   if (!entries.length) throw new Error('No payouts meet the minimum threshold');
   const songPrizes = category === 'top10' && topTenScheduleVersion >= 3;
   if (songPrizes && entries.some(entry => !hasPayoutWallet(entry.wallet))) throw new Error('Link the artist wallet for every winning song before finalizing Top 10');
-  return { schemaVersion: songPrizes ? 5 : category === 'top10' ? 4 : period ? 3 : 2, ...(period ? { timeZone: PAYROLL_TIME_ZONE, startAt: period.startAt, endAt: period.endAt, partial: Boolean(report.partial) } : {}),
+  return { schemaVersion: splitSongs ? 6 : songPrizes ? 5 : category === 'top10' ? 4 : period ? 3 : 2, ...(period ? { timeZone: PAYROLL_TIME_ZONE, startAt: period.startAt, endAt: period.endAt, partial: Boolean(report.partial) } : {}),
     ranking: category === 'playback' ? 'qualified-plays' : songPrizes ? 'song-votes-halving' : `${normalizeTopTenRanking(ranking)}-halving`, station: 'decentbusking', chainId: 8453, category, week: report.week,
     routerAddress, assetAddress, fundSlug, budgetUnits: budgetUnits.toString(), minimumUnits: minimumUnits.toString(),
     allocatedUnits: plan.allocatedUnits.toString(), remainderUnits: plan.remainderUnits.toString(),
     finalizedAt: new Date(now).toISOString(),
+    ...(splitSongs ? { songSplits: report.tracks.map(track => ({ trackId: track.trackId, splits: songPayoutSplits(track) }))
+      .filter(song => song.splits) } : {}),
     entries: entries.map(entry => ({ wallet: entry.wallet, artist: entry.artist || '', plays: entry.plays,
       ...(songPrizes ? { trackId: entry.trackId, title: entry.title || '' } : {}),
+      ...(entry.splitShareBps ? { splitShareBps: entry.splitShareBps, songAmountUnits: entry.songAmountUnits.toString() } : {}),
       ...(category === 'top10' ? { votes: entry.votes, rank: entry.rank } : {}),
       amountUnits: entry.amountUnits.toString(), workReferenceText: radioWorkReferenceText({ week: report.week, category, wallet: entry.wallet,
         ...(songPrizes ? { trackId: entry.trackId } : {}) }) })) };
@@ -216,13 +255,13 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
   if (!/^ipfs:\/\/[^/\s]+$/.test(metadataUri || '') || !/^0x[0-9a-fA-F]{64}$/.test(metadataHash || '')) throw new Error('An immutable IPFS allocation receipt is required');
   if (allocation.assetAddress?.toLowerCase() !== BASE_USDC_ADDRESS.toLowerCase()) throw new Error('Radio settlement supports native Base USDC only');
   const validated = finalizeRadioAllocation({ report: { week: allocation.week, current: false,
-    tracks: allocation.entries },
+    tracks: tracksFromAllocationEntries(allocation) }, splitSongs: allocation.schemaVersion >= 6,
     category: allocation.category, budgetUnits: BigInt(allocation.budgetUnits), minimumUnits: BigInt(allocation.minimumUnits),
     ranking: allocation.schemaVersion === 1 ? 'plays' : allocation.ranking,
     topTenScheduleVersion: allocation.schemaVersion >= 5 ? 3 : allocation.schemaVersion < 4 ? 1 : 2,
     fundSlug: allocation.fundSlug, routerAddress: allocation.routerAddress, assetAddress: allocation.assetAddress });
   if (validated.week !== allocation.week) throw new Error('Invalid completed week');
-  if (allocation.schemaVersion >= 5 && !radioAllocationMatchesReport(report || { week: allocation.week, current: false, tracks: allocation.entries }, allocation)) throw new Error('Song prizes do not match the frozen chart allocation; load the full closed-week report including forfeited positions');
+  if (isSongPrizeAllocation(allocation) && !radioAllocationMatchesReport(frozenReport(report, allocation), allocation)) throw new Error('Song prizes do not match the frozen chart allocation; load the full closed-week report including forfeited positions');
   if (Number((await signer.provider.getNetwork()).chainId) !== 8453 || (await signer.getAddress()).toLowerCase() !== owner?.toLowerCase()) throw new Error('Connect the Base owner wallet');
   const waitForTransaction = async (transaction, detail) => {
     let receipt;
@@ -249,13 +288,13 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
   const identities = new Set();
   for (const entry of allocation.entries) {
     const identity = radioWorkReferenceText({ week: allocation.week, category: allocation.category, wallet: entry.wallet,
-      ...(allocation.schemaVersion >= 5 ? { trackId: entry.trackId } : {}) });
+      ...(isSongPrizeAllocation(allocation) ? { trackId: entry.trackId } : {}) });
     if (identity !== entry.workReferenceText || identities.has(identity) || BigInt(entry.amountUnits) <= 0n) throw new Error('Invalid or duplicate allocation entry');
     identities.add(identity);
     reviewedTotal += BigInt(entry.amountUnits);
     const workReference = hashReference(identity);
     if (await router.completedWorkReferences(workReference)) continue;
-    if (allocation.schemaVersion >= 5 && await router.completedWorkReferences(hashReference(radioWorkReferenceText({ week: allocation.week, category: allocation.category, wallet: entry.wallet })))) throw new Error('An artist-based prize was already paid for this week; manual reconciliation required');
+    if (isSongPrizeAllocation(allocation) && await router.completedWorkReferences(hashReference(radioWorkReferenceText({ week: allocation.week, category: allocation.category, wallet: entry.wallet })))) throw new Error('An artist-based prize was already paid for this week; manual reconciliation required');
     if (allocation.schemaVersion >= 3 && String(allocation.week).startsWith('NY-')) {
       for (const legacyWeek of overlappingUtcWeeks(payrollPeriodFromKey(allocation.week))) {
         const legacy = radioWorkReferenceText({ week: legacyWeek, category: allocation.category, wallet: entry.wallet });
@@ -332,7 +371,7 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
 }
 
 export function validateRadioReceipt(allocation, { routerAddress, assetAddress, funds, report }) {
-  if (!allocation || ![1, 2, 3, 4, 5].includes(allocation.schemaVersion) || allocation.chainId !== 8453 ||
+  if (!allocation || ![1, 2, 3, 4, 5, 6].includes(allocation.schemaVersion) || allocation.chainId !== 8453 ||
       !['playback', 'top10'].includes(allocation.category) || allocation.station !== 'decentbusking' ||
       allocation.routerAddress?.toLowerCase() !== routerAddress.toLowerCase() || allocation.assetAddress?.toLowerCase() !== assetAddress.toLowerCase() ||
       allocation.fundSlug !== (allocation.category === 'playback' ? funds.playback : funds.topTen)) throw new Error('Receipt does not match this station, fund, asset, and router');
@@ -342,17 +381,17 @@ export function validateRadioReceipt(allocation, { routerAddress, assetAddress, 
     if (allocation.schemaVersion < 3 || allocation.timeZone !== PAYROLL_TIME_ZONE || allocation.startAt !== period.startAt || allocation.endAt !== period.endAt) throw new Error('Receipt payroll timezone or boundaries do not match');
   } else if (allocation.schemaVersion >= 3 && allocation.timeZone) throw new Error('New York receipts require the new payroll schema');
   finalizeRadioAllocation({ report: { week: allocation.week, current: false,
-    tracks: allocation.entries },
+    tracks: tracksFromAllocationEntries(allocation) }, splitSongs: allocation.schemaVersion >= 6,
     category: allocation.category, budgetUnits: BigInt(allocation.budgetUnits), minimumUnits: BigInt(allocation.minimumUnits),
     ranking: allocation.schemaVersion === 1 ? 'plays' : allocation.ranking,
     topTenScheduleVersion: allocation.schemaVersion >= 5 ? 3 : allocation.schemaVersion < 4 ? 1 : 2,
     fundSlug: allocation.fundSlug, routerAddress, assetAddress });
-  if (allocation.schemaVersion >= 5 && !radioAllocationMatchesReport(report || { week: allocation.week, current: false, tracks: allocation.entries }, allocation)) throw new Error('Song prizes do not match the frozen chart allocation; load the full closed-week report including forfeited positions');
+  if (isSongPrizeAllocation(allocation) && !radioAllocationMatchesReport(frozenReport(report, allocation), allocation)) throw new Error('Song prizes do not match the frozen chart allocation; load the full closed-week report including forfeited positions');
   const identities = new Set();
   let total = 0n;
   for (const entry of allocation.entries) {
     const identity = radioWorkReferenceText({ week: allocation.week, category: allocation.category, wallet: entry.wallet,
-      ...(allocation.schemaVersion >= 5 ? { trackId: entry.trackId } : {}) });
+      ...(isSongPrizeAllocation(allocation) ? { trackId: entry.trackId } : {}) });
     const validCount = allocation.category === 'top10' && normalizeTopTenRanking(allocation.ranking) === 'votes'
       ? Number.isSafeInteger(entry.votes) && entry.votes > 0 && Number.isSafeInteger(entry.plays) && entry.plays >= 0
       : Number.isSafeInteger(entry.plays) && entry.plays > 0;

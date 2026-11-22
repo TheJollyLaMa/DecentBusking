@@ -26,6 +26,48 @@ test('song-ranked receipts freeze separate prizes for songs by the same artist a
   assert.equal(radioAllocationMatchesReport({ ...report, tracks: [...report.tracks].map(song => ({ ...song, votes: song.trackId === 'song-b' ? 99 : song.votes })) }, allocation), false);
 });
 
+test('schema 6 splits song prizes and playback among a song split while older receipts stay valid', async () => {
+  const { finalizeRadioAllocation, validateRadioReceipt, radioAllocationMatchesReport, settleRadioAllocation } = await import(url);
+  const { id } = require('../discord-bot/node_modules/ethers');
+  const config = { routerAddress: track(3, 1).wallet, assetAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', funds: { playback: 'dbusk-playback', topTen: 'dbusk-top10' } };
+  const splits = [{ wallet: track(1, 1).wallet, shareBps: 7000 }, { wallet: track(4, 1).wallet, shareBps: 3000 }];
+  const report = { week: 'NY-2026-10-05', current: false, tracks: [
+    { ...track(1, 3), trackId: 'duet', title: 'Duet', votes: 9, splits },
+    { ...track(2, 1), trackId: 'solo', title: 'Solo', votes: 4 },
+  ] };
+  const base = { ...config, report, now: Date.parse('2026-10-13T12:00:00Z') };
+  const top10 = finalizeRadioAllocation({ ...base, category: 'top10', fundSlug: 'dbusk-top10', budgetUnits: 10000001n, minimumUnits: 10000n, topTenScheduleVersion: 3, splitSongs: true });
+  assert.equal(top10.schemaVersion, 6);
+  assert.deepEqual(top10.entries.map(entry => [entry.trackId, entry.wallet, entry.amountUnits]), [
+    ['duet', splits[0].wallet, '3500000'], ['duet', splits[1].wallet, '1500000'], ['solo', track(2, 1).wallet, '5000001']]);
+  assert.equal(new Set(top10.entries.map(entry => entry.workReferenceText)).size, 3);
+  assert.equal(radioAllocationMatchesReport(report, top10), true);
+  assert.equal(validateRadioReceipt(top10, config), top10);
+  const resplit = { ...report, tracks: report.tracks.map(song => ({ ...song, splits: song.splits && [splits[0], { wallet: track(5, 1).wallet, shareBps: 3000 }] })) };
+  assert.equal(radioAllocationMatchesReport(resplit, top10), true);
+  assert.equal(validateRadioReceipt(top10, { ...config, report: resplit }), top10);
+  const playback = finalizeRadioAllocation({ ...base, category: 'playback', fundSlug: 'dbusk-playback', budgetUnits: 4000000n, minimumUnits: 0n, splitSongs: true });
+  assert.equal(playback.schemaVersion, 6);
+  assert.deepEqual(playback.entries.map(entry => [entry.wallet, entry.amountUnits]), [
+    [splits[0].wallet, '2100000'], [track(2, 1).wallet, '1000000'], [splits[1].wallet, '900000']]);
+  assert.equal(radioAllocationMatchesReport(report, playback), true);
+  assert.equal(validateRadioReceipt(playback, config), playback);
+  const legacy = finalizeRadioAllocation({ ...base, category: 'top10', fundSlug: 'dbusk-top10', budgetUnits: 10000001n, minimumUnits: 10000n, topTenScheduleVersion: 3 });
+  assert.equal(legacy.schemaVersion, 5);
+  assert.deepEqual(legacy.entries.map(entry => entry.wallet), [track(1, 1).wallet, track(2, 1).wallet]);
+  assert.equal(radioAllocationMatchesReport(report, legacy), true);
+  const owner = track(9, 1).wallet;
+  const paid = new Set();
+  const payout = async (...args) => ({ hash: `tx-${args[2]}`, wait: async () => { paid.add(args[4]); return { status: 1 }; } });
+  payout.staticCall = async () => {};
+  const result = await settleRadioAllocation({ allocation: top10, metadataUri: 'ipfs://split-receipt', metadataHash: `0x${'1'.repeat(64)}`, owner, hashReference: id,
+    signer: { provider: { getNetwork: async () => ({ chainId: 8453 }) }, getAddress: async () => owner },
+    router: { target: top10.routerAddress, paused: async () => false, PAYROLL_ROLE: async () => 'payroll', hasRole: async () => true,
+      approvedAssets: async () => true, funds: async () => ({ exists: true, active: true }), contributors: async () => ({ approved: true }),
+      completedWorkReferences: async reference => paid.has(reference), fundBalances: async () => 10000001n, payout } });
+  assert.deepEqual(result.confirmed.map(entry => entry.wallet), top10.entries.map(entry => entry.wallet));
+});
+
 test('song settlement batches songs by artist without merging payment references', async () => {
   const { finalizeRadioAllocation, settleRadioAllocation, radioWorkReferenceText } = await import(url);
   const { id } = require('../discord-bot/node_modules/ethers');

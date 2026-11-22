@@ -39,7 +39,7 @@ function element() {
 
 function setup({ resolve = async () => null, receipt = async () => ({ status: 1 }), chainId = 8453n,
   liveTarget = async () => null, radioState = null, serviceUrl = '', routerAddress = '',
-  protocol = {}, pendingReceipt = receipt, contractCode = '0x01', ethersImpl } = {}) {
+  protocol = {}, pendingReceipt = receipt, contractCode = '0x01', ethersImpl, configExtra = {}, songSplit = null } = {}) {
   const ids = ['hat-btn', 'tip-modal', 'tip-to-label', 'tip-artist', 'tip-song', 'tip-status',
     'tip-track-position', 'tip-prev-btn', 'tip-next-btn', 'tip-send-btn', 'tip-cancel-btn', 'tip-amount', 'tip-route',
     'tip-usdc-estimate'];
@@ -57,7 +57,7 @@ function setup({ resolve = async () => null, receipt = async () => ({ status: 1 
   const context = vm.createContext({
     console, document, setTimeout, clearTimeout, ...protocol,
     navigator: { clipboard: { writeText: async value => { copied.push(value); } } },
-    window: { ethereum: {}, _currentBuskerWallet: walletB, DecentConfig: { ipfsUploadServiceUrl: serviceUrl, tipRouterAddress: routerAddress },
+    window: { ethereum: {}, _currentBuskerWallet: walletB, DecentConfig: { ipfsUploadServiceUrl: serviceUrl, tipRouterAddress: routerAddress, ...configExtra },
       _wallet: { signer: {
         getAddress: async () => walletB,
         provider: { getNetwork: async () => ({ chainId }), getCode: async () => contractCode,
@@ -76,12 +76,21 @@ function setup({ resolve = async () => null, receipt = async () => ({ status: 1 
             contractTips.push({ address, args });
             return { hash: `0x${'34'.repeat(32)}`, wait: receipt };
           };
+          this.tipSplit = async (...args) => {
+            contractTips.push({ address, split: true, args });
+            return { hash: `0x${'34'.repeat(32)}`, wait: receipt };
+          };
+          this.getSong = async songId => {
+            if (!songSplit) throw new Error('No on-chain song');
+            return { ...songSplit, songId };
+          };
         }
       } },
     announcePaymentCelebration: detail => celebrations.push(detail),
     resolveNowPlayingNFT: resolve,
     readLiveTipTarget: liveTarget,
     getRadioStateSnapshot: () => radioState,
+    getBaseReadProvider: () => ({}),
     nftArtistLabel: nft => nft.artistName || nft.artist || 'Unknown artist',
     nftIdentity: nft => {
       if (!nft?.contractAddress || !Number.isSafeInteger(nft.tokenId)) throw new Error('Invalid NFT identity');
@@ -258,10 +267,54 @@ test('recordings with multiple creator shares fail closed instead of sending a 1
   });
   play({ ...songA, source: 'radio', nft: null });
   await elements['hat-btn'].click();
-  assert.match(elements['tip-status'].textContent, /multiple designated owner shares/);
+  assert.match(elements['tip-status'].textContent, /shared between owners/);
   assert.equal(elements['tip-send-btn'].disabled, true);
   await elements['tip-send-btn'].click();
   assert.equal(transfers.length + contractTips.length, 0);
+});
+
+test('shared songs tip every owner in one contract call using the on-chain DJuke split', async () => {
+  const protocol = await import('../js/tip-protocol.mjs');
+  const ethersImpl = require('../discord-bot/node_modules/ethers');
+  const splitRouter = `0x${'cd'.repeat(20)}`, collection = `0x${'ef'.repeat(20)}`, djuke = `0x${'56'.repeat(20)}`;
+  const songId = `0x${'78'.repeat(32)}`;
+  const expected = protocol.createTipContext({ source: 'radio', nftId: `8453:${collection}:49` });
+  const iface = new ethersImpl.Interface(protocol.TIP_ABI);
+  const amount = 10000000000000001n, first = amount * 7000n / 10000n;
+  const logs = [[walletA, first], [walletB, amount - first]].map(([recipient, value], index) => ({
+    ...iface.encodeEventLog('TipSent', [walletB, recipient, ethersImpl.id(expected.contextRef), expected.sourceKind, value, expected.contextRef]),
+    address: splitRouter, index }));
+  const nft = { ...songA.nft, contractAddress: collection, tokenId: 49, djukeSongId: songId,
+    creatorSplits: [{ wallet: walletA, shareBps: 7000 }, { wallet: walletB, shareBps: 3000 }] };
+  const { elements, play, contractTips, celebrations } = setup({
+    protocol, ethersImpl, routerAddress: `0x${'9a'.repeat(20)}`,
+    configExtra: { tipSplitRouterAddress: splitRouter, djukeContractAddress: djuke },
+    songSplit: { recipients: [walletA, walletB], sharesBps: [7000n, 3000n] },
+    receipt: async () => ({ status: 1, hash: `0x${'34'.repeat(32)}`, logs }),
+  });
+  play({ ...songA, source: 'radio', nft });
+  await elements['hat-btn'].click();
+  assert.match(elements['tip-route'].textContent, /Split between 2 song owners/);
+  elements['tip-amount'].value = '0.010000000000000001';
+  await elements['tip-send-btn'].click();
+  assert.equal(contractTips.length, 1);
+  assert.equal(contractTips[0].split, true);
+  assert.equal(contractTips[0].address, splitRouter);
+  assert.deepEqual([...contractTips[0].args[0]], [walletA, walletB]);
+  assert.deepEqual([...contractTips[0].args[1]], [7000, 3000]);
+  assert.equal(contractTips[0].args[3], expected.contextRef);
+  assert.equal(contractTips[0].args[4].value, amount);
+  assert.match(elements['tip-status'].textContent, /Tip confirmed/);
+  assert.equal(celebrations.length, 1);
+
+  const stale = setup({ protocol, ethersImpl, routerAddress: `0x${'9a'.repeat(20)}`,
+    configExtra: { tipSplitRouterAddress: splitRouter, djukeContractAddress: djuke },
+    songSplit: { recipients: [walletA, walletB], sharesBps: [5000n, 5000n] } });
+  stale.play({ ...songA, source: 'radio', nft });
+  await stale.elements['hat-btn'].click();
+  assert.match(stale.elements['tip-status'].textContent, /being updated/);
+  await stale.elements['tip-send-btn'].click();
+  assert.equal(stale.contractTips.length, 0);
 });
 
 test('all cached stage importers resolve to the live-tip controller', () => {
@@ -272,7 +325,7 @@ test('all cached stage importers resolve to the live-tip controller', () => {
     const references = [...importer.matchAll(/['"](\.\/stage\.js[^'"]*)['"]/g)];
     assert.ok(references.length);
     for (const [, reference] of references) {
-      assert.equal(imports[reference.replace('./', './js/')], './js/stage.js?v=20261122-tip-quote');
+      assert.equal(imports[reference.replace('./', './js/')], './js/stage.js?v=20261123-song-splits');
     }
   }
   assert.equal(imports['./js/space.js?v=20261030-ad-cutoff'], './js/space.js?v=20261122-hls-tip-match');

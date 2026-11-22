@@ -53,7 +53,7 @@ export function createHistoricalTipBookingReader({ provider, escrowAddress, cont
   };
 }
 
-export function createTipContextResolver({ provider, collections, readLiveBooking,
+export function createTipContextResolver({ provider, collections, readLiveBooking, readSongSplit = async () => null,
   readNft = async ({ collection, tokenId, blockNumber }) => {
     const contract = new Contract(collection, NFT_ABI, provider);
     const [uri, supply] = await Promise.all([
@@ -91,8 +91,14 @@ export function createTipContextResolver({ provider, collections, readLiveBookin
     if (BigInt(nft.supply) <= 0n) return { status: 'mismatch', error: 'Recording was not minted at the tip block' };
     if (!/^ipfs:\/\//.test(nft.uri)) return { status: 'unavailable', error: 'Historical recording attribution requires content-addressed IPFS metadata' };
     const metadata = await metadataFor(nft.uri);
-    if (!isMusicNft(metadata) || metadata.tipWallet?.toLowerCase() !== recipient) {
-      return { status: 'mismatch', error: 'Tip recipient does not match the recording metadata at the tip block' };
+    if (!isMusicNft(metadata)) return { status: 'mismatch', error: 'Tip recipient does not match the recording metadata at the tip block' };
+    if (metadata.tipWallet?.toLowerCase() !== recipient) {
+      // Shared songs pay each owner in the DJuke split that was live at the tip block.
+      const owners = await readSongSplit({ metadata, collection, tokenId, blockNumber });
+      if (owners === undefined) return { status: 'unavailable', error: 'Song split verification is unavailable' };
+      if (!Array.isArray(owners) || !owners.some(owner => String(owner).toLowerCase() === recipient)) {
+        return { status: 'mismatch', error: 'Tip recipient does not match the recording metadata at the tip block' };
+      }
     }
     return { status: 'verified', label: `${nftArtistLabel(metadata)} - ${metadata.name || metadata.title || `Recording #${tokenId}`}` };
   };

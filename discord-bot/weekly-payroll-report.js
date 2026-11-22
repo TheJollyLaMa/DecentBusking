@@ -35,7 +35,12 @@ export function buildWeeklyPayrollReport({ playback, top10, report, siteUrl }) {
   const ranked = [...artists.values()].sort((first, second) => first.amountUnits === second.amountUnits
     ? first.wallet.localeCompare(second.wallet) : first.amountUnits > second.amountUnits ? -1 : 1);
   const chart = rankTopTenSongs(report.tracks).filter(song => song.votes > 0);
-  const prizes = new Map(top10.allocation.entries.map(entry => [entry.trackId, entry]));
+  const prizes = new Map();
+  for (const entry of top10.allocation.entries) {
+    const prize = prizes.get(entry.trackId) || { amountUnits: 0n };
+    prize.amountUnits += BigInt(entry.amountUnits);
+    prizes.set(entry.trackId, prize);
+  }
   const chartLines = chart.map(song => {
     const prize = prizes.get(song.trackId);
     return `${song.rank}. ${label(song.title)} - ${label(song.artist, 22)}: **${prize ? dollars(prize.amountUnits) : '$0.00 (not payable)'}**`;

@@ -21,7 +21,7 @@
  */
 
 import { isAdminWallet } from './admin-access.mjs';
-import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt, radioWorkReferenceText, radioAllocationMatchesReport } from './radio-payroll.mjs?v=20261019-payroll-confirmations';
+import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt, radioWorkReferenceText, radioAllocationMatchesReport, tracksFromAllocationEntries } from './radio-payroll.mjs?v=20261123-song-splits';
 import { previewTopTenSongPayroll } from './top-ten-prizes.mjs';
 import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, defaultSettlementFundMetadata, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs?v=20261116-promotions';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
@@ -842,7 +842,7 @@ async function _refreshRadioPayroll({ background = false } = {}) {
     _radioReports = (history.weeks || []).filter(report => report.week !== 'all-time');
     for (const saved of Object.values(_reviewRecords())) {
       if (saved?.allocation && !_radioReports.some(report => report.week === saved.allocation.week)) {
-        _radioReports.push({ week: saved.allocation.week, current: false, legacy: true, tracks: saved.allocation.entries });
+        _radioReports.push({ week: saved.allocation.week, current: false, legacy: true, tracks: tracksFromAllocationEntries(saved.allocation) });
       }
     }
     select.replaceChildren(..._radioReports.slice().reverse().map(report => {
@@ -924,7 +924,7 @@ async function _refreshWeeklyPayflow() {
       for (const saved of state.allocations || []) {
         validateRadioReceipt(saved.allocation, { routerAddress: _payrollAssetConfig.routerAddress, assetAddress: _getAssetConfig('USDC').address,
           funds: _payrollAssetConfig.radioFunds, report: _radioReports.find(value => value.week === saved.allocation.week) });
-        if (![3, 4, 5].includes(saved.allocation.schemaVersion) || ethers.id(JSON.stringify(saved.allocation)) !== saved.metadataHash || !/^ipfs:\/\/[^/\s]+$/.test(saved.metadataUri)) throw new Error('Scheduled allocation proof is invalid');
+        if (![3, 4, 5, 6].includes(saved.allocation.schemaVersion) || ethers.id(JSON.stringify(saved.allocation)) !== saved.metadataHash || !/^ipfs:\/\/[^/\s]+$/.test(saved.metadataUri)) throw new Error('Scheduled allocation proof is invalid');
         const key = _reviewKey(saved.allocation.category, saved.allocation.week);
         if (records[key] && records[key].metadataHash !== saved.metadataHash) throw new Error('A conflicting reviewed receipt exists; manual reconciliation required');
         records[key] = saved;
@@ -1429,7 +1429,7 @@ function _renderRadioReviews() {
       const row = document.createElement('div'); row.className = 'radio-payroll-artist';
       const name = document.createElement('div'); name.className = 'payroll-recipient-name';
       const artist = document.createElement('strong'); artist.textContent = entry.title ? `${entry.rank}. ${entry.title}` : entry.artist || _shortAddr(entry.wallet);
-      const wallet = document.createElement('span'); wallet.textContent = `${entry.title ? `${entry.artist} · ` : ''}${_shortAddr(entry.wallet)}`;
+      const wallet = document.createElement('span'); wallet.textContent = `${entry.title ? `${entry.artist} · ` : ''}${_shortAddr(entry.wallet)}${entry.splitShareBps ? ` · ${entry.splitShareBps / 100}% split` : ''}`;
       wallet.title = entry.wallet;
       const amount = document.createElement('strong'); amount.className = 'payroll-recipient-amount'; amount.textContent = `${formatUsdcUnits(entry.amountUnits)} USDC`;
       const state = _radioRecipientStates.get(entry.workReferenceText);
@@ -1578,10 +1578,14 @@ function _previewRadioPayroll() {
     const minimumUnits = units('radio-minimum-payout');
     const playbackBudget = units('radio-playback-budget');
     const prizeBudget = units('radio-prize-budget');
-    const playback = previewPlaybackPayroll({ tracks: report.tracks, budgetUnits: playbackBudget, minimumUnits });
+    const newYork = report.week.startsWith('NY-');
+    const playbackReceipt = _radioReviews.playback?.allocation;
+    const playback = previewPlaybackPayroll({ tracks: report.tracks, budgetUnits: playbackBudget, minimumUnits,
+      splitSongs: newYork && (!playbackReceipt || playbackReceipt.schemaVersion >= 6) });
     const receipt = _radioReviews.top10?.allocation;
-    const songPrizes = report.week.startsWith('NY-') && (!receipt || receipt.schemaVersion >= 5);
-    const prizes = songPrizes ? previewTopTenSongPayroll({ tracks: report.tracks, budgetUnits: prizeBudget, minimumUnits })
+    const songPrizes = newYork && (!receipt || receipt.schemaVersion >= 5);
+    const prizes = songPrizes ? previewTopTenSongPayroll({ tracks: report.tracks, budgetUnits: prizeBudget, minimumUnits,
+      splitSongs: !receipt || receipt.schemaVersion >= 6 })
       : previewTopTenPayroll({ tracks: report.tracks, budgetUnits: prizeBudget, minimumUnits });
     const render = (id, plan) => {
       const target = document.getElementById(id);
@@ -1600,7 +1604,7 @@ function _previewRadioPayroll() {
         const row = document.createElement('div');
         row.className = 'radio-payroll-artist';
         const name = document.createElement('span');
-        name.textContent = `${entry.rank ? `${entry.rank}. ` : ''}${entry.title ? `${entry.title} · ` : ''}${entry.artist || _shortAddr(entry.wallet)} · ${entry.votes !== undefined ? `${entry.votes} weekly net votes` : `${entry.plays} plays`} · ${_shortAddr(entry.wallet)}`;
+        name.textContent = `${entry.rank ? `${entry.rank}. ` : ''}${entry.title ? `${entry.title} · ` : ''}${entry.artist || _shortAddr(entry.wallet)} · ${entry.votes !== undefined ? `${entry.votes} weekly net votes` : `${entry.plays} plays`} · ${_shortAddr(entry.wallet)}${entry.splitShareBps ? ` · ${entry.splitShareBps / 100}% split` : ''}`;
         const amount = document.createElement('strong');
         amount.textContent = `${formatUsdcUnits(entry.amountUnits)} USDC${entry.payable ? '' : entry.amountUnits === 0n ? ' · no payout' : ' · held below minimum'}`;
         row.append(name, amount);

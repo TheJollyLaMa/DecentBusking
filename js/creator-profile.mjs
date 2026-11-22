@@ -17,9 +17,17 @@ import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist 
 import { groupWatchlistByArtist } from './djuke-playlists.mjs?v=20261030-ad-cutoff';
 import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readContractEarnings, scanLogEarnings,
   summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261023-djuke-v05';
-import { renderTipLedger } from './tip-ledger-ui.mjs';
+import { renderTipLedger } from './tip-ledger-ui.mjs?v=20261123-song-splits';
 
 import { renderWallet } from './wallet-label.mjs';
+
+const SONG_PROPOSAL_STATUS = {
+  pending: '⏳ With admin',
+  completed: '✅ Live',
+  rejected: '✖ Declined',
+  expired: '⌛ Expired',
+  superseded: '↺ Replaced',
+};
 
 export function renderMusicianCareSummary(container, profile) {
   const status = container.querySelector('[data-profile-care-status]');
@@ -456,6 +464,8 @@ export function initCreatorProfile() {
   const splitProposalStatus = dialog.querySelector('[data-split-proposal-status]');
   const splitProposalLink = dialog.querySelector('[data-split-proposal-link]');
   const splitProposalApprove = dialog.querySelector('[data-split-proposal-approve]');
+  const splitProposalRefresh = dialog.querySelector('[data-split-proposal-refresh]');
+  const splitProposalChart = dialog.querySelector('[data-split-proposal-chart]');
   const songMigrationApply = dialog.querySelector('[data-song-migration-apply]');
   const renderAlbumTracks = () => {
     if (!albumTrackManagement || !albumTrackList) return;
@@ -532,6 +542,24 @@ export function initCreatorProfile() {
     const after = (request.recipients || []).map((wallet, index) =>
       `${wallet} · ${Number(request.sharesBps?.[index] || 0) / 100}%${request.positions?.[index] ? ` · ${request.positions[index]}` : ''}`);
     splitApprovalSection.hidden = false;
+    const songProposal = request.kind === 'song';
+    splitProposalDiff.hidden = songProposal;
+    if (splitProposalChart) splitProposalChart.hidden = !songProposal;
+    if (splitProposalRefresh) splitProposalRefresh.hidden = songProposal;
+    if (songProposal) {
+      splitProposalTitle.textContent = `⚸ ${request.title}`;
+      if (splitProposalChart) {
+        renderCreatorSplitPie(splitProposalChart, (request.recipients || []).map((wallet, index) => ({
+          wallet, shareBps: Number(request.sharesBps?.[index]), position: request.positions?.[index] || '',
+        })), { label: 'Proposed payout split' });
+      }
+      splitProposalProgress.textContent = SONG_PROPOSAL_STATUS[request.status] || SONG_PROPOSAL_STATUS.pending;
+      splitProposalApprove.hidden = true;
+      if (songMigrationApply) songMigrationApply.hidden = true;
+      splitProposalLink.hidden = true;
+      if (splitProposalStatus) splitProposalStatus.textContent = '';
+      return;
+    }
     splitProposalTitle.textContent = request.kind === 'album'
       ? `Album split approval · ${request.title}`
       : request.kind === 'migration'
@@ -1509,9 +1537,7 @@ export function initCreatorProfile() {
     renderSplitProposal(response.request);
     reviewedSongRows = null;
     songSplitConfirm.hidden = true;
-    message(response.request.approvals.length === response.request.owners.length
-      ? 'Your signature approved the proposal. All current payees have approved; the request is ready in the owner Admin queue. No payments have changed yet.'
-      : 'Proposal saved. Share the approval link with the remaining current payees before the owner applies the split.');
+    message('⏳ Sent to admin');
   }));
   dialog.querySelector('[data-album-sign]').addEventListener('click', () => run(async () => {
     const proposed = await proposal();

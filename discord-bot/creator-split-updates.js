@@ -50,9 +50,9 @@ export function createCreatorSplitUpdateQueue({
     getReadyRequests() {
       return ordered().filter(entry => entry.status === 'pending' &&
         !isExpired(entry) &&
-        entry.approvals.length === entry.owners.length &&
+        (entry.kind === 'song' || (entry.approvals.length === entry.owners.length &&
         entry.owners.every(owner => entry.approvals.some(approval =>
-          approval.address.toLowerCase() === owner.toLowerCase()))).map(copy);
+          approval.address.toLowerCase() === owner.toLowerCase()))))).map(copy);
     },
     async queueRequest(request) {
       return run(async () => {

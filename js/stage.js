@@ -7,7 +7,8 @@ import { readLiveTipTarget } from './live-tip-target.mjs?v=20261114-live-directi
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { resolveNowPlayingNFT } from './space.js?v=20261030-ad-cutoff';
 import { nftArtistLabel, nftIdentity } from './nft-loader.js?v=20261012-paging';
-import { TIP_ABI, createTipContext, verifyAttributedTipReceipt } from './tip-protocol.mjs';
+import { TIP_ABI, TIP_SPLIT_ABI, createTipContext, normalizeTipSplit, splitTipAmounts, verifyAttributedTipReceipt, verifySplitTipReceipt } from './tip-protocol.mjs?v=20261123-song-splits';
+import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, getCreatorWatchlistState, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs?v=20261030-ad-cutoff';
 
 let _tipPlayingTrack = null;
@@ -208,17 +209,7 @@ function _bindHat() {
   });
 }
 
-function _renderTipWallet(wallet) {
-  const label = document.getElementById('tip-to-label');
-  label.replaceChildren();
-  label.removeAttribute('title');
-  label.removeAttribute('aria-label');
-  if (!wallet) {
-    label.textContent = 'Recipient wallet not yet verified.';
-    return;
-  }
-  label.title = wallet;
-  label.setAttribute('aria-label', `Tip recipient wallet: ${wallet}`);
+function _tipWalletAddress(wallet) {
   const address = document.createElement('span');
   address.className = 'tip-wallet-address';
   address.setAttribute('aria-hidden', 'true');
@@ -232,6 +223,32 @@ function _renderTipWallet(wallet) {
     address.append(icon);
   }
   address.append(wallet.slice(-4));
+  return address;
+}
+
+function _renderTipWallet(wallet, splits = null) {
+  const label = document.getElementById('tip-to-label');
+  label.replaceChildren();
+  label.removeAttribute('title');
+  label.removeAttribute('aria-label');
+  if (splits) {
+    label.title = splits.map(part => `${part.recipient} ${part.shareBps / 100}%`).join('\n');
+    label.setAttribute('aria-label', `Tip split: ${label.title.replace(/\n/g, ', ')}`);
+    for (const part of splits) {
+      const share = document.createElement('span');
+      share.className = 'tip-wallet-share';
+      share.textContent = ` ${part.shareBps / 100}% `;
+      label.append(_tipWalletAddress(part.recipient), share);
+    }
+    return;
+  }
+  if (!wallet) {
+    label.textContent = 'Recipient wallet not yet verified.';
+    return;
+  }
+  label.title = wallet;
+  label.setAttribute('aria-label', `Tip recipient wallet: ${wallet}`);
+  const address = _tipWalletAddress(wallet);
   const copy = document.createElement('button');
   copy.type = 'button';
   copy.className = 'tip-wallet-copy';
@@ -454,7 +471,15 @@ async function _handleSendTip() {
     } else {
       const intent = { ...tip, recipient: tip.wallet, amountWei: amountWei.toString() };
       let tx;
-      if (tip.routerAddress) {
+      if (tip.splits) {
+        splitTipAmounts(amountWei, tip.splits);
+        intent.payer = await signer.getAddress();
+        if (await provider.getCode(tip.routerAddress) === '0x') throw new Error('The configured split tip contract is not deployed on this chain');
+        const context = createTipContext(intent);
+        const contract = new ethers.Contract(tip.routerAddress, TIP_SPLIT_ABI, signer);
+        tx = await contract.tipSplit(tip.splits.map(part => part.recipient), tip.splits.map(part => part.shareBps),
+          context.sourceKind, context.contextRef, { value: amountWei, chainId: expectedChain });
+      } else if (tip.routerAddress) {
         intent.payer = await signer.getAddress();
         if (await provider.getCode(tip.routerAddress) === '0x') throw new Error('The configured tip contract is not deployed on this chain');
         const context = createTipContext(intent);
@@ -485,7 +510,8 @@ async function _handleSendTip() {
     if (receipt?.status !== 1) throw new Error('Tip confirmation is still pending');
     if (tip.routerAddress) {
       if (receipt.hash?.toLowerCase() !== _tipPending.txHash.toLowerCase()) throw new Error('Receipt does not match the submitted tip transaction');
-      verifyAttributedTipReceipt({ receipt, routerAddress: tip.routerAddress, intent: _tipPending.intent, ethers });
+      if (tip.splits) verifySplitTipReceipt({ receipt, routerAddress: tip.routerAddress, intent: _tipPending.intent, ethers });
+      else verifyAttributedTipReceipt({ receipt, routerAddress: tip.routerAddress, intent: _tipPending.intent, ethers });
     }
     const txHash = receipt.hash || _tipPending.txHash;
     _tipPending = null;
@@ -497,7 +523,7 @@ async function _handleSendTip() {
       txHash,
       amountText: ethers.formatEther(amountWei),
       assetText: 'ETH',
-      summary: `Tip to ${tip.artist} for ${tip.title} (${_shortAddr(tip.wallet)})`,
+      summary: `Tip to ${tip.artist} for ${tip.title} (${tip.splits ? `split ${tip.splits.length} ways` : _shortAddr(tip.wallet)})`,
       txLabel: 'Tip confirmed',
     });
   } catch (err) {
@@ -514,9 +540,9 @@ async function _handleSendTip() {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
-function _tipRoute({ source, bookingId, nft }) {
+function _tipRoute({ source, bookingId, nft, split = false }) {
   const cfg = window.DecentConfig || {};
-  const routerAddress = cfg.tipRouterAddress ?? '';
+  const routerAddress = (split ? cfg.tipSplitRouterAddress : cfg.tipRouterAddress) ?? '';
   const chainId = cfg.chainId || 8453;
   if (typeof routerAddress !== 'string' || (routerAddress &&
       (!/^0x[0-9a-fA-F]{40}$/.test(routerAddress) || /^0x0{40}$/i.test(routerAddress)))) {
@@ -528,6 +554,24 @@ function _tipRoute({ source, bookingId, nft }) {
   const route = { source, bookingId, nftId, routerAddress, chainId, chainName: cfg.chainName || 'Base Mainnet' };
   if (routerAddress) createTipContext(route);
   return route;
+}
+
+const _DJUKE_SONG_ABI = ['function getSong(bytes32) view returns ((string audioURI,bool enabled,address[] recipients,uint16[] sharesBps))'];
+
+// Tips follow the split the DJuke contract pays, not a cached catalog copy.
+async function _readSongTipSplit(nft) {
+  const cfg = window.DecentConfig || {};
+  const routerAddress = cfg.tipSplitRouterAddress || '';
+  if (!/^0x[0-9a-fA-F]{40}$/.test(routerAddress) || /^0x0{40}$/i.test(routerAddress) ||
+      !/^0x[0-9a-fA-F]{40}$/.test(cfg.djukeContractAddress || '') || !/^0x[0-9a-fA-F]{64}$/.test(nft?.djukeSongId || '')) return null;
+  const contract = new ethers.Contract(cfg.djukeContractAddress, _DJUKE_SONG_ABI, getBaseReadProvider({ ethers }));
+  const song = await contract.getSong(nft.djukeSongId);
+  const splits = normalizeTipSplit([...song.recipients], [...song.sharesBps]);
+  const expected = new Map(nft.creatorSplits.map(part => [String(part.wallet || part.address || '').toLowerCase(), Number(part.shareBps)]));
+  if (expected.size !== splits.length || splits.some(part => expected.get(part.recipient.toLowerCase()) !== part.shareBps)) {
+    throw new Error('The song split is being updated. Try again after the change is live.');
+  }
+  return splits;
 }
 
 function _tipTrackKey(track = {}) {
@@ -611,7 +655,9 @@ function _renderTipState() {
   if (songEl) songEl.textContent = track?.title || 'No song playing';
   if (positionEl) positionEl.textContent = _tipHistoryLabel();
   const routeEl = document.getElementById('tip-route');
-  if (routeEl) routeEl.textContent = _tipSnapshot?.routerAddress
+  if (routeEl) routeEl.textContent = _tipSnapshot?.splits
+    ? `Split between ${_tipSnapshot.splits.length} song owners via the DecentBusking tip contract, matching the song's on-chain split.`
+    : _tipSnapshot?.routerAddress
     ? `100% to the artist via the DecentBusking tip contract. On-chain source: ${_tipSnapshot.source === 'live' ? 'live performance' : _tipSnapshot.source === 'archive' ? 'archive recording' : 'radio recording'}.`
     : 'Legacy direct ETH tip. No DecentBusking source is recorded on-chain until the tip contract is enabled.';
   if (sendBtn) sendBtn.textContent = _tipPending ? 'Recheck tip' : '💸 Send Tip';
@@ -695,27 +741,33 @@ async function _selectTipHistoryEntry(index, { openModal = false } = {}) {
       _syncTipNavState();
       return;
     }
+    let splits = null;
     if (Array.isArray(nft?.creatorSplits) && nft.creatorSplits.length > 1) {
-      _tipSnapshot = null;
-      _tipSelectionState = 'error';
-      _tipSelectionMessage = 'This recording has multiple designated owner shares. Atomic split tips are not enabled yet, so no tip was sent.';
-      _renderTipWallet('');
-      _showStatus('tip-status', _tipSelectionMessage, true);
-      _syncTipNavState();
-      return;
+      splits = await _readSongTipSplit(nft);
+      if (generation !== _tipLookupGeneration || _tipSelectionIndex !== index) return;
+      if (!splits) {
+        _tipSnapshot = null;
+        _tipSelectionState = 'error';
+        _tipSelectionMessage = 'This song is shared between owners, and split tips are not available right now. No tip was sent.';
+        _renderTipWallet('');
+        _showStatus('tip-status', _tipSelectionMessage, true);
+        _syncTipNavState();
+        return;
+      }
     }
     track.nft = nft;
     _tipHistory[index] = { ...entry, track };
     _tipSnapshot = Object.freeze({
       wallet,
+      ...(splits ? { splits } : {}),
       artist: nftArtistLabel(nft),
       title: track.title || nft.name || nft.title || 'Unknown song',
       trackKey: _tipTrackKey(track),
-      ..._tipRoute({ source: track.source === 'archive' ? 'archive' : 'radio', nft }),
+      ..._tipRoute({ source: track.source === 'archive' ? 'archive' : 'radio', nft, split: Boolean(splits) }),
     });
     document.getElementById('tip-artist').textContent = _tipSnapshot.artist;
     document.getElementById('tip-song').textContent = _tipSnapshot.title;
-    _renderTipWallet(wallet);
+    _renderTipWallet(wallet, splits);
     _tipSelectionState = 'ready';
     _tipSelectionMessage = window.ethereum ? '' : '🦊 MetaMask not detected. Install it to send tips.';
     _showStatus('tip-status', window.ethereum ? '' : '🦊 MetaMask not detected. Install it to send tips.', !window.ethereum);

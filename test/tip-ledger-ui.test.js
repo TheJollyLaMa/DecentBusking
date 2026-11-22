@@ -68,4 +68,8 @@ test('native-tip Profile disclosure stays separate from USDC and does not fetch 
   renderTipLedger({ container, address: wallet, ethers, config: { tipRouterAddress: router, ipfsUploadServiceUrl: 'https://worker.test' } });
   assert.equal(container.children[0].children[0].children[0].textContent, 'Native ETH tips');
   assert.equal(typeof container.children[0].listeners.toggle, 'function');
+  assert.equal(container.children.length, 1);
+  renderTipLedger({ container, address: wallet, ethers, config: { tipRouterAddress: router,
+    tipSplitRouterAddress: `0x${'cd'.repeat(20)}`, ipfsUploadServiceUrl: 'https://worker.test' } });
+  assert.equal(container.children[1].children[0].children[0].textContent, 'Shared-song ETH tips');
 });
