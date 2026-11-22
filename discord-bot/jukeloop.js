@@ -570,30 +570,45 @@ export function getJukeLoopSession(guildId) {
   return _sessions.get(guildId) ?? null;
 }
 
-export async function submitJukeLoopVote({ playId, voterId, vote }, saveVote = applySiteVote) {
+export async function submitJukeLoopVote({ playId, voterId, vote }, saveVote = applySiteVote,
+  publicBroadcast = null) {
   if (typeof playId !== 'string' || playId.length > 160 ||
       typeof voterId !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(voterId) ||
       (vote !== 1 && vote !== -1)) throw new Error('Invalid radio vote');
-  const session = [..._sessions.values()].find((entry) =>
-    !entry._destroyed && entry._nowPlaying?.audible && entry._nowPlaying.playId === playId);
+  const sessions = [..._sessions.values()].filter(entry => !entry._destroyed);
+  const current = sessions.find(entry => entry._nowPlaying?.audible && entry._nowPlaying.playId === playId);
+  const recentProgram = publicBroadcast?.selected !== false &&
+    publicBroadcast?.programHistory?.find(entry => entry.playId === playId && entry.live === false &&
+      entry.isDevert === false && entry.trackId);
+  const session = current ? current : recentProgram ? sessions.find(entry => entry.websitePlayback) : null;
   if (!session) throw new Error('This radio play has ended or is not audible yet');
-  if (session._siteVotePlayId !== playId) {
-    session._siteVotePlayId = playId;
-    session._siteVoters = new Map();
+  session._siteVoteHistory ||= new Map();
+  let voters = session._siteVoteHistory.get(playId);
+  if (!voters) {
+    voters = new Map();
+    session._siteVoteHistory.set(playId, voters);
+    while (session._siteVoteHistory.size > 24) {
+      session._siteVoteHistory.delete(session._siteVoteHistory.keys().next().value);
+    }
   }
-  const previous = session._siteVoters.get(voterId);
+  if (!current && (!Number.isFinite(recentProgram.at) ||
+      Date.now() - recentProgram.at > 120000 || recentProgram.at > Date.now())) {
+    throw new Error('This buffered radio play has ended');
+  }
+  const trackId = current ? session._nowPlaying.trackId : recentProgram.trackId;
+  const previous = voters.get(voterId);
   if (previous !== undefined) return { playId, vote: previous, duplicate: true };
-  if (session._siteVoters.size >= 5000) throw new Error('Voting capacity reached for this play');
+  if (voters.size >= 5000) throw new Error('Voting capacity reached for this play');
   let acceptedVote = vote;
   let duplicate = false;
-  if (session._nowPlaying.isDevert) {
+  if (current && session._nowPlaying.isDevert) {
     if (!session.devertPlayback?.recordMainRadioAdVote || !session._currentDevertAd) throw new Error('DeVert ad voting is not configured');
     const result = await session.devertPlayback.recordMainRadioAdVote({ campaignId: session._currentDevertAd.campaignId,
       radioPlayId: playId, voterId, vote });
     duplicate = result?.duplicate === true;
     if (duplicate) acceptedVote = result.vote;
-  } else saveVote(session._nowPlaying.trackId, vote);
-  session._siteVoters.set(voterId, acceptedVote);
+  } else saveVote(trackId, vote);
+  voters.set(voterId, acceptedVote);
   return { playId, vote: acceptedVote, duplicate };
 }
 

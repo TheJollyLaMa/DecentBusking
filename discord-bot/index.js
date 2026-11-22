@@ -2370,7 +2370,9 @@ async function main() {
       if (!paymentLedgerReady) throw new Error('Payment ledger is restoring; retry shortly');
       return paymentLedger.reconcile(txHash);
     },
-    onRadioVote: submitJukeLoopVote,
+    onRadioVote: vote => submitJukeLoopVote(vote, undefined, {
+      ...publicBroadcast.snapshot(), selected: broadcastMode === 'public',
+    }),
   });
   const port = process.env.PORT || 10000;
   http.createServer(requestHandler).listen(port, () => {

@@ -5,6 +5,9 @@ export async function readLiveTipTarget({ serviceUrl, expectedBookingId, fetchIm
   signal = AbortSignal.timeout(10000), audibleBroadcast = getAudibleBroadcast() }) {
   const state = await readRadioState({ radioUrl: radioEndpoint(serviceUrl), fetchImpl, signal });
   if (state.publicBroadcast?.selected) {
+    const liveSlot = state.liveAudio?.policy?.mode === 'live' || state.liveAudio?.phase === 'live' ||
+      state.activeShow?.type === 'live_performance';
+    if (!liveSlot && !expectedBookingId) return null;
     if (!audibleBroadcast || !Number.isFinite(state.serverTime) ||
         state.serverTime - audibleBroadcast.at > 120000 || audibleBroadcast.at > state.serverTime) {
       throw new Error('Buffered radio timing is unavailable. Play the broadcast before choosing its live performer.');
