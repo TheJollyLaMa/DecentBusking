@@ -2037,6 +2037,25 @@ body.recording-edit-open #recording-edit-tab { right: var(--recording-editor-wid
   .mint-flow { font-size: .66rem; gap: 4px; }
   .mint-split-row { grid-template-columns: minmax(0, 1fr) 76px 26px; gap: 6px; }
 }
+
+.mint-referral-section {
+  margin: 0.85rem 0;
+  padding: 0.85rem;
+  border: 1px solid rgba(240, 192, 64, 0.24);
+  border-radius: 10px;
+  background: rgba(240, 192, 64, 0.06);
+}
+
+.mint-referral-section h4,
+.mint-referral-section p {
+  margin: 0 0 0.5rem;
+}
+
+.mint-referral-section small {
+  display: block;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
 @media (prefers-reduced-motion: reduce) {
   #mint-modal { animation: none; }
   #mint-form .mint-dropzone { transition: none; }

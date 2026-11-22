@@ -1961,13 +1961,18 @@ async function main() {
         provider: paymentProvider, routerAddress: payrollAssets.routerAddress, ownerWallet: config.mintOwnerWallet,
         devertContractAddress: process.env.DEVERT_CONTRACT_ADDRESS,
         siteUrl: config.siteUrl,
+        readPlaylist: getPlaybackPlaylist,
         announcements: createPromotionAnnouncements({ channelId: config.announceChannelId,
           getClient: () => config.getDiscordClient?.() || client,
           canAnnounce: () => discordDiagnostics.bot('dbusker').notBefore() <= Date.now() }),
         voteOnRadio: async vote => {
           const playing = getJukeLoopNowPlaying();
-          if (!playing || playing.isDevert || playing.playId !== vote.playId) throw new Error('A current song, not an advert, is required');
-          return submitJukeLoopVote(vote);
+          const broadcast = { ...publicBroadcast.snapshot(), selected: broadcastMode === 'public' };
+          const current = !playing?.isDevert && playing?.playId === vote.playId;
+          const buffered = broadcast.selected && broadcast.programHistory?.some(program =>
+            program.playId === vote.playId && program.live === false && program.isDevert === false);
+          if (!current && !buffered) throw new Error('A currently audible song, not an advert, is required');
+          return submitJukeLoopVote(vote, undefined, broadcast);
         } });
     } catch (error) {
       console.warn(`[promotions] Disabled until public Pinata checkpoints and the persistent journal are ready: ${error.message}`);

@@ -105,6 +105,21 @@ test('community schedule keeps every ended event in a descending archived list',
   assert.deepEqual(result.archived.map(event => event.id), ['just-ended', 'canceled', 'old']);
 });
 
+test('published referral campaigns become public calendar occurrences with running capacity', async () => {
+  const { promotionCalendarEvents } = await import('../js/radio-schedule-ui.mjs');
+  const events = promotionCalendarEvents({ campaigns: [
+    { id: 'pilot', title: 'Musician referral pilot', status: 'published', template: 'musician-referral',
+      startsAt: '2026-11-22T12:00:00Z', endsAt: '2026-12-06T12:00:00Z',
+      maxAwards: 6, remainingAwards: 4 },
+    { id: 'draft', title: 'Draft', status: 'draft', template: 'musician-referral',
+      startsAt: '2026-11-22T12:00:00Z', endsAt: '2026-12-06T12:00:00Z' },
+  ] });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].campaignId, 'pilot');
+  assert.equal(events[0].type, 'referral_campaign');
+  assert.equal(events[0].promotion.remainingAwards, 4);
+});
+
 test('default Top 10 finale runs during the last New York payroll hour and ends at Monday midnight', async () => {
   const { resolveActiveShow, defaultRadioSchedule } = await import('../js/radio-schedule.mjs');
   const schedule = defaultRadioSchedule();

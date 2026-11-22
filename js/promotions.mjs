@@ -22,6 +22,31 @@ export const PROMOTION_ACTIVITY_WINDOWS = [
   { id: 'current-week', label: 'Current New York payroll week' },
   { id: 'offer-window', label: 'During this offer after registration' },
 ];
+export const MUSICIAN_REFERRAL_PILOT = Object.freeze({
+  template: 'musician-referral',
+  id: 'musician-referral-pilot-v1',
+  title: 'First musician referral pilot',
+  maxConversions: 6,
+  requiredVotes: 10,
+  rewardUnits: '25000000',
+  budgetUnits: '150000000',
+  rewardLegs: Object.freeze([
+    Object.freeze({ id: 'referrer', kind: 'wallet', recipientRole: 'referrer', amountUnits: '10000000' }),
+    Object.freeze({ id: 'musician', kind: 'wallet', recipientRole: 'musician', amountUnits: '5000000' }),
+    Object.freeze({ id: 'dbusk-top10', kind: 'funding-needed', fund: 'dbusk-top10', amountUnits: '5000000' }),
+    Object.freeze({ id: 'dbusk-playback', kind: 'funding-needed', fund: 'dbusk-playback', amountUnits: '5000000' }),
+  ]),
+});
+export function musicianReferralLegs(referrer, musician) {
+  return MUSICIAN_REFERRAL_PILOT.rewardLegs.map(leg => ({
+    ...leg,
+    ...(leg.kind === 'wallet' ? { recipient: (leg.recipientRole === 'referrer' ? referrer : musician).toLowerCase() } : {}),
+    status: leg.kind === 'wallet' ? 'pending' : 'funding-needed',
+  }));
+}
+export function isMusicianReferralCampaign(campaign) {
+  return campaign?.template === MUSICIAN_REFERRAL_PILOT.template;
+}
 export const PROMOTION_TEMPLATES = [
   { id: 'album', title: 'Bring your album', criteria: 'Bring an album with the stated minimum number of original tracks and rights to publish. Supply approved radio catalog and qualifying delivery evidence for admin review.' },
   { id: 'referral', title: 'Referral rush', criteria: 'Bring the stated number of new promotion participants. Each must register your invite before casting a signed song vote in the selected activity window. Final identity and evidence review is required.' },
@@ -29,13 +54,14 @@ export const PROMOTION_TEMPLATES = [
   { id: 'buddy', title: 'Bring a band buddy', criteria: 'Help a new musician complete onboarding and publish an approved recording. Supply the musician and recording references; no duplicate reward for the same work.' },
   { id: 'sponsor-match', title: 'First sponsor match', criteria: 'A capped match to the selected artist fund after a sponsor’s first qualifying contribution. Fund contributions are not refundable ad purchases. Draft only until a fund-to-fund settlement path is verified.' },
   { id: 'session', title: 'Village listening session', criteria: 'Organize a listening session and supply event and participation evidence. Never condition rewards on positive votes or claim anonymous activity proves unique humans.' },
+  { id: 'musician-referral', title: MUSICIAN_REFERRAL_PILOT.title, criteria: 'For each new musician with a verified minted playlist track and 10 distinct campaign-scoped signed song votes. One conversion creates four auditable $25 allocation legs, capped at six conversions.' },
 ];
 export function promotionAuthorization({ address, origin, issuedAt, command }) {
   return ['DecentBusking Promotions authorization v1', `Wallet: ${address.toLowerCase()}`,
     `Origin: ${origin}`, `Issued: ${issuedAt}`, `Command: ${JSON.stringify(command)}`].join('\n');
 }
-export function promotionWorkReference(claim) {
-  return `decentbusking:promotions:v1:8453:${claim.campaignId}:${claim.wallet.toLowerCase()}`;
+export function promotionWorkReference(claim, legId = '') {
+  return `decentbusking:promotions:v1:8453:${claim.campaignId}:${claim.wallet.toLowerCase()}${legId ? `:${legId}` : ''}`;
 }
 export function promotionMoney(value) {
   const amount = BigInt(value);

@@ -38,6 +38,21 @@ export function renderMusicianCareSummary(container, profile) {
   } catch (error) { status.textContent = `Activity unavailable: ${error.message}`; }
 }
 
+export function renderPromotionProfileSummary(container, state, wallet, ensName = '') {
+  const target = container.querySelector('[data-profile-promotions]');
+  if (!target) return;
+  const profiles = (state?.participantProfiles || []).filter(item => item.wallet?.toLowerCase() === wallet?.toLowerCase());
+  if (!profiles.length) {
+    target.textContent = 'No musician-referral pilot participation is recorded.';
+    return;
+  }
+  const walletLink = address => `<a href="https://basescan.org/address/${address}" target="_blank" rel="noopener">${address.slice(0, 6)}…${address.slice(-4)}</a>`;
+  target.innerHTML = profiles.map(item => `<strong>${ensName || walletLink(wallet)} · Referral pilot</strong><br>` +
+    `${item.qualifiedCount} qualified · pending ${Number(item.pendingUnits) / 1e6} USDC · approved ${Number(item.approvedUnits) / 1e6} USDC · paid ${Number(item.paidUnits) / 1e6} USDC · ` +
+    `maximum ${Number(item.maxEarningsUnits) / 1e6} USDC<br>${item.referred.map(ref => `${walletLink(ref.wallet)}: ${ref.voteProgress}/10 votes, ${ref.trackState}`).join('<br>')}` +
+    `<br>Supporter token: ${item.supporterToken.eligible ? 'eligible' : 'not yet eligible'}; eligibility only, no configured mint or transfer.`).join('<hr>');
+}
+
 export const CREATOR_ALBUM_ABI = [
   'function getSong(bytes32) view returns ((string audioURI,bool enabled,address[] recipients,uint16[] sharesBps))',
   'function getAlbum(bytes32) view returns ((address mainOwner,string title,string manifestURI,uint256 revision,uint256 listenPrice,uint256 albumPrice,address[] recipients,uint16[] sharesBps,string[] positions,bytes32[] songIds))',
@@ -825,6 +840,14 @@ export function initCreatorProfile() {
     for (const field of ['displayName', 'bio']) form.elements.namedItem(field).value = profile[field] || '';
     renderDiscordLinkFlow();
     renderMusicianCareSummary(dialog, profile);
+    const promotionsTarget = dialog.querySelector('[data-profile-promotions]');
+    if (promotionsTarget && service()) {
+      promotionsTarget.textContent = 'Loading public promotion state…';
+      void fetch(`${service()}/api/promotions`, { cache: 'no-store', signal: AbortSignal.timeout(15000) })
+        .then(response => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+        .then(state => renderPromotionProfileSummary(dialog, state, address, ens?.name || ''))
+        .catch(() => { promotionsTarget.textContent = 'Promotion state is unavailable; no reward status is being asserted.'; });
+    }
     setControls();
     renderWatchlist();
     void renderMyNFTs();

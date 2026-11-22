@@ -24,7 +24,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261122-split-pies" />
+  <link rel="stylesheet" href="css/styles.css?v=20261122-musician-referral" />
   <link rel="stylesheet" href="css/dmtv.css?v=20261118-dmtv-escrow" />
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth" />
   <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback" />
@@ -60,7 +60,9 @@
       "./js/performer-room.mjs?v=20261110-wallet-practice":"./js/performer-room.mjs?v=20261117-booking-assets",
       "./js/performer-room.mjs?v=20261114-allocated-stage":"./js/performer-room.mjs?v=20261117-booking-assets",
       "./js/performer-room.mjs?v=20261116-curtain":"./js/performer-room.mjs?v=20261117-booking-assets",
-      "./js/radio-schedule-ui.mjs?v=20261025-community-reminder":"./js/radio-schedule-ui.mjs?v=20261115-afterparty",
+      "./js/radio-schedule-ui.mjs?v=20261025-community-reminder":"./js/radio-schedule-ui.mjs?v=20261122-musician-referral",
+      "./js/promotions-ui.mjs?v=20261116-promotions":"./js/promotions-ui.mjs?v=20261122-musician-referral",
+      "./js/mint.js?v=20261030-ad-cutoff":"./js/mint.js?v=20261122-musician-referral",
       "./js/fund-display.mjs?v=20261024-djuke-labels":"./js/fund-display.mjs?v=20261108-live-audio-pilot"
     }}
   </script>
@@ -676,6 +678,13 @@
           <input id="mint-cid-input" type="text" placeholder="bafy... or ipfs://..." />
           <p class="mint-help">Use a file CID, not a folder. We’ll detect the format for you.</p>
         </div>
+        <section id="mint-referral-section" class="mint-referral-section" hidden>
+          <h4>🤝 Active musician referral</h4>
+          <p data-mint-referral-summary></p>
+          <label for="mint-referrer">Who referred you? <span class="hint">(wallet or ENS · optional)</span></label>
+          <input id="mint-referrer" type="text" placeholder="friend.eth or 0x…" />
+          <small>If entered, a separate wallet signature records the current campaign's public terms and retroactive attribution. Uploading does not guarantee a reward.</small>
+        </section>
         <p id="mint-media-detected" class="mint-detected" role="status" aria-live="polite">Format is detected automatically.</p>
         <div id="mint-media-preview" hidden></div>
         <label class="mint-ad-choice"><input id="mint-devert" type="checkbox" /><span><strong>This is a DVert advertisement</strong><small>Separate from music rotation and the music Top 10. After approval, use DVert to book a campaign. This submission does not buy airtime.</small></span></label>
@@ -1172,14 +1181,14 @@
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
   <script type="module" src="js/payroll.js?v=20261118-verified-backlog"></script>
   <script type="module" src="js/radio-history.js?v=20261029-tally-sections"></script>
-  <script type="module" src="js/radio-schedule-ui.mjs?v=20261115-afterparty"></script>
+  <script type="module" src="js/radio-schedule-ui.mjs?v=20261122-musician-referral"></script>
   <link rel="stylesheet" href="css/fund-tour.css?v=20261019-fund-tour">
   <script type="module" src="js/fund-header.mjs?v=20261030-fund-refresh"></script>
   <script type="module" src="js/fund-tour.mjs?v=20261030-fund-refresh"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261110-live-program"></script>
   <script type="module" src="js/djuke.mjs?v=20261112-playlist-continuity"></script>
   <script type="module" src="js/devert-site.mjs?v=20261107-review"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261122-split-pies"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261122-musician-referral"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261118-artist-artwork"></script>
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/djuke-playlists-ui.mjs?v=20261025-scheduling-info"></script>
@@ -1251,6 +1260,10 @@
         <div><dt>Chanting</dt><dd data-profile-care-chanting></dd></div>
         <div><dt>Vocal practice</dt><dd data-profile-care-vocal></dd></div>
       </dl>
+    </section>
+    <section class="creator-care-summary" aria-labelledby="creator-promotions-title">
+      <h3 id="creator-promotions-title">Campaign participation</h3>
+      <p data-profile-promotions>Public musician-referral campaign stats will appear when available.</p>
     </section>
     <details class="creator-dropdown" data-profile-earnings aria-labelledby="creator-earnings-title">
       <summary><span id="creator-earnings-title" class="creator-dropdown-title">Total earnings</span><strong class="creator-earnings-total" data-earnings-total>—</strong></summary>

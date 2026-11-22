@@ -208,6 +208,22 @@ export function openMintModal() {
   updateMediaPreview();
   document.getElementById('mint-art-preview').hidden = true;
   document.getElementById('mint-art-name').textContent = 'No cover yet? It can be chosen during owner approval.';
+  const referralSection = document.getElementById('mint-referral-section');
+  if (referralSection) {
+    referralSection.hidden = true;
+    document.getElementById('mint-referrer').value = new URLSearchParams(window.location.search).get('ref') || '';
+    void import('./promotions-ui.mjs?v=20261122-musician-referral')
+      .then(async ({ activeMusicianReferralCampaign }) => {
+        const campaigns = await activeMusicianReferralCampaign();
+        if (!campaigns.length) return;
+        referralSection.hidden = false;
+        referralSection.querySelector('[data-mint-referral-summary]').textContent =
+          campaigns.length === 1
+            ? `${campaigns[0].title} · $10 referrer · $5 musician · complete a verified mint + 10 signed song votes.`
+            : 'More than one referral campaign is active; enter the campaign-specific referral link first.';
+      })
+      .catch(() => {});
+  }
   if (artworkPreviewUrl) { URL.revokeObjectURL(artworkPreviewUrl); artworkPreviewUrl = ''; }
   modal.classList.remove('hidden');
   document.getElementById('mint-modal-inner').scrollTop = 0;
@@ -248,9 +264,15 @@ async function handleSubmission(event) {
     if (artwork && (artwork.size > 10 * 1024 * 1024 || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(artwork.type))) {
       throw new Error('Artwork must be PNG, JPEG, WebP, or GIF, up to 10 MB');
     }
+    const referral = document.getElementById('mint-referrer')?.value.trim();
     pending = true;
     button.disabled = true;
     document.querySelectorAll('#mint-form input, #mint-form button').forEach(control => { control.disabled = true; });
+    if (referral && !document.getElementById('mint-devert')?.checked) {
+      setStatus('Registering referral terms before upload…');
+      const { recordMusicianReferralUpload } = await import('./promotions-ui.mjs?v=20261122-musician-referral');
+      await recordMusicianReferralUpload({ referrer: referral });
+    }
     setStatus('Detecting your media format…');
     const { mediaType, filename } = await inspectMedia({ file: cidMode ? null : file, cid: ipfsCid, serviceUrl: cfg.ipfsUploadServiceUrl });
     const upload = createBrowserIpfsUploader({ provider: cfg.ipfsUploadProvider || 'pinata',
@@ -287,7 +309,16 @@ async function handleSubmission(event) {
       origin: window.location.origin,
       media: { title, artist, recipient, tipWallet, parentTokenId, filename, mediaType, ipfsCid, artworkCid,
         isDevertAd: document.getElementById('mint-devert')?.checked === true, creatorSplits } });
-    setStatus(`${result.status === 'minted' ? 'Already minted' : 'Queued for owner approval'}. IPFS CID: ${ipfsCid}${document.getElementById('mint-devert')?.checked ? ' · Advertisement: book airtime separately in DVert after approval.' : ''}`);
+    let referralWarning = '';
+    if (referral && result.trackId && !document.getElementById('mint-devert')?.checked) {
+      try {
+        const { recordMusicianReferralUpload } = await import('./promotions-ui.mjs?v=20261122-musician-referral');
+        await recordMusicianReferralUpload({ referrer: referral, trackId: result.trackId });
+      } catch (error) {
+        referralWarning = ` · Referral attribution needs attention: ${error.message}`;
+      }
+    }
+    setStatus(`${result.status === 'minted' ? 'Already minted' : 'Queued for owner approval'}. IPFS CID: ${ipfsCid}${document.getElementById('mint-devert')?.checked ? ' · Advertisement: book airtime separately in DVert after approval.' : ''}${referralWarning}`);
   } catch (error) {
     setStatus(error.message || 'Submission failed', true);
   } finally {

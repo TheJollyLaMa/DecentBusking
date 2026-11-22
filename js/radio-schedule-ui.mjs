@@ -155,7 +155,19 @@ export function partitionRadioScheduleEvents(events, now = Date.now()) {
   return { upcoming, archived };
 }
 
-function renderSchedule(payload, onCancel, bookingState = null) {
+export function promotionCalendarEvents(state) {
+  return (state?.campaigns || []).filter(campaign =>
+    campaign.template === 'musician-referral' &&
+    ['published', 'paused', 'closed'].includes(campaign.status) &&
+    Number.isFinite(Date.parse(campaign.startsAt)) && Number.isFinite(Date.parse(campaign.endsAt)))
+    .map(campaign => ({
+      id: `promotion:${campaign.id}`, campaignId: campaign.id, type: 'referral_campaign',
+      title: campaign.title, startUtc: campaign.startsAt, endUtc: campaign.endsAt,
+      status: campaign.status, promotion: campaign,
+    }));
+}
+
+function renderSchedule(payload, onCancel, bookingState = null, promotionState = null) {
   const weekly = document.getElementById('radio-schedule-weekly');
   const events = document.getElementById('radio-schedule-events');
   const archive = document.getElementById('radio-schedule-archive');
@@ -179,16 +191,27 @@ function renderSchedule(payload, onCancel, bookingState = null) {
   }
 
   events.replaceChildren();
-  const { upcoming, archived } = partitionRadioScheduleEvents(scheduledLiveOccurrences(payload, now), now);
+  const { upcoming, archived } = partitionRadioScheduleEvents(
+    [...scheduledLiveOccurrences(payload, now), ...promotionCalendarEvents(promotionState)], now);
   for (const event of upcoming) {
     const cancelled = event.status === 'cancelled';
-    const active = !cancelled && Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc);
+    const active = !cancelled && Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc) &&
+      (event.type !== 'referral_campaign' || event.status === 'published');
     const row = element('li', `radio-schedule-row${active ? ' is-active' : ''}${cancelled ? ' is-cancelled' : ''}`);
     row.append(element('strong', 'radio-schedule-name', event.title),
       element('span', 'radio-schedule-time', `${formatEventTime(event.startUtc, payload.timeZone || TIME_ZONE)} - ${formatEventTime(event.endUtc, payload.timeZone || TIME_ZONE)}`));
     if (event.type === 'playlist_show') {
       const definition = payload.playlistDefinitions?.find(item => item.id === event.playlistId);
       row.append(element('span', 'radio-schedule-time', `Playlist show · ${definition?.rule || 'No votes ever'} · Vote up OR down!`));
+    }
+    if (event.type === 'referral_campaign') {
+      const campaign = event.promotion;
+      row.append(element('span', 'radio-schedule-live', `🤝 ${campaign.status === 'published' ? 'REFERRAL CAMPAIGN' : campaign.status.toUpperCase()}`),
+        element('span', 'radio-schedule-time',
+          `${campaign.remainingAwards || 0} slots · ${Math.max(0, Number(campaign.maxAwards || 0) - Number(campaign.remainingAwards || 0))} reserved/complete`));
+      const link = element('a', 'payroll-btn', 'View campaign');
+      link.href = `${location.pathname}?promotion=${encodeURIComponent(campaign.id)}`;
+      row.append(link);
     }
     const invitedWallet = window._wallet?.address || '';
     const booking = performerBookingForOccurrence(bookingState?.bookings, event.id, invitedWallet);
@@ -201,7 +224,7 @@ function renderSchedule(payload, onCancel, bookingState = null) {
     if (active) row.append(element('span', 'radio-schedule-live', 'LIVE NOW'));
     if (cancelled) row.append(element('span', 'radio-schedule-cancelled-stamp', 'Canceled'),
       element('span', 'radio-schedule-cancel-reason', event.cancellationReason));
-    else if (isAdminWallet() && payload.ready !== false) {
+    else if (event.type !== 'referral_campaign' && isAdminWallet() && payload.ready !== false) {
       const button = element('button', 'admin-btn admin-btn-secondary', 'Cancel event');
       button.type = 'button';
       button.addEventListener('click', () => onCancel(event, button));
@@ -220,6 +243,9 @@ function renderSchedule(payload, onCancel, bookingState = null) {
       element('span', 'radio-schedule-time', `${formatEventTime(event.startUtc, payload.timeZone || TIME_ZONE)} - ${formatEventTime(event.endUtc, payload.timeZone || TIME_ZONE)}`),
       element('span', cancelled ? 'radio-schedule-cancelled-stamp' : 'radio-schedule-archive-status', cancelled ? 'Canceled' : 'Completed'));
     if (cancelled && event.cancellationReason) row.append(element('span', 'radio-schedule-cancel-reason', event.cancellationReason));
+    if (event.type === 'referral_campaign') {
+      row.append(element('span', 'radio-schedule-time', `Referral campaign · ${event.status}`));
+    }
     if (event.type === 'playlist_show') {
       const definition = payload.playlistDefinitions?.find(item => item.id === event.playlistId);
       row.append(element('span', 'radio-schedule-time', `Playlist show · ${definition?.rule || 'No votes ever'}`));
@@ -300,7 +326,15 @@ export function initRadioScheduleBoard() {
         if (!bookingsResponse.ok) throw new Error(bookingsPayload.error || `Booking invites unavailable (${bookingsResponse.status})`);
         bookingState = bookingsPayload;
       } catch (error) { bookingError = error.message; }
-      renderSchedule(payload, cancel, bookingState);
+      let promotionState = null;
+      try {
+        const promotionsResponse = await fetch(`${service}/api/promotions`, {
+          cache: 'no-store', signal: AbortSignal.timeout(12000),
+        });
+        const promotionsPayload = await promotionsResponse.json();
+        if (promotionsResponse.ok) promotionState = promotionsPayload;
+      } catch {}
+      renderSchedule(payload, cancel, bookingState, promotionState);
       if (bookingError) status.textContent = `Schedule loaded, but stage links and wallet-specific invitations could not be checked: ${bookingError}. Open your existing stage link or retry.`;
       if (subscribe) {
         subscribe.hidden = !service || payload.ready === false;

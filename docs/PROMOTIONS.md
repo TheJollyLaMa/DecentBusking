@@ -94,6 +94,49 @@ publish or move funds. The existing router has no verified atomic fund-to-fund
 settlement path; do not treat a wallet payout or recover/deposit as an
 implemented match. Fund contributions are not refundable ad purchases.
 
+## $150 musician referral pilot template
+
+The **First musician referral pilot** is an extension of this same promotions
+journal, not a separate service. Its base configuration is fixed at six
+conversions, $25 per conversion and $150 total. Qualification is all-or-nothing:
+the referred musician must own a playlist entry that the restored worker
+playlist marks `minted` with a token ID, and that musician must have 10 distinct
+play IDs with campaign-scoped signed song votes. The votes are associated with
+the referred musician; one wallet cannot silently reuse an earlier anonymous
+or differently scoped vote.
+
+Each qualifying conversion creates four independently visible legs:
+
+| Leg | USDC | Settlement state |
+| --- | ---: | --- |
+| Referrer wallet | $10 | review and existing one-address payout router |
+| Referred musician wallet | $5 | review and existing one-address payout router |
+| `dbusk-top10` allocation | $5 | **funding needed**; not paid by this router |
+| `dbusk-playback` allocation | $5 | **funding needed**; not paid by this router |
+
+The two funding-needed legs remain auditable obligations. They are excluded
+from paid counters and no transfer is fabricated. Direct wallet legs get
+separate references, payment preparation, Base receipts and reconciliation.
+The current router cannot atomically pay a whole four-leg conversion.
+
+An admin can curate a pilot referrer before or after publication. A participant
+can correct their own attribution during the active window after registration;
+wallets and ENS inputs are resolved in the browser, while the server persists
+only the verified wallet. Self/duplicate attribution and changes to reserved or
+paid conversion evidence fail closed. Corrections retain an immutable public
+reason and reviewer record.
+
+An admin may top up the source or extend the end/claim dates only through an
+**explicit immutable amendment**. The prior budget and dates, new budget and
+dates, reviewer, timestamp and reason are retained together. The normal draft
+editor cannot overwrite published pilot terms.
+
+The supporter token result is eligibility only. When all six conversions have
+both direct wallet legs paid before the campaign end, every earning referrer is
+marked eligible. No NFT is minted or transferred because no exact edition or
+authority configuration is present. Missing playlist, vote, router, amendment
+or settlement support is displayed as unavailable/blocked, not as success.
+
 Published terms are immutable and participants sign acceptance of that version;
 duplicate an offer to create changed terms. New York date inputs reject both
 nonexistent spring-forward times and ambiguous fall-back times. Pausing/closing
