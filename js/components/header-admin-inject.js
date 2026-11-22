@@ -67,22 +67,34 @@ function _injectAdminLink(shadowRoot) {
   if (!shadowRoot) return;
   const leftMenu = shadowRoot.querySelector('.ankh-left .dropdown-menu');
   if (!leftMenu) return;
-  if (leftMenu.querySelector('[data-admin-item]')) return;
 
   _injectStyle(shadowRoot);
 
-  const li = document.createElement('li');
-  li.className = 'admin-nav-item';
-  li.dataset.adminItem = '1';
-  li.textContent = '🔑 Admin';
+  if (!leftMenu.querySelector('[data-admin-item]')) {
+    const li = document.createElement('li');
+    li.className = 'admin-nav-item';
+    li.dataset.adminItem = '1';
+    li.textContent = '🔑 Admin';
+    li.addEventListener('click', e => {
+      e.stopPropagation();
+      leftMenu.style.display = 'none';
+      document.dispatchEvent(new CustomEvent('open-admin'));
+    });
+    leftMenu.appendChild(li);
+  }
 
-  li.addEventListener('click', e => {
-    e.stopPropagation();
-    leftMenu.style.display = 'none';
-    document.dispatchEvent(new CustomEvent('open-admin'));
-  });
-
-  leftMenu.appendChild(li);
+  if (!leftMenu.querySelector('[data-radio-programming-item]')) {
+    const li = document.createElement('li');
+    li.className = 'admin-nav-item';
+    li.dataset.radioProgrammingItem = '1';
+    li.textContent = '📻 Radio Programming';
+    li.addEventListener('click', e => {
+      e.stopPropagation();
+      leftMenu.style.display = 'none';
+      document.dispatchEvent(new CustomEvent('open-admin', { detail: { section: 'radio-programming' } }));
+    });
+    leftMenu.appendChild(li);
+  }
 }
 
 function _injectStyle(shadowRoot) {

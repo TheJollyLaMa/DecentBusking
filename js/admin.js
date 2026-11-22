@@ -16,11 +16,11 @@ import { completeCreatorSplitProposal, fetchCreatorSplitProposal, rejectCreatorS
 import { isAdminWallet } from './admin-access.mjs';
 import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261025-community-reminder';
 import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261116-longform';
-import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?v=20261116-longform';
+import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?v=20261122-referral-calendar';
 import { renderAdminRadioAnnouncements, requestRadioAnnouncement } from './admin-radio-announcements.mjs';
 import { removeDevertCampaign } from './devert-campaigns.mjs';
 import { renderWallet } from './wallet-label.mjs';
-import { mountAdminPromotions, mountPublicPromotion } from './promotions-ui.mjs?v=20261116-promotions';
+import { mountAdminPromotions, mountPublicPromotion } from './promotions-ui.mjs?v=20261122-musician-referral';
 
 const ROLE_GRANT_ABI = [
   'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
@@ -149,12 +149,20 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── Open / Close ──────────────────────────────────────────────────────────────
-function _openModal() {
+async function _openModal(event) {
   if (!isAdminWallet()) return;
   _adminOpen = true;
   _modal?.classList.remove('hidden');
   _refreshPaymentLedger();
-  return _connectWallet();
+  await _connectWallet();
+  if (event?.detail?.section !== 'radio-programming' || _modal?.classList.contains('hidden') ||
+      _radioScheduleSection?.classList.contains('hidden')) return;
+  _radioScheduleSection.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  const heading = _radioScheduleSection.querySelector('h3');
+  if (heading) {
+    heading.tabIndex = -1;
+    heading.focus({ preventScroll: true });
+  }
 }
 
 function _showPaymentLedger(ledger) {
@@ -340,6 +348,18 @@ async function _loadRadioSchedule() {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || `Schedule unavailable (${response.status})`);
     if (checkId !== _walletCheckId) return;
+    try {
+      const promotionsResponse = await fetch(`${service.replace(/\/$/, '')}/api/promotions`, { cache: 'no-store' });
+      const promotions = await promotionsResponse.json();
+      payload.promotionEvents = promotionsResponse.ok ? (promotions.campaigns || [])
+        .filter(campaign => campaign.template === 'musician-referral' && ['published', 'paused', 'closed'].includes(campaign.status))
+        .map(campaign => ({ id: campaign.id, title: campaign.title, status: campaign.status,
+          startUtc: campaign.startsAt, endUtc: campaign.endsAt, remainingAwards: campaign.remainingAwards })) : [];
+      if (!promotionsResponse.ok) payload.promotionEventsError = promotions.error || `Promotions unavailable (${promotionsResponse.status})`;
+    } catch (error) {
+      payload.promotionEvents = [];
+      payload.promotionEventsError = error.message;
+    }
     _radioSchedule = payload;
     renderPlaylistShowPreview(payload);
     _populateRadioWeeklyForm(payload.schedule || defaultRadioSchedule(payload.weeklySchedule));

@@ -15,6 +15,10 @@ test('calendar offers scheduling presets without a front-end rule builder', () =
   assert.doesNotMatch(source, /presetEditor|Rule preset|Save preset|Rule preset builder/);
   assert.match(source, /for \(const preset of presets\(\)\)/);
   assert.match(source, /button\('\+ Live block'/);
+  assert.match(source, /Referral campaign/);
+  assert.match(source, /drag = \{ referral: true \}/);
+  assert.match(source, /campaignId: event\.id/);
+  assert.match(source, /14 \* 86400000/);
 });
 
 test('current calendar date and half-hour slot follow New York time and DST', async () => {

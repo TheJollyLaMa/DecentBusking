@@ -193,19 +193,42 @@ export async function enablePromotionRecipient({ claim, snapshot, status, confir
   if (!(updated.approved ?? updated[1])) throw new Error('Recipient enablement is not active');
 }
 
-export function mountAdminPromotions(root) {
+let promotionEditorDialog = null;
+
+export function openPromotionCalendarEditor({ startsAt, endsAt, campaignId } = {}) {
+  if (promotionEditorDialog?.open) return;
+  promotionEditorDialog = document.createElement('dialog');
+  promotionEditorDialog.className = 'promotion-calendar-editor-dialog promotion-dialog';
+  promotionEditorDialog.setAttribute('aria-label', campaignId ? 'Referral campaign details' : 'Create referral campaign');
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.textContent = 'Close';
+  close.className = 'promotion-calendar-editor-close';
+  const body = document.createElement('div');
+  promotionEditorDialog.append(close, body);
+  document.body.append(promotionEditorDialog);
+  close.addEventListener('click', () => promotionEditorDialog.close());
+  promotionEditorDialog.addEventListener('close', () => {
+    promotionEditorDialog.remove();
+    promotionEditorDialog = null;
+  }, { once: true });
+  mountAdminPromotions(body, { startsAt, endsAt, campaignId, calendarMode: true });
+  promotionEditorDialog.showModal();
+}
+
+export function mountAdminPromotions(root, calendarOptions = {}) {
   if (!root) return;
   let state;
   let busy = false;
   let generation = 0;
   let editId = '';
-  root.innerHTML = `<summary>Invites &amp; Promotions</summary>
+  root.innerHTML = `${calendarOptions.calendarMode ? '' : '<summary>Invites &amp; Promotions</summary>'}
     <p>${termsNotice}</p>
     <p>Create/deposit into <strong>Promotionals (${PROMOTIONS_FUND})</strong> in Payroll → Settlements Router. No funds are created or moved here automatically.</p>
     <button type="button" data-promo-unlock>Unlock / refresh promotions</button>
     <p role="status" data-promo-status></p><div data-promo-funding></div>
     <div data-promo-workspace hidden>
-      <details><summary>Create or edit a draft</summary>
+      <details ${calendarOptions.calendarMode && !calendarOptions.campaignId ? 'open' : ''}><summary>Create or edit a draft</summary>
         <form data-promo-form>
           <label>Offer template<select name="template">${PROMOTION_TEMPLATES.map(t => `<option value="${t.id}">${escape(t.title)}</option>`).join('')}</select></label>
           ${field('title', 'Title')}
@@ -219,6 +242,9 @@ export function mountAdminPromotions(root) {
           <div data-promo-referral>
             ${field('requiredReferrals', 'Required qualified referrals (2–100)', 'number', '2')}
             <label>Referral activity window<select name="activityWindow">${PROMOTION_ACTIVITY_WINDOWS.map(w => `<option value="${w.id}">${escape(w.label)}</option>`).join('')}</select></label>
+          </div>
+          <div data-promo-curated>
+            <label>Curated referrers (wallets or ENS, one per line)<textarea name="curatedReferrers" maxlength="4000" placeholder="jose.eth&#10;0x…"></textarea></label>
           </div>
           <div data-promo-sponsor-terms>${field('minPurchase', 'Minimum eligible DVert purchase (USDC)', 'text', '5')}</div>
           <div data-promo-match-terms>
@@ -241,12 +267,13 @@ export function mountAdminPromotions(root) {
     for (const [selector, active] of [
       ['[data-promo-album]', input('template').value === 'album'],
       ['[data-promo-referral]', input('template').value === 'referral'],
+      ['[data-promo-curated]', ['referral', 'musician-referral'].includes(input('template').value)],
       ['[data-promo-sponsor-terms]', input('template').value === 'sponsor'],
       ['[data-promo-match-terms]', input('template').value === 'sponsor-match'],
     ]) {
       const section = root.querySelector(selector);
       section.hidden = !active;
-      section.querySelectorAll('input, select').forEach(el => { el.disabled = !active; });
+      section.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = !active; });
     }
   }
   function template() {
@@ -265,16 +292,23 @@ export function mountAdminPromotions(root) {
   function reset() {
     editId = '';
     form.reset();
+    if (calendarOptions.calendarMode) input('template').value = MUSICIAN_REFERRAL_PILOT.template;
     template();
     input('startsAt').value = utcToNewYorkInput(new Date().toISOString());
     input('endsAt').value = utcToNewYorkInput(new Date(Date.now() + 7 * 86400000).toISOString());
     input('claimDeadline').value = utcToNewYorkInput(new Date(Date.now() + 14 * 86400000).toISOString());
+    if (calendarOptions.startsAt) input('startsAt').value = utcToNewYorkInput(calendarOptions.startsAt);
+    if (calendarOptions.endsAt) input('endsAt').value = utcToNewYorkInput(calendarOptions.endsAt);
+    if (calendarOptions.endsAt) input('claimDeadline').value = utcToNewYorkInput(calendarOptions.endsAt);
   }
   function render() {
     root.querySelector('[data-promo-workspace]').hidden = false;
     root.querySelector('[data-promo-funding]').textContent = state.storageError ||
       `${state.funds.map(f => `${f.slug}: ${f.error || money(f.balanceUnits)}`).join(' · ')}. Campaign reservations are service accounting, not on-chain escrow.`;
-    root.querySelector('[data-promo-campaigns]').innerHTML = state.campaigns.map(c => `<article class="promotion-card" data-campaign="${c.id}">
+    const campaigns = calendarOptions.campaignId
+      ? state.campaigns.filter(c => c.id === calendarOptions.campaignId)
+      : state.campaigns;
+    root.querySelector('[data-promo-campaigns]').innerHTML = campaigns.map(c => `<article class="promotion-card" data-campaign="${c.id}">
       ${campaignCard(c)}<p>Budget: ${money(c.budgetUnits)} · remaining: ${money(c.remainingUnits)} · committed: ${money(c.committedUnits)}</p>
       <p>Approved: ${money(c.approvedUnits)} · payment pending: ${money(c.paymentPendingUnits)} · paid: ${money(c.paidUnits)} · ${c.applications} claims (${c.awaitingReview} awaiting review)</p>
       <button type="button" data-promo-edit>${c.status === 'draft' ? 'Edit draft' : 'Duplicate as draft'}</button>
@@ -283,7 +317,7 @@ export function mountAdminPromotions(root) {
         .map(s => `<button type="button" data-promo-state="${s}">${{ published: 'Publish offer', paused: 'Pause offer', closed: 'Close offer', archived: 'Archive' }[s]}</button>`).join('')}
       ${c.announcement?.status === 'sent' ? `<p>Discord poster sent: <a href="${escape(c.announcement.messageUrl)}" target="_blank" rel="noopener">view message</a></p>` : ''}
       ${c.announcement?.status === 'pending' ? '<p>Discord delivery is uncertain; do not send again.</p><button type="button" data-promo-reconcile-discord>Reconcile Discord delivery</button>' : ''}
-      ${c.template === 'musician-referral' ? `<details><summary>Curate referrer / amend pilot</summary>
+      ${c.template === 'musician-referral' ? `<details ${calendarOptions.campaignId ? 'open' : ''}><summary>Curate referrer / amend pilot</summary>
         <label>Curated referrer wallet or ENS<input data-promo-curated-ref maxlength="255"></label>
         <label>Reason<input data-promo-curated-reason maxlength="2000"></label>
         <button type="button" data-promo-curate>Record curated referrer</button>
@@ -304,7 +338,8 @@ export function mountAdminPromotions(root) {
           <button type="button" data-promo-send-discord>Confirm — send poster to Discord</button>
         </figure>` : ''}
       </details>` : ''}</article>`).join('') || '<p>No offers yet. Templates above save as drafts.</p>';
-    root.querySelector('[data-promo-claims]').innerHTML = state.claims.map(c => `<article class="promotion-card" data-claim="${c.id}">
+    root.querySelector('[data-promo-claims]').innerHTML = state.claims
+      .filter(c => !calendarOptions.campaignId || c.campaignId === calendarOptions.campaignId).map(c => `<article class="promotion-card" data-claim="${c.id}">
       <h4>${escape(state.campaigns.find(p => p.id === c.campaignId)?.title || c.campaignId)}</h4>
       <p>${escape(c.wallet)} · ${money(c.amountUnits)} · ${escape(c.fund)} · <strong>${escape(c.status)}</strong></p>
       <p class="promotion-terms">${escape(c.evidence)}</p>
@@ -330,7 +365,8 @@ export function mountAdminPromotions(root) {
         <button type="button" data-promo-reconcile>Reconcile payment</button>` : ''}
       ${c.status === 'paid' && !c.legs ? `<a href="https://basescan.org/tx/${escape(c.txHash)}" target="_blank" rel="noopener">Confirmed payment</a>` : ''}
     </article>`).join('') || '<p>No participant claims.</p>';
-    root.querySelector('[data-promo-members]').innerHTML = state.members.map(m => `<article class="promotion-card" data-member="${escape(m.wallet)}" data-member-campaign="${escape(m.campaignId)}">
+    root.querySelector('[data-promo-members]').innerHTML = state.members
+      .filter(m => !calendarOptions.campaignId || m.campaignId === calendarOptions.campaignId).map(m => `<article class="promotion-card" data-member="${escape(m.wallet)}" data-member-campaign="${escape(m.campaignId)}">
       <p>${escape(state.campaigns.find(c => c.id === m.campaignId)?.title || m.campaignId)} · ${escape(m.wallet)}</p>
       <p>Current referrer: ${escape(m.referrer || 'none')} · joined ${escape(m.joinedAt)}</p>
       ${m.attributionHistory.map(h => `<p>${escape(h.at)} · ${escape(h.reviewer)}: ${escape(h.from || 'none')} → ${escape(h.to || 'none')} · ${escape(h.reason)}</p>`).join('')}
@@ -372,6 +408,13 @@ export function mountAdminPromotions(root) {
         criteria: input('criteria').value, terms: input('terms').value,
         rewardUnits: promotionUnits(input('reward').value), budgetUnits: promotionUnits(input('budget').value),
         maxAwards: Number(input('maxAwards').value), fund: input('fund').value.trim(),
+        curatedReferrers: await (async () => {
+          const values = String(input('curatedReferrers').value || '').split(/[\n,]/)
+            .map(value => value.trim()).filter(Boolean);
+          if (!values.length) return [];
+          const provider = (await wallet()).provider;
+          return Promise.all(values.map(value => resolvedWallet(value, provider)));
+        })(),
         ...(input('template').value === 'album' ? { minOriginalTracks: Number(input('minOriginalTracks').value) } : {}),
         ...(input('template').value === 'referral' ? { requiredReferrals: Number(input('requiredReferrals').value),
           activityWindow: input('activityWindow').value } : {}),
