@@ -1050,7 +1050,9 @@ test('radio watchlist resolution requires an exact media match instead of title 
   context.verified = verified;
   vm.runInContext('_allNFTs = [{nft: verified}];', context);
   for (const audioUrl of ['blob:http://localhost/preloaded',
-    'https://worker.example/api/radio/media?cid=exact-cid', 'https://gateway.example/ipfs/exact-cid']) {
+    'https://worker.example/api/radio/media?cid=exact-cid',
+    'https://broadcast.example/hls/aabbccddeeff00112233445566778899/index.m3u8',
+    'https://gateway.example/ipfs/exact-cid']) {
     const resolved = await vm.runInContext(`resolveNowPlayingNFT({title:'Minted song',
       audioUrl:${JSON.stringify(audioUrl)},ipfsCid:'exact-cid'}, {requireMediaMatch:true})`, context);
     assert.equal(resolved.tokenId, 80, 'transport URLs must not hide a verified exact CID match');

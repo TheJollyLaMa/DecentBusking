@@ -291,7 +291,8 @@ function _audioUrlMatches(detail, nft, exact = false) {
       .match(/\/ipfs\/([^?#]+)/)?.[1] || String(value || '');
     const media = [nft?.audioUrl, nft?.videoUrl, nft?.animation_url].filter(Boolean);
     const audioUrl = String(detail?.audioUrl || '');
-    const transportUrl = audioUrl.startsWith('blob:') || /\/api\/radio\/media(?:\?|$)/.test(audioUrl);
+    const transportUrl = audioUrl.startsWith('blob:') || /\/api\/radio\/media(?:\?|$)/.test(audioUrl) ||
+      /\/hls\/[a-z0-9]{20,120}\/index\.m3u8(?:[?#]|$)/i.test(audioUrl);
     const expected = transportUrl ? String(detail?.ipfsCid || '') : identity(audioUrl) || String(detail?.ipfsCid || '');
     return !!expected && media.some(value => identity(value) === expected);
   }
