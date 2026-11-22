@@ -27,6 +27,11 @@ let _watchlistLookupGeneration = 0;
 let _watchlistBusy = false;
 let _watchlistLookupError = '';
 const _tipHistoryLimit = 12;
+const TIP_ETH_QUOTE_URL = 'https://api.coinbase.com/v2/prices/ETH-USD/spot';
+const TIP_QUOTE_CACHE_KEY = 'decentbusking:tip-eth-usdc:v1';
+const TIP_QUOTE_CACHE_MS = 5 * 60 * 1000;
+let _tipEthUsdcRate = null;
+let _tipQuoteTask = null;
 
 // ── Public API ────────────────────────────────────────────────────────────
 export function initStage() {
@@ -148,6 +153,7 @@ function _bindHat() {
     if (!modal) return;
     const wasHidden = modal.classList.contains('hidden');
     modal.classList.remove('hidden');
+    void _refreshTipUsdcEstimate();
     if (!wasHidden || _tipBusy || _tipPending || _tipSelectionState === 'sent') {
       _renderTipState();
       return;
@@ -226,7 +232,77 @@ function _renderTipWallet(wallet) {
     address.append(icon);
   }
   address.append(wallet.slice(-4));
-  label.append(address);
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'tip-wallet-copy';
+  copy.textContent = 'Copy';
+  copy.setAttribute('aria-label', `Copy recipient wallet ${wallet}`);
+  copy.addEventListener('click', async () => {
+    const copied = await globalThis.navigator?.clipboard?.writeText(wallet).then(() => true, () => false);
+    copy.textContent = copied ? 'Copied' : 'Copy failed';
+    clearTimeout(copy._resetTimer);
+    copy._resetTimer = setTimeout(() => { copy.textContent = 'Copy'; }, 1800);
+  });
+  label.append(address, copy);
+}
+
+function _renderTipUsdcEstimate() {
+  const estimate = document.getElementById('tip-usdc-estimate');
+  if (!estimate) return;
+  const amount = Number(document.getElementById('tip-amount')?.value);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    estimate.textContent = '';
+    return;
+  }
+  if (!Number.isFinite(_tipEthUsdcRate) || _tipEthUsdcRate <= 0) {
+    estimate.textContent = 'USDC estimate unavailable';
+    return;
+  }
+  const usdc = amount * _tipEthUsdcRate;
+  const precision = usdc >= 100 ? 2 : usdc >= 1 ? 3 : 4;
+  estimate.textContent = `(≈ ${usdc.toLocaleString('en-US', {
+    minimumFractionDigits: 2, maximumFractionDigits: precision,
+  })} USDC · ETH spot estimate)`;
+}
+
+async function _refreshTipUsdcEstimate() {
+  _renderTipUsdcEstimate();
+  const cached = (() => {
+    try {
+      const value = JSON.parse(globalThis.sessionStorage?.getItem(TIP_QUOTE_CACHE_KEY) || 'null');
+      return Number.isFinite(value?.rate) && value.rate > 0 && Date.now() - value.savedAt < TIP_QUOTE_CACHE_MS
+        ? value.rate : null;
+    } catch { return null; }
+  })();
+  if (cached) {
+    _tipEthUsdcRate = cached;
+    _renderTipUsdcEstimate();
+    return;
+  }
+  if (typeof fetch !== 'function') {
+    const estimate = document.getElementById('tip-usdc-estimate');
+    if (estimate) estimate.textContent = 'USDC estimate unavailable';
+    return;
+  }
+  _tipQuoteTask ||= fetch(TIP_ETH_QUOTE_URL, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+    .then(async response => {
+      const body = await response.json();
+      if (!response.ok || !Number.isFinite(Number(body?.data?.amount)) || Number(body.data.amount) <= 0) {
+        throw new Error('ETH quote unavailable');
+      }
+      _tipEthUsdcRate = Number(body.data.amount);
+      try {
+        globalThis.sessionStorage?.setItem(TIP_QUOTE_CACHE_KEY,
+          JSON.stringify({ rate: _tipEthUsdcRate, savedAt: Date.now() }));
+      } catch {}
+      _renderTipUsdcEstimate();
+    })
+    .catch(() => {
+      const estimate = document.getElementById('tip-usdc-estimate');
+      if (estimate) estimate.textContent = 'USDC estimate unavailable';
+    })
+    .finally(() => { _tipQuoteTask = null; });
+  await _tipQuoteTask;
 }
 
 function _closeTipModal() {
@@ -291,6 +367,7 @@ function _bindTipModal() {
   const prevBtn = document.getElementById('tip-prev-btn');
   const nextBtn = document.getElementById('tip-next-btn');
   const modal = document.getElementById('tip-modal');
+  const amountInput = document.getElementById('tip-amount');
 
   if (cancelBtn) {
     cancelBtn.addEventListener('click', _closeTipModal);
@@ -302,6 +379,7 @@ function _bindTipModal() {
 
   prevBtn?.addEventListener('click', () => _stepTipHistory(-1));
   nextBtn?.addEventListener('click', () => _stepTipHistory(1));
+  amountInput?.addEventListener('input', _renderTipUsdcEstimate);
 
   // Close on backdrop click
   if (modal) {

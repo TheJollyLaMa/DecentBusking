@@ -2217,6 +2217,28 @@ body.recording-edit-open #recording-edit-tab { right: var(--recording-editor-wid
   border-color: var(--gold);
 }
 
+.tip-usdc-estimate {
+  margin: -0.75rem 0 1rem;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+
+.tip-wallet-copy {
+  margin-left: 0.55rem;
+  padding: 0.28rem 0.5rem;
+  border: 1px solid rgba(240, 192, 64, 0.3);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--gold);
+  font: inherit;
+  cursor: pointer;
+}
+
+.tip-wallet-copy:hover,
+.tip-wallet-copy:focus-visible {
+  background: rgba(240, 192, 64, 0.12);
+}
+
 #tip-status {
   font-size: 0.85rem;
   overflow-wrap: anywhere;
