@@ -24,7 +24,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261119-dhearse-retry" />
+  <link rel="stylesheet" href="css/styles.css?v=20261122-split-pies" />
   <link rel="stylesheet" href="css/dmtv.css?v=20261118-dmtv-escrow" />
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth" />
   <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback" />
@@ -1179,7 +1179,7 @@
   <script type="module" src="js/top-ten-board.mjs?v=20261110-live-program"></script>
   <script type="module" src="js/djuke.mjs?v=20261112-playlist-continuity"></script>
   <script type="module" src="js/devert-site.mjs?v=20261107-review"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261121-payment-first"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261122-split-pies"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261118-artist-artwork"></script>
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/djuke-playlists-ui.mjs?v=20261025-scheduling-info"></script>
@@ -1331,24 +1331,29 @@
     <details class="creator-dropdown" data-song-section>
       <summary><span class="creator-dropdown-title">Song collaborators &amp; payments</span></summary>
       <div class="creator-dropdown-body creator-payment-body">
-      <p>Select <strong>Collaborators &amp; payments</strong> beside a song in My NFTs above, or open that song's card. You do not need an album.</p>
       <form data-song-split-form hidden>
         <h3 data-song-split-title>Selected song</h3>
-        <p data-song-split-identity></p>
         <input name="songId" type="hidden" />
-        <p data-song-split-mode></p>
-        <p data-song-split-current class="creator-dropdown-status"></p>
+        <div class="creator-split-pie-panel">
+          <span class="creator-split-pie-heading">Current split</span>
+          <div data-song-split-current-chart></div>
+        </div>
+        <p data-song-split-notice class="creator-dropdown-status" role="status" hidden></p>
         <fieldset data-song-split-editor>
-          <legend>Proposed song split</legend>
+          <legend>Collaborators</legend>
           <div data-split-rows></div>
-          <button type="button" data-split-add>Add collaborator</button>
+          <button type="button" data-split-add>＋ Collaborator</button>
           <output data-split-total aria-live="polite"></output>
         </fieldset>
-        <p>These percentages divide this song's artist payout, not the platform allocations. Adding a collaborator requires no platform account.</p>
-        <button type="button" data-song-split-review>Review changes</button>
-        <p data-song-split-review-text role="status" aria-live="polite"></p>
-        <button type="button" data-song-split-propose disabled>Create approval request for this song</button>
-        <p>1. Review → 2. Current payees approve → 3. Admin applies on-chain → 4. Future requests use the new split. An approval request alone does not change payments.</p>
+        <div class="creator-split-actions">
+          <button type="button" data-song-split-review>Review</button>
+          <button type="button" class="creator-split-confirm" data-song-split-propose hidden disabled><span aria-hidden="true">⚸</span> Confirm</button>
+        </div>
+        <div class="creator-split-pie-panel creator-split-review" data-song-split-review-panel hidden>
+          <span class="creator-split-pie-heading">Proposed split</span>
+          <div data-song-split-review-chart></div>
+          <p>Current payees and admin approve before payouts change.</p>
+        </div>
       </form>
       </div>
     </details>

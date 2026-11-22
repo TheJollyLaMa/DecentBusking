@@ -1,4 +1,4 @@
-import { createSplitTutorialSurfaces } from './split-tutorial-surfaces.mjs?v=20261025-split-surfaces';
+import { createSplitTutorialSurfaces } from './split-tutorial-surfaces.mjs?v=20261122-split-pies';
 
 const TUTORIAL_STORAGE_KEY = 'decentbusking:tutorial:seen:v1';
 const TUTORIAL_COMPLETED_KEY = 'decentbusking:tutorial:completed:v1';
@@ -130,7 +130,7 @@ const SPLIT_HOPS = [
     body: 'The editor loads the current on-chain payees. Add a collaborator’s wallet or ENS name, give them a role, and set each percentage. Confirm the resolved wallet with your collaborator. All shares must total exactly 100%. These divide the artist payout, not the platform funds, NFT ownership or NFT royalties.',
   },
   { title: 'Review before asking for approval',
-    body: 'Choose Review changes to resolve names and compare current and proposed payments for this song. Check every address, role and percentage. Editing a row invalidates the review. Create approval request asks for a gasless signature only after checking that the matching approval service is available.',
+    body: 'Choose Review to resolve names and show the proposed split. Check every address, role and percentage. Editing a row invalidates the review. Confirm requests a gasless signature only after checking that the matching approval service is available.',
   },
   { title: 'Who approves?',
     body: 'Every current payee must approve. A current payee’s proposal signature counts as their approval; if you are the sole current payee, your signature makes it ready immediately. Newly added payees are not required to approve. Share the proposal link with any remaining current payees; they connect their wallet, review, and sign Review and approve. Requests expire after seven days.',
