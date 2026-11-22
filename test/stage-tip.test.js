@@ -272,6 +272,7 @@ test('all cached stage importers resolve to the live-tip controller', () => {
       assert.equal(imports[reference.replace('./', './js/')], './js/stage.js?v=20261122-buffered-tips');
     }
   }
+  assert.equal(imports['./js/space.js?v=20261030-ad-cutoff'], './js/space.js?v=20261122-hls-tip-match');
 });
 
 test('footer NFT lookup failures report verification errors and recover on retry', async () => {
