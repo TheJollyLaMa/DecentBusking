@@ -3,6 +3,7 @@ import { Contract, Interface, id, verifyMessage, isAddress } from 'ethers';
 import { PAYMENT_EVENT_ABI } from './payment-ledger.js';
 import { currentPayrollPeriod } from '../js/payroll-week.mjs';
 import { PROMOTIONS_FUND, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS,
+  MUSICIAN_REFERRAL_PILOT, isMusicianReferralCampaign, musicianReferralLegs,
   isPromotionsFund, promotionAnnouncementDraft, promotionAuthorization, promotionWorkReference } from '../js/promotions.mjs';
 
 const address = value => {
@@ -32,11 +33,17 @@ const timestamp = (value, label) => {
 };
 const statuses = new Set(['draft', 'published', 'paused', 'closed', 'archived']);
 const held = claim => ['approved', 'payment-pending', 'paid'].includes(claim.status);
+const unpaidReservedUnits = claim => claim.legs
+  ? claim.legs.filter(leg => leg.status !== 'paid').reduce((total, leg) => total + BigInt(leg.amountUnits), 0n)
+  : claim.status === 'paid' ? 0n : BigInt(claim.amountUnits);
 const paymentInterface = new Interface([
   ...PAYMENT_EVENT_ABI,
   'event Transfer(address indexed from,address indexed to,uint256 value)',
 ]);
 const routerInterface = new Interface(PROMOTIONS_ROUTER_ABI);
+const fundInterface = new Interface([
+  'event FundFunded(bytes32 indexed fundId,address indexed asset,address indexed funder,uint256 amount)',
+]);
 const lower = value => String(value || '').toLowerCase();
 
 export function validatePromotionCheckpoint(value) {
@@ -64,6 +71,38 @@ export function validatePromotionCheckpoint(value) {
           !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(c.matchTargetFund || '') ||
           !/^[1-9]\d{0,14}$/.test(c.minContributionUnits || ''))) fail();
     if (BigInt(c.budgetUnits) < BigInt(c.rewardUnits)) fail();
+    if (isMusicianReferralCampaign(c) && (c.rewardUnits !== MUSICIAN_REFERRAL_PILOT.rewardUnits ||
+        c.maxAwards !== MUSICIAN_REFERRAL_PILOT.maxConversions ||
+        BigInt(c.budgetUnits) % BigInt(MUSICIAN_REFERRAL_PILOT.rewardUnits) !== 0n ||
+        BigInt(c.budgetUnits) > BigInt(MUSICIAN_REFERRAL_PILOT.budgetUnits) + (c.amendments || []).reduce((n, a) => n + BigInt(a?.budgetIncreaseUnits || 0), 0n) ||
+        !Array.isArray(c.curatedReferrers) || !Array.isArray(c.amendments) ||
+        !c.supporterToken || c.supporterToken.status !== 'eligibility-only' ||
+        !Array.isArray(c.supporterToken.eligibleWallets) ||
+        c.supporterToken.eligibleWallets.some(w => !validWallet(w)))) fail();
+    if (c.curatedReferrers && c.curatedReferrers.some(w => !validWallet(w))) fail();
+    for (const curation of c.curationHistory || []) {
+      if (!curation || !validId(curation.id) || !validWallet(curation.wallet) ||
+          !validWallet(curation.reviewer) || !validDate(curation.at) ||
+          !c.curatedReferrers.includes(curation.wallet)) fail();
+      text(curation.reason, 'Checkpoint curation reason');
+    }
+    let amendmentBudget = BigInt(MUSICIAN_REFERRAL_PILOT.budgetUnits), amendmentEnd = null;
+    for (const amendment of c.amendments || []) {
+      if (!amendment || !validId(amendment.id) || !validWallet(amendment.reviewer) || !validDate(amendment.at) ||
+          !validDate(amendment.before?.endsAt) || !validDate(amendment.after?.endsAt) ||
+          !validDate(amendment.before?.claimDeadline) || !validDate(amendment.after?.claimDeadline) ||
+          !/^(?:0|[1-9]\d{0,14})$/.test(amendment.budgetIncreaseUnits || '') ||
+          Date.parse(amendment.after.endsAt) < Date.parse(amendment.before.endsAt) ||
+          Date.parse(amendment.after.claimDeadline) < Date.parse(amendment.before.claimDeadline) ||
+          BigInt(amendment.before.budgetUnits || 0) !== amendmentBudget ||
+          BigInt(amendment.after.budgetUnits || 0) !== amendmentBudget + BigInt(amendment.budgetIncreaseUnits) ||
+          amendmentEnd && Date.parse(amendment.before.endsAt) !== Date.parse(amendmentEnd)) fail();
+      text(amendment.reason, 'Checkpoint amendment reason');
+      amendmentBudget += BigInt(amendment.budgetIncreaseUnits);
+      amendmentEnd = amendment.after.endsAt;
+    }
+    if (isMusicianReferralCampaign(c) && (BigInt(c.budgetUnits) !== amendmentBudget ||
+        Date.parse(c.endsAt) !== Date.parse(amendmentEnd || c.endsAt))) fail();
     if (c.announcement) {
       const a = c.announcement;
       if (!['pending', 'sent'].includes(a.status) || !/^Promotion [0-9a-f]{32}$/.test(a.marker || '') ||
@@ -82,7 +121,9 @@ export function validatePromotionCheckpoint(value) {
     if (!m || !campaigns.has(m.campaignId) || !validWallet(m.wallet) || !validDate(m.joinedAt) || members.has(key) ||
         m.referrer !== '' && (!validWallet(m.referrer) || m.referrer === m.wallet) ||
         m.termsVersion !== campaigns.get(m.campaignId).version || !validDate(m.acceptedAt) ||
-        !Array.isArray(m.attributionHistory)) fail();
+        !Array.isArray(m.attributionHistory) ||
+        m.uploadTrackIds !== undefined && (!Array.isArray(m.uploadTrackIds) ||
+          m.uploadTrackIds.length > 100 || m.uploadTrackIds.some(id => typeof id !== 'string' || !id.trim() || id.length > 200))) fail();
     for (const h of m.attributionHistory) {
       if (!h || !validDate(h.at) || !validWallet(h.reviewer) ||
           h.from && !validWallet(h.from) || h.to && !validWallet(h.to)) fail();
@@ -90,7 +131,8 @@ export function validatePromotionCheckpoint(value) {
     }
     members.set(key, m);
   }
-  if (value.members.some(m => m.referrer && !members.has(`${m.campaignId}:${m.referrer}`))) fail();
+  if (value.members.some(m => m.referrer && !members.has(`${m.campaignId}:${m.referrer}`) &&
+      !campaigns.get(m.campaignId)?.curatedReferrers?.includes(m.referrer))) fail();
   const participantClaims = new Set(), heldWallets = new Set(), heldSubjects = new Set(), transactionHashes = new Set();
   const reservations = new Map();
   const voteKey = (campaignId, wallet, week, playId, at) => JSON.stringify([campaignId, wallet, week, playId, at]);
@@ -98,13 +140,15 @@ export function validatePromotionCheckpoint(value) {
   for (const c of value.claims) {
     const campaign = campaigns.get(c?.campaignId);
     const participant = `${c?.campaignId}:${c?.wallet}`;
-    if (!c || !validId(c.id) || claims.has(c.id) || !campaign || !members.has(participant) || participantClaims.has(participant) ||
+    const conversion = isMusicianReferralCampaign(campaign);
+    const participantClaimKey = conversion ? `${participant}:${c?.subjectWallet}` : participant;
+    if (!c || !validId(c.id) || claims.has(c.id) || !campaign || !members.has(participant) || participantClaims.has(participantClaimKey) ||
         c.amountUnits !== campaign.rewardUnits || c.fund !== campaign.fund || c.termsVersion !== campaign.version ||
         !['submitted', 'needs-evidence', 'rejected', 'approved', 'payment-pending', 'paid'].includes(c.status) ||
         !Array.isArray(c.history) || !validDate(c.createdAt) ||
         c.txHash && (!/^0x[0-9a-f]{64}$/.test(c.txHash) || transactionHashes.has(c.txHash)) ||
         c.lastRevertedHash && !/^0x[0-9a-f]{64}$/.test(c.lastRevertedHash) ||
-        c.status === 'paid' && (!c.txHash || !Number.isSafeInteger(c.paymentBlockNumber) || c.paymentBlockNumber < 0 ||
+        c.status === 'paid' && !conversion && (!c.txHash || !Number.isSafeInteger(c.paymentBlockNumber) || c.paymentBlockNumber < 0 ||
           !/^0x[0-9a-f]{64}$/i.test(c.paymentBlockHash || '') || !validDate(c.paidAt))) fail();
     text(c.evidence, 'Checkpoint evidence');
     for (const h of c.history) {
@@ -121,6 +165,32 @@ export function validatePromotionCheckpoint(value) {
         c.qualification.activity.some((v, index) => !v || v.wallet !== c.qualification.wallets[index] ||
           campaign.activityWindow === 'current-week' && v.week !== c.qualification.week ||
           !recordedVotes.has(voteKey(c.campaignId, v.wallet, v.week, v.playId, v.at))))) fail();
+    if (conversion) {
+      const expected = musicianReferralLegs(c.wallet, c.subjectWallet);
+      const member = members.get(`${campaign.id}:${c.subjectWallet}`);
+      if (!validWallet(c.subjectWallet) || c.subjectWallet === c.wallet || !member || member.referrer !== c.wallet ||
+            !c.qualification || c.qualification.voteCount !== MUSICIAN_REFERRAL_PILOT.requiredVotes ||
+            !Array.isArray(c.qualification.playIds) ||
+            c.qualification.playIds.length !== MUSICIAN_REFERRAL_PILOT.requiredVotes ||
+            new Set(c.qualification.playIds).size !== MUSICIAN_REFERRAL_PILOT.requiredVotes ||
+            c.qualification.playIds.some(playId => !value.votes.some(v => v.campaignId === campaign.id && v.playId === playId &&
+              v.subjectWallet === c.subjectWallet &&
+              Date.parse(v.at) >= Date.parse(member.joinedAt) && Date.parse(v.at) < Date.parse(campaign.endsAt))) ||
+            !c.qualification.track || c.qualification.track.mintStatus !== 'minted' ||
+            !member.uploadTrackIds?.includes(c.qualification.track.trackId) ||
+            !/^\d+$/.test(String(c.qualification.track.tokenId || '')) ||
+            lower(c.qualification.track.mintRecipient) !== c.subjectWallet ||
+            !Array.isArray(c.legs) || c.legs.length !== expected.length ||
+            c.legs.some((leg, index) => leg.id !== expected[index].id || leg.kind !== expected[index].kind ||
+              leg.amountUnits !== expected[index].amountUnits ||
+              (leg.kind === 'wallet' && (!validWallet(leg.recipient) || leg.recipient !== expected[index].recipient ||
+                !['pending', 'approved', 'payment-pending', 'paid'].includes(leg.status))) ||
+              (leg.kind === 'funding-needed' && (leg.fund !== expected[index].fund ||
+                !['funding-needed', 'paid'].includes(leg.status))) ||
+              leg.txHash && !/^0x[0-9a-f]{64}$/.test(leg.txHash) ||
+              leg.status === 'paid' && (!leg.txHash || !Number.isSafeInteger(leg.paymentBlockNumber) ||
+                leg.paymentBlockNumber < 0 || !/^0x[0-9a-f]{64}$/i.test(leg.paymentBlockHash || '') || !validDate(leg.paidAt)))) fail();
+    }
     if (campaign.template === 'sponsor' && (!/^0x[0-9a-f]{64}$/.test(c.purchaseHash || '') ||
         !validWallet(c.purchaser) || c.purchaser === c.wallet || !/^\d{1,30}$/.test(c.advertId || '') ||
         !c.qualification || c.qualification.purchaseHash !== c.purchaseHash || c.qualification.purchaser !== c.purchaser ||
@@ -133,10 +203,13 @@ export function validatePromotionCheckpoint(value) {
         text(h.reason, 'Checkpoint payment review reason');
       }
     }
-    if (c.txHash) transactionHashes.add(c.txHash);
+    for (const hash of [c.txHash, ...(c.legs || []).map(leg => leg.txHash)].filter(Boolean)) {
+      if (transactionHashes.has(hash)) fail();
+      transactionHashes.add(hash);
+    }
     if (held(c)) {
-      if (heldWallets.has(c.wallet)) fail();
-      heldWallets.add(c.wallet);
+      if (!conversion && heldWallets.has(c.wallet)) fail();
+      if (!conversion) heldWallets.add(c.wallet);
       const reserved = reservations.get(c.campaignId) || { count: 0, units: 0n };
       reserved.count++;
       reserved.units += BigInt(c.amountUnits);
@@ -146,16 +219,18 @@ export function validatePromotionCheckpoint(value) {
         heldSubjects.add(subject);
       }
     }
-    claims.add(c.id); participantClaims.add(participant);
+    claims.add(c.id); participantClaims.add(participantClaimKey);
   }
   for (const [campaignId, reserved] of reservations) {
     const campaign = campaigns.get(campaignId);
     if (reserved.count > campaign.maxAwards || reserved.units > BigInt(campaign.budgetUnits)) fail();
   }
   for (const v of value.votes) {
-    const key = `${v?.campaignId}:${v?.wallet}:${v?.week}`;
+    const campaign = campaigns.get(v?.campaignId);
+    const key = `${v?.campaignId}:${v?.wallet}:${isMusicianReferralCampaign(campaign) ? `${v?.subjectWallet}:${v?.playId}` : v?.week}`;
     const member = members.get(`${v?.campaignId}:${v?.wallet}`);
     if (!v || !validWallet(v.wallet) || !member || Date.parse(v.at) < Date.parse(member.joinedAt) ||
+        isMusicianReferralCampaign(campaign) && (!validWallet(v.subjectWallet) || !members.has(`${v.campaignId}:${v.subjectWallet}`)) ||
         !/^0x[0-9a-f]{64}$/.test(v.browser) || !validDate(v.at) ||
         currentPayrollPeriod(Date.parse(v.at)).week !== v.week || votes.has(key) ||
         browsers.has(v.browser) && browsers.get(v.browser) !== v.wallet) fail();
@@ -167,7 +242,7 @@ export function validatePromotionCheckpoint(value) {
 const validateCheckpoint = validatePromotionCheckpoint;
 
 export function createPromotions({ restore, save, getCheckpointUri = () => '', provider, routerAddress, ownerWallet,
-  voteOnRadio, readFunding, announcements, siteUrl, devertContractAddress = '', now = Date.now, verifySignature = verifyMessage }) {
+  voteOnRadio, readPlaylist = () => [], readFunding, announcements, siteUrl, devertContractAddress = '', now = Date.now, verifySignature = verifyMessage }) {
   const owner = address(ownerWallet);
   const router = new Contract(routerAddress, PROMOTIONS_ROUTER_ABI, provider);
   let state = { schemaVersion: 1, revision: 0, campaigns: [], claims: [], members: [], votes: [] };
@@ -225,13 +300,22 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
     const committed = reserved.reduce((n, c) => n + BigInt(c.amountUnits), 0n);
     const total = status => claims.filter(c => c.status === status).reduce((n, c) => n + BigInt(c.amountUnits), 0n);
     const { announcement, ...offer } = campaign;
+    const legTotal = status => claims.flatMap(c => c.legs || []).filter(leg => leg.kind === 'wallet' && leg.status === status)
+      .reduce((n, leg) => n + BigInt(leg.amountUnits), 0n);
+    const special = isMusicianReferralCampaign(campaign);
     return { ...offer, ...(admin && announcement ? { announcement } : {}),
-      committedUnits: committed.toString(), approvedUnits: total('approved').toString(),
-      paymentPendingUnits: total('payment-pending').toString(), paidUnits: total('paid').toString(),
+      committedUnits: committed.toString(), approvedUnits: special ? legTotal('approved').toString() : total('approved').toString(),
+      paymentPendingUnits: special ? legTotal('payment-pending').toString() : total('payment-pending').toString(),
+      paidUnits: special ? legTotal('paid').toString() : total('paid').toString(),
       remainingUnits: (BigInt(campaign.budgetUnits) - committed).toString(),
       remainingAwards: Math.max(0, Math.min(campaign.maxAwards - reserved.length,
         Number((BigInt(campaign.budgetUnits) - committed) / BigInt(campaign.rewardUnits)))),
-      applications: claims.length, awaitingReview: claims.filter(c => ['submitted', 'needs-evidence'].includes(c.status)).length };
+      applications: claims.length, awaitingReview: claims.filter(c => ['submitted', 'needs-evidence'].includes(c.status)).length,
+      ...(isMusicianReferralCampaign(campaign) ? {
+        qualifiedConversions: claims.filter(c => c.status !== 'rejected').length,
+        fundingNeededUnits: claims.flatMap(c => c.legs || []).filter(leg => leg.kind === 'funding-needed' && leg.status !== 'paid')
+          .reduce((n, leg) => n + BigInt(leg.amountUnits), 0n).toString(),
+      } : {}) };
   }
   const open = campaign => campaign.status === 'published' && Date.parse(campaign.startsAt) <= now() && now() < Date.parse(campaign.endsAt);
   async function funding(fundSlug = PROMOTIONS_FUND) {
@@ -313,6 +397,82 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
     });
     return { week, window: campaign.activityWindow, wallets, activity };
   }
+  function mintedTrackEvidence(wallet, uploadTrackIds = null) {
+    const tracks = readPlaylist();
+    if (!Array.isArray(tracks)) throw new Error('Playlist evidence is unavailable; do not qualify this conversion');
+    const allowed = Array.isArray(uploadTrackIds) ? new Set(uploadTrackIds) : null;
+    const track = tracks.find(item => item && item.mintStatus === 'minted' && (!allowed || allowed.has(item.trackId)) &&
+      /^\d+$/.test(String(item.tokenId || '')) &&
+      lower(item.mintRecipient) === wallet && item.trackId);
+    if (!track) throw new Error('Referred musician needs a verified minted track in the DecentBusking playlist');
+    return { trackId: track.trackId, tokenId: String(track.tokenId), mintStatus: track.mintStatus,
+      mintRecipient: lower(track.mintRecipient), title: text(track.title || '', 'Minted track title', 120) };
+  }
+  function musicianReferralEvidence(next, claim, campaign) {
+    const member = next.members.find(item => item.campaignId === campaign.id && item.wallet === claim.subjectWallet);
+    if (!member || member.referrer !== claim.wallet) throw new Error('The musician must be attributed to this referrer');
+    const votes = next.votes.filter(v => v.campaignId === campaign.id && v.subjectWallet === claim.subjectWallet &&
+      Date.parse(v.at) >= Date.parse(member.joinedAt) && Date.parse(v.at) >= Date.parse(campaign.startsAt) &&
+      Date.parse(v.at) < Date.parse(campaign.endsAt));
+    const playIds = [...new Set(votes.map(v => v.playId))].sort();
+    if (playIds.length < MUSICIAN_REFERRAL_PILOT.requiredVotes) {
+      throw new Error(`${playIds.length}/${MUSICIAN_REFERRAL_PILOT.requiredVotes} distinct signed song votes recorded; qualification is all-or-nothing`);
+    }
+    playIds.splice(MUSICIAN_REFERRAL_PILOT.requiredVotes);
+    return { voteCount: playIds.length, playIds, track: mintedTrackEvidence(member.wallet, member.uploadTrackIds) };
+  }
+  function participantStats(wallet) {
+    const campaigns = state.campaigns.filter(c => isMusicianReferralCampaign(c));
+    const result = [];
+    for (const campaign of campaigns) {
+      const memberWallets = state.members.filter(m => m.campaignId === campaign.id).map(m => m.wallet);
+      if (!memberWallets.includes(wallet)) continue;
+      const claims = state.claims.filter(c => c.campaignId === campaign.id);
+      const earned = claims.filter(c => c.status !== 'rejected' && c.legs?.some(l => l.recipient === wallet));
+      const totals = status => earned.flatMap(c => c.legs || []).filter(l => l.kind === 'wallet' && l.recipient === wallet && l.status === status)
+        .reduce((n, l) => n + BigInt(l.amountUnits), 0n);
+      const relevantMembers = state.members.filter(m => m.campaignId === campaign.id && (m.referrer === wallet || m.wallet === wallet));
+      const reservedConversions = claims.filter(claim => ['approved', 'payment-pending', 'paid'].includes(claim.status)).length;
+      const remainingConversions = Math.max(0, Math.min(
+        campaign.maxAwards - reservedConversions,
+        Number((BigInt(campaign.budgetUnits) - BigInt(summary(campaign).committedUnits)) /
+          BigInt(MUSICIAN_REFERRAL_PILOT.rewardUnits))));
+      const ownConversion = state.members.find(member => member.campaignId === campaign.id &&
+        member.wallet === wallet && member.referrer);
+      const referred = relevantMembers.map(member => {
+        const track = (() => {
+          try { return mintedTrackEvidence(member.wallet, member.uploadTrackIds); } catch { return null; }
+        })();
+        const progress = new Set(state.votes.filter(v => v.campaignId === campaign.id &&
+          Date.parse(v.at) >= Date.parse(member.joinedAt) && (!isMusicianReferralCampaign(campaign) || v.subjectWallet === member.wallet) &&
+          Date.parse(v.at) < Date.parse(campaign.endsAt)).map(v => v.playId));
+        return { wallet: member.wallet, self: member.wallet === wallet,
+          referrer: member.referrer, voteProgress: Math.min(MUSICIAN_REFERRAL_PILOT.requiredVotes, progress.size),
+          track: track ? { trackId: track.trackId, tokenId: track.tokenId } : null, trackState: track ? 'minted' : 'missing-minted-track' };
+      });
+      result.push({ campaignId: campaign.id, qualifiedCount: earned.filter(c => c.status !== 'rejected').length,
+        pendingUnits: (totals('pending') + totals('payment-pending')).toString(),
+        approvedUnits: totals('approved').toString(), paidUnits: totals('paid').toString(),
+        maxEarningsUnits: (BigInt(remainingConversions) * 10_000_000n +
+          (ownConversion && !claims.some(claim => claim.subjectWallet === wallet) ? 5_000_000n : 0n)).toString(),
+        referrers: campaign.curatedReferrers,
+        attributedMusicians: state.members.filter(m => m.campaignId === campaign.id && m.referrer === wallet).map(m => m.wallet),
+        referred, curated: campaign.curatedReferrers.includes(wallet),
+        supporterToken: { status: campaign.supporterToken?.status || 'eligibility-only', eligible: !!campaign.supporterToken?.eligibleWallets?.includes(wallet),
+          note: 'Eligibility only. No token is minted or transferred unless an exact edition and authority are separately configured.' } });
+    }
+    return result;
+  }
+  function updateSupporterEligibility(next, campaign) {
+    if (!isMusicianReferralCampaign(campaign)) return;
+    const qualifyingClaims = next.claims.filter(item => item.campaignId === campaign.id &&
+      item.legs?.length === 4 && item.legs.every(leg => leg.status === 'paid' && leg.paidAt &&
+        Date.parse(leg.paidAt) < Date.parse(campaign.endsAt)));
+    if (qualifyingClaims.length !== MUSICIAN_REFERRAL_PILOT.maxConversions) return;
+    campaign.supporterToken ||= { status: 'eligibility-only', eligibleWallets: [] };
+    campaign.supporterToken.eligibleWallets = [...new Set(qualifyingClaims.map(item => item.wallet))];
+    campaign.supporterToken.evaluatedAt = new Date(now()).toISOString();
+  }
   async function snapshot(wallet, admin) {
     const campaigns = state.campaigns.filter(c => admin || c.status !== 'draft' && c.status !== 'archived').map(c => summary(c, admin));
     const week = currentPayrollPeriod(now()).week;
@@ -345,38 +505,46 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       members: state.members,
       votes: state.votes,
       participation,
+      participantStats: participantStats(wallet),
       activity: wallet ? { week, voted: state.votes.some(v => v.wallet === wallet && v.week === week) } : null,
     });
   }
-  async function reconcile(next, claim, hash) {
+  async function reconcile(next, claim, hash, leg = null) {
     if (Number((await provider.getNetwork()).chainId) !== 8453) throw new Error('Payment reconciliation requires Base');
     if (!/^0x[0-9a-f]{64}$/i.test(hash || '')) throw new Error('Enter a valid Base transaction hash');
-    if (next.claims.some(c => c.id !== claim.id && c.txHash === lower(hash))) throw new Error('Transaction already assigned');
+    const paymentTarget = leg || claim;
+    const paymentWallet = leg?.recipient || claim.wallet;
+    const paymentUnits = leg?.amountUnits || claim.amountUnits;
+    if (next.claims.some(c => c.id !== claim.id && (c.txHash === lower(hash) ||
+        c.legs?.some(item => item.txHash === lower(hash))))) throw new Error('Transaction already assigned');
+    if (claim.legs?.some(item => item.id !== leg?.id && item.txHash === lower(hash))) throw new Error('Transaction already assigned');
     const receipt = await provider.getTransactionReceipt(hash);
-    if (claim.txHash && claim.txHash !== lower(hash) && (!receipt || Number(receipt.status) !== 1)) {
+    if (paymentTarget.txHash && paymentTarget.txHash !== lower(hash) && (!receipt || Number(receipt.status) !== 1)) {
       throw new Error('Original payment is unresolved; only a matching successful replacement may reconcile another hash');
     }
     if (!receipt || await provider.getBlockNumber() - receipt.blockNumber + 1 < 2) {
-      claim.txHash = lower(hash);
-      claim.status = 'payment-pending';
+      paymentTarget.txHash = lower(hash);
+      paymentTarget.status = 'payment-pending';
+      if (leg) claim.status = claim.legs.filter(item => item.kind === 'wallet').every(item => item.status === 'paid') ? 'paid' : 'payment-pending';
       return;
     }
     if ((await provider.getBlock(receipt.blockNumber))?.hash !== receipt.blockHash) throw new Error('Payment is not in the canonical Base block');
     if (lower(receipt.to) !== lower(routerAddress)) throw new Error('Wrong payment transaction target');
     if (Number(receipt.status) !== 1) {
-      if (claim.txHash && claim.txHash !== lower(hash)) throw new Error('Check the originally recorded payment before another hash');
+      if (paymentTarget.txHash && paymentTarget.txHash !== lower(hash)) throw new Error('Check the originally recorded payment before another hash');
       const tx = await provider.getTransaction(hash);
       let parsed;
       try { parsed = tx && routerInterface.parseTransaction({ data: tx.data, value: tx.value || 0 }); } catch {}
       const args = parsed?.args;
       if (!tx || lower(tx.to) !== lower(routerAddress) || lower(tx.from) !== owner || parsed?.name !== 'payout' ||
           args[0] !== id(claim.fund) || lower(args[1]) !== lower(PROMOTIONS_USDC) ||
-          lower(args[2]) !== claim.wallet || args[3] !== BigInt(claim.amountUnits) ||
-          args[4] !== id(promotionWorkReference(claim))) {
+          lower(args[2]) !== paymentWallet || args[3] !== BigInt(paymentUnits) ||
+          args[4] !== id(promotionWorkReference(claim, leg?.id))) {
         throw new Error('Reverted transaction does not prove this exact owner-authorized reward attempt');
       }
-      claim.txHash = '';
-      claim.status = 'approved';
+      paymentTarget.txHash = '';
+      paymentTarget.status = 'approved';
+      if (leg) claim.status = 'approved';
       claim.lastRevertedHash = lower(hash);
       return;
     }
@@ -384,25 +552,31 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       if (![lower(routerAddress), lower(PROMOTIONS_USDC)].includes(lower(log.address))) return [];
       try { return [{ emitter: lower(log.address), parsed: paymentInterface.parseLog(log) }]; } catch { return []; }
     });
-    const reference = id(promotionWorkReference(claim));
+    const reference = id(promotionWorkReference(claim, leg?.id));
     const match = events.some(({ emitter, parsed: e }) => emitter === lower(routerAddress) && e?.name === 'PayrollPaid' &&
       e.args.fundId === id(claim.fund) && lower(e.args.asset) === lower(PROMOTIONS_USDC) &&
-      lower(e.args.recipient) === claim.wallet && e.args.amount === BigInt(claim.amountUnits) && e.args.workReference === reference);
+      lower(e.args.recipient) === paymentWallet && e.args.amount === BigInt(paymentUnits) && e.args.workReference === reference);
     const transfer = events.some(({ emitter, parsed: e }) => emitter === lower(PROMOTIONS_USDC) && e?.name === 'Transfer' &&
-      lower(e.args.from) === lower(routerAddress) && lower(e.args.to) === claim.wallet && e.args.value === BigInt(claim.amountUnits));
+      lower(e.args.from) === lower(routerAddress) && lower(e.args.to) === paymentWallet && e.args.value === BigInt(paymentUnits));
     if (!match || !transfer) throw new Error('Missing matching Promotionals payout and USDC transfer proofs');
-    claim.status = 'paid';
-    claim.txHash = lower(hash);
-    claim.paymentBlockNumber = receipt.blockNumber;
-    claim.paymentBlockHash = receipt.blockHash;
-    claim.paidAt = new Date(now()).toISOString();
+    paymentTarget.status = 'paid';
+    paymentTarget.txHash = lower(hash);
+    paymentTarget.paymentBlockNumber = receipt.blockNumber;
+    paymentTarget.paymentBlockHash = receipt.blockHash;
+    paymentTarget.paidAt = new Date(now()).toISOString();
+    if (leg) {
+      claim.status = claim.legs.every(item => item.status === 'paid') ? 'paid' : 'approved';
+      updateSupporterEligibility(next, next.campaigns.find(item => item.id === claim.campaignId));
+    }
   }
   return {
     async publicState() {
       return run(async () => {
         await refresh();
+        const participantProfiles = [...new Set(state.members.map(member => member.wallet))].flatMap(wallet =>
+          participantStats(wallet).map(stats => ({ wallet, ...stats })));
         return structuredClone({ ...state, campaigns: state.campaigns.map(c => summary(c, true)),
-          checkpointUri: getCheckpointUri(),
+          checkpointUri: getCheckpointUri(), participantProfiles,
           notice: 'All promotion records, including drafts, evidence, referral links, activity and review notes, are public and checkpointed to IPFS. Do not submit secrets or personal information about others. Drafts are not live offers. Rewards require admin approval; budgets are earmarked, not escrowed.' });
       });
     },
@@ -425,8 +599,8 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
         const next = structuredClone(state);
         const at = new Date(now()).toISOString();
         let campaign = next.campaigns.find(c => c.id === command.campaignId);
-        const adminActions = ['save', 'status', 'review', 'correct-attribution', 'prepare-payment', 'release-payment-preparation',
-          'reconcile', 'preview-discord', 'send-discord', 'reconcile-discord'];
+        const adminActions = ['save', 'amend', 'curate-referrer', 'status', 'review', 'correct-attribution', 'prepare-payment', 'release-payment-preparation',
+          'reconcile', 'reconcile-funding-leg', 'preview-discord', 'send-discord', 'reconcile-discord'];
         if (adminActions.includes(command.action)) {
           if (!admin) throw new Error('Only the configured admin may manage promotions');
           if (command.revision !== state.revision) throw new Error('Promotions changed; refresh before retrying');
@@ -503,6 +677,17 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
               throw new Error('Choose a supported referral activity window');
             }
             qualification = { requiredReferrals: input.requiredReferrals, activityWindow: input.activityWindow };
+          } else if (input.template === MUSICIAN_REFERRAL_PILOT.template) {
+            const expectedBudget = campaign?.amendments?.length ? campaign.budgetUnits : MUSICIAN_REFERRAL_PILOT.budgetUnits;
+            if (units(input.rewardUnits) !== MUSICIAN_REFERRAL_PILOT.rewardUnits ||
+                units(input.budgetUnits) !== expectedBudget ||
+                input.maxAwards !== MUSICIAN_REFERRAL_PILOT.maxConversions) {
+              throw new Error('The musician referral pilot must use $25 per conversion, a $150 budget, and six conversions');
+            }
+            qualification = { campaignConfigId: MUSICIAN_REFERRAL_PILOT.id,
+              curatedReferrers: campaign?.curatedReferrers || [], amendments: campaign?.amendments || [],
+              supporterToken: campaign?.supporterToken || { status: 'eligibility-only', eligibleWallets: [],
+                note: 'No exact edition or authority is configured; no NFT may be minted or transferred.' } };
           } else if (input.template === 'sponsor') {
             qualification = { minPurchaseUnits: units(input.minPurchaseUnits) };
           } else if (input.template === 'sponsor-match') {
@@ -516,6 +701,52 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
             fund, ...qualification, createdAt: campaign?.createdAt || at, updatedAt: at };
           if (campaign) Object.assign(campaign, saved);
           else next.campaigns.push(saved);
+        } else if (command.action === 'curate-referrer') {
+          if (!campaign || !isMusicianReferralCampaign(campaign) || !['draft', 'published', 'paused'].includes(campaign.status) ||
+              now() > Date.parse(campaign.endsAt)) throw new Error('Curated referrers can only be changed in an active or draft pilot');
+          const referrer = address(command.referrer);
+          campaign.curatedReferrers ||= [];
+          if (campaign.curatedReferrers.includes(referrer)) throw new Error('Referrer is already curated');
+          campaign.curatedReferrers.push(referrer);
+          campaign.curationHistory ||= [];
+          campaign.curationHistory.push({ id: randomUUID(), wallet: referrer, at, reviewer: owner,
+            reason: text(command.reason, 'Curator reason') });
+        } else if (command.action === 'amend') {
+          if (!campaign || !isMusicianReferralCampaign(campaign) || campaign.status === 'archived') throw new Error('Pilot amendment is unavailable');
+          const budgetIncreaseUnits = command.budgetIncreaseUnits === undefined || command.budgetIncreaseUnits === '0'
+            ? '0' : units(command.budgetIncreaseUnits);
+          const endsAt = timestamp(command.endsAt || campaign.endsAt, 'Amended end');
+          const claimDeadline = timestamp(command.claimDeadline || campaign.claimDeadline, 'Amended claim deadline');
+          if (budgetIncreaseUnits === '0' && endsAt === campaign.endsAt && claimDeadline === campaign.claimDeadline) throw new Error('Amendment does not change the budget or dates');
+          if (Date.parse(endsAt) < Date.parse(campaign.endsAt) || Date.parse(claimDeadline) < Date.parse(campaign.claimDeadline) ||
+              Date.parse(campaign.startsAt) >= Date.parse(endsAt) || Date.parse(endsAt) > Date.parse(claimDeadline)) {
+            throw new Error('An amendment may only extend end/claim dates and preserve date ordering');
+          }
+          const nextBudget = BigInt(campaign.budgetUnits) + BigInt(budgetIncreaseUnits);
+          if (['published', 'paused', 'closed'].includes(campaign.status)) {
+            const balance = await funding(campaign.fund);
+            const paidCampaignUnits = item => next.claims.filter(claim => claim.campaignId === item.id)
+              .reduce((total, claim) => total + (claim.legs
+                ? claim.legs.filter(leg => leg.status === 'paid').reduce((sum, leg) => sum + BigInt(leg.amountUnits), 0n)
+                : claim.status === 'paid' ? BigInt(claim.amountUnits) : 0n), 0n);
+            const otherOutstanding = next.campaigns.filter(item => item.id !== campaign.id &&
+                item.fund === campaign.fund && ['published', 'paused', 'closed'].includes(item.status))
+              .reduce((total, item) => total + BigInt(item.budgetUnits) - paidCampaignUnits(item), 0n);
+            const amendedPaid = paidCampaignUnits(campaign);
+            if (balance < otherOutstanding + nextBudget - amendedPaid) {
+              throw new Error('Promotionals balance cannot cover this amendment plus other campaign commitments');
+            }
+          }
+          const amendment = { id: randomUUID(), at, reviewer: owner, reason: text(command.reason, 'Immutable amendment reason'),
+            budgetIncreaseUnits, before: { budgetUnits: campaign.budgetUnits, endsAt: campaign.endsAt,
+              claimDeadline: campaign.claimDeadline, status: campaign.status },
+            after: { budgetUnits: nextBudget.toString(), endsAt, claimDeadline, status: campaign.status } };
+          campaign.amendments ||= [];
+          campaign.amendments.push(amendment);
+          campaign.budgetUnits = nextBudget.toString();
+          campaign.endsAt = endsAt;
+          campaign.claimDeadline = claimDeadline;
+          campaign.updatedAt = at;
         } else if (command.action === 'status') {
           if (!campaign || !statuses.has(command.status)) throw new Error('Invalid campaign status');
           const allowed = { draft: ['published', 'archived'], published: ['paused', 'closed'], paused: ['published', 'closed'], closed: ['archived'], archived: [] };
@@ -540,13 +771,28 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           const referrer = command.referrer ? address(command.referrer) : '';
           if (next.members.length >= 10000) throw new Error('Promotion participant capacity reached');
           if (referrer && next.members.some(m => m.wallet === wallet)) throw new Error('Only new promotion participants can be referrals');
-          if (referrer && (referrer === wallet || !next.members.some(m => m.wallet === referrer && m.campaignId === campaign.id))) throw new Error('Referrer must be a different registered participant in this promotion');
+          const curated = isMusicianReferralCampaign(campaign) && campaign.curatedReferrers?.includes(referrer);
+          if (referrer && (referrer === wallet || (!curated &&
+              !next.members.some(m => m.wallet === referrer && m.campaignId === campaign.id)))) throw new Error('Referrer must be a different registered or curated participant in this promotion');
+          const uploadTrackIds = command.trackId ? [text(command.trackId, 'Submitted track ID', 200)] : [];
+          if (uploadTrackIds.length) {
+            const track = readPlaylist().find(item => item?.trackId === uploadTrackIds[0] &&
+              lower(item.mintRecipient) === wallet);
+            if (!track) throw new Error('Submitted track is not owned by this connected musician wallet');
+          }
           next.members.push({ wallet, campaignId: campaign.id, referrer, joinedAt: at,
-            termsVersion: campaign.version, acceptedAt: at, attributionHistory: [] });
+            termsVersion: campaign.version, acceptedAt: at, attributionHistory: [], uploadTrackIds });
         } else if (command.action === 'vote') {
           if (next.votes.length >= 30000) throw new Error('Promotion activity capacity reached');
           if (!campaign || !open(campaign) || !next.members.some(m => m.wallet === wallet && m.campaignId === campaign.id)) throw new Error('Join an open promotion first');
           if (!/^[a-zA-Z0-9_-]{16,128}$/.test(command.voterId || '') || ![1, -1].includes(command.vote)) throw new Error('Invalid promotion vote');
+          const subjectWallet = isMusicianReferralCampaign(campaign) ? address(command.subjectWallet) : '';
+          if (subjectWallet && subjectWallet !== wallet) {
+            throw new Error('A musician must sign each qualifying song vote with their own wallet');
+          }
+          if (subjectWallet && !next.members.some(item => item.campaignId === campaign.id && item.wallet === subjectWallet)) {
+            throw new Error('Vote subject must be a registered musician in this pilot');
+          }
           const playId = text(command.playId, 'Play ID', 200);
           const browser = id(command.voterId);
           if (next.votes.some(v => v.browser === browser && v.wallet !== wallet)) throw new Error('This browser has already qualified a different wallet');
@@ -554,20 +800,36 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           const result = await voteOnRadio({ playId, voterId: command.voterId, vote: command.vote });
           if (result.playId !== playId || ![1, -1].includes(result.vote)) throw new Error('Radio did not confirm a song vote');
           const week = currentPayrollPeriod(now()).week;
-          const alreadyQualified = next.votes.some(v => v.campaignId === campaign.id && v.wallet === wallet && v.week === week);
+          const alreadyQualified = isMusicianReferralCampaign(campaign)
+            ? next.votes.some(v => v.campaignId === campaign.id && v.wallet === wallet &&
+                v.subjectWallet === subjectWallet && v.playId === playId)
+            : next.votes.some(v => v.campaignId === campaign.id && v.wallet === wallet && v.week === week);
           if (result.duplicate && !alreadyQualified) throw new Error('An earlier anonymous or other-offer vote cannot qualify this offer; vote on the next song after registration');
           if (!alreadyQualified) {
-            next.votes.push({ campaignId: campaign.id, wallet, browser, week, playId, at: new Date(now()).toISOString() });
+            next.votes.push({ campaignId: campaign.id, wallet, browser, week, playId, at: new Date(now()).toISOString(),
+              ...(isMusicianReferralCampaign(campaign) ? { subjectWallet } : {}) });
           }
         } else if (command.action === 'claim') {
           if (next.claims.length >= 10000) throw new Error('Promotion claim capacity reached');
           if (!campaign || !['published', 'paused', 'closed'].includes(campaign.status) || now() > Date.parse(campaign.claimDeadline)) throw new Error('Claim window is closed');
           const member = next.members.find(m => m.wallet === wallet && m.campaignId === campaign.id);
           if (!member) throw new Error('Register before the promotion closes');
-          if (next.claims.some(c => c.campaignId === campaign.id && c.wallet === wallet)) throw new Error('One claim per participant per campaign');
+          if (isMusicianReferralCampaign(campaign) && next.claims.filter(c =>
+              c.campaignId === campaign.id && c.status !== 'rejected').length >= MUSICIAN_REFERRAL_PILOT.maxConversions) {
+            throw new Error('All six musician referral conversion slots are already recorded');
+          }
+          const duplicate = next.claims.some(c => c.campaignId === campaign.id && c.wallet === wallet &&
+            (!isMusicianReferralCampaign(campaign) || c.subjectWallet === address(command.musicianWallet)));
+          if (duplicate) throw new Error(isMusicianReferralCampaign(campaign) ?
+            'This musician conversion is already recorded' : 'One claim per participant per campaign');
           const claim = { id: randomUUID(), campaignId: campaign.id, wallet, fund: campaign.fund, amountUnits: campaign.rewardUnits,
             status: 'submitted', evidence: text(command.evidence, 'Evidence'), createdAt: at, termsVersion: campaign.version, history: [] };
           if (campaign.template === 'referral') claim.qualification = referralEvidence(next, claim, campaign);
+          if (isMusicianReferralCampaign(campaign)) {
+            claim.subjectWallet = address(command.musicianWallet);
+            claim.qualification = musicianReferralEvidence(next, claim, campaign);
+            claim.legs = musicianReferralLegs(claim.wallet, claim.subjectWallet);
+          }
           if (campaign.template === 'sponsor') await setSponsorEvidence(next, claim, campaign, command);
           if (campaign.template === 'buddy') setBuddySubject(next, claim, command);
           next.claims.push(claim);
@@ -578,8 +840,9 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           if (!member) throw new Error('Participant not found');
           const referrer = command.referrer ? address(command.referrer) : '';
           const reason = text(command.reason, 'Attribution correction reason');
-          if (referrer === member.referrer) throw new Error('Attribution is unchanged');
-          if (referrer && (referrer === memberWallet ||
+          if (referrer === member.referrer && !command.trackId) throw new Error('Attribution is unchanged');
+          const curated = isMusicianReferralCampaign(campaign) && campaign.curatedReferrers?.includes(referrer);
+          if (referrer && (referrer === memberWallet || !curated &&
               !next.members.some(m => m.campaignId === campaign.id && m.wallet === referrer &&
                 Date.parse(m.joinedAt) <= Date.parse(member.joinedAt)))) {
             throw new Error('Referrer must be a different participant already registered in this promotion');
@@ -587,22 +850,84 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           if (referrer && next.members.find(m => m.wallet === memberWallet) !== member) {
             throw new Error('Only a participant’s first promotion registration can be referred');
           }
-          if (next.claims.some(c => c.campaignId === campaign.id && [member.referrer, referrer].includes(c.wallet) && held(c))) {
-            throw new Error('Attribution affects a reserved or paid referral; resolve the dispute without changing frozen evidence');
+          if (next.claims.some(c => c.campaignId === campaign.id &&
+              (c.subjectWallet === memberWallet || c.wallet === memberWallet || [member.referrer, referrer].includes(c.wallet)))) {
+            throw new Error('Attribution and frozen evidence cannot change after this musician has any claim; resolve the dispute before submitting evidence');
           }
           member.attributionHistory.push({ at, reviewer: owner, from: member.referrer, to: referrer, reason });
           member.referrer = referrer;
-        } else if (['review', 'prepare-payment', 'release-payment-preparation', 'reconcile'].includes(command.action)) {
+        } else if (command.action === 'correct-my-attribution') {
+          if (!campaign || !isMusicianReferralCampaign(campaign) || !open(campaign)) throw new Error('Retroactive attribution is only available during this pilot');
+          const member = next.members.find(m => m.campaignId === campaign.id && m.wallet === wallet);
+          if (!member) throw new Error('Register for this pilot before correcting attribution');
+          const referrer = command.referrer ? address(command.referrer) : '';
+          if (referrer === member.referrer && !command.trackId) throw new Error('Attribution is unchanged');
+          const curated = campaign.curatedReferrers?.includes(referrer);
+          if (referrer && (referrer === wallet || (!curated && !next.members.some(m => m.campaignId === campaign.id &&
+              m.wallet === referrer && Date.parse(m.joinedAt) <= Date.parse(member.joinedAt))))) {
+            throw new Error('Choose a different registered or curated referrer');
+          }
+          if (next.claims.some(c => c.campaignId === campaign.id && c.subjectWallet === wallet)) {
+            throw new Error('This musician already has a claim; resolve the attribution dispute before changing frozen evidence');
+          }
+          member.attributionHistory.push({ at, reviewer: wallet, from: member.referrer, to: referrer,
+            reason: text(command.reason, 'Attribution correction reason') });
+          member.referrer = referrer;
+          if (command.trackId) {
+            const trackId = text(command.trackId, 'Submitted track ID', 200);
+            const track = readPlaylist().find(item => item?.trackId === trackId &&
+              lower(item.mintRecipient) === wallet);
+            if (!track) throw new Error('Submitted track is not owned by this connected musician wallet');
+            member.uploadTrackIds ||= [];
+            if (!member.uploadTrackIds.includes(trackId)) member.uploadTrackIds.push(trackId);
+          }
+        } else if (['review', 'prepare-payment', 'release-payment-preparation', 'reconcile',
+            'reconcile-funding-leg'].includes(command.action)) {
           const claim = next.claims.find(c => c.id === command.claimId);
           if (!claim) throw new Error('Claim not found');
           campaign = next.campaigns.find(c => c.id === claim.campaignId);
-          if (command.action === 'review') {
+          if (command.action === 'reconcile-funding-leg') {
+            if (!isMusicianReferralCampaign(campaign) || !admin || claim.status !== 'approved') {
+              throw new Error('Funding reconciliation requires an approved conversion and authorized pilot admin');
+            }
+            const leg = claim.legs?.find(item => item.id === command.legId);
+            if (!leg || leg.kind !== 'funding-needed' || leg.status === 'paid') throw new Error('Unknown or already reconciled funding leg');
+            const hash = /^0x[0-9a-f]{64}$/i.test(command.txHash || '') ? lower(command.txHash) : '';
+            if (!hash) throw new Error('Enter a valid Base funding transaction hash');
+            const receipt = await provider.getTransactionReceipt(hash);
+            if (!receipt || receipt.status !== 1 || lower(receipt.to) !== lower(routerAddress)) throw new Error('Funding transaction is not a confirmed router transaction');
+            const head = await provider.getBlockNumber();
+            if (head - receipt.blockNumber + 1 < 2) throw new Error('Funding transaction needs two confirmed Base blocks');
+            const block = await provider.getBlock(receipt.blockNumber);
+            if (block?.hash !== receipt.blockHash) throw new Error('Funding transaction is not in the canonical Base block');
+            const event = receipt.logs.map(log => {
+              if (lower(log.address) !== lower(routerAddress)) return null;
+              try { return fundInterface.parseLog(log); } catch { return null; }
+            }).find(parsed => parsed?.name === 'FundFunded' && parsed.args.fundId === id(leg.fund) &&
+              lower(parsed.args.asset) === lower(PROMOTIONS_USDC) &&
+              lower(parsed.args.funder) === owner && parsed.args.amount === BigInt(leg.amountUnits));
+            if (!event) throw new Error('Transaction does not fund this exact allocation leg with native Base USDC');
+            if (next.claims.some(item => item.id !== claim.id && item.legs?.some(existing => lower(existing.txHash) === hash)) ||
+                claim.legs.some(item => item.id !== leg.id && lower(item.txHash) === hash)) throw new Error('Funding transaction was already assigned');
+            Object.assign(leg, { status: 'paid', txHash: hash, paymentBlockNumber: Number(receipt.blockNumber),
+              paymentBlockHash: receipt.blockHash, paidAt: at });
+            claim.status = claim.legs.every(item => item.status === 'paid') ? 'paid' : 'approved';
+            claim.history.push({ at, action: 'approved', reason: `Funding leg ${leg.id} verified from Base transaction ${hash}`,
+              reviewer: owner });
+            updateSupporterEligibility(next, campaign);
+          }
+          else if (command.action === 'review') {
             if (!(['submitted', 'needs-evidence'].includes(claim.status) ||
                 claim.status === 'approved' && command.decision === 'rejected') ||
                 !['approved', 'rejected', 'needs-evidence'].includes(command.decision)) throw new Error('Claim is not reviewable');
+            if (isMusicianReferralCampaign(campaign) && command.decision !== 'approved' &&
+                claim.legs.some(leg => leg.kind === 'wallet' && ['paid', 'payment-pending'].includes(leg.status))) {
+              throw new Error('Do not reverse conversion evidence after a wallet leg has payment evidence or pending reconciliation');
+            }
             const reason = text(command.reason, 'Review reason');
             if (command.decision === 'approved') {
               if (campaign.template === 'referral') claim.qualification = referralEvidence(next, claim, campaign);
+              if (isMusicianReferralCampaign(campaign)) claim.qualification = musicianReferralEvidence(next, claim, campaign);
               if (campaign.template === 'sponsor') {
                 if (command.confirmNewAdvertiser !== true || command.confirmRefundAndDisputeReview !== true) {
                   throw new Error('Review new-advertiser, refund and attribution-dispute eligibility before approval');
@@ -612,11 +937,12 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
               const s = summary(campaign);
               if (!s.remainingAwards || BigInt(s.remainingUnits) < BigInt(claim.amountUnits)) throw new Error('Campaign reward capacity exhausted');
               const balance = await funding(campaign.fund);
-              const reserved = next.claims.filter(c => c.fund === campaign.fund && held(c) && c.status !== 'paid')
-                .reduce((n, c) => n + BigInt(c.amountUnits), 0n);
+              const reserved = next.claims.filter(c => c.fund === campaign.fund && held(c))
+                .reduce((n, c) => n + unpaidReservedUnits(c), 0n);
               if (balance < reserved + BigInt(claim.amountUnits)) throw new Error('Promotionals balance cannot cover reward commitments');
               // No automatic stacking of the same participant's promotional rewards.
-              if (next.claims.some(c => c.id !== claim.id && c.wallet === claim.wallet && held(c))) throw new Error('Participant already has another approved promotional reward; review stacking outside this pilot');
+              if (!isMusicianReferralCampaign(campaign) &&
+                  next.claims.some(c => c.id !== claim.id && c.wallet === claim.wallet && held(c))) throw new Error('Participant already has another approved promotional reward; review stacking outside this pilot');
               const subjects = new Set([claim.subjectWallet, ...(campaign.template === 'referral' ? claim.qualification.wallets : [])].filter(Boolean));
               if (subjects.size && next.claims.some(c => c.id !== claim.id && held(c) &&
                   [c.subjectWallet, ...(c.qualification?.wallets || [])].some(subject => subject && subjects.has(subject)))) {
@@ -624,32 +950,62 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
               }
             }
             claim.status = command.decision;
+            if (isMusicianReferralCampaign(campaign) && command.decision === 'approved') {
+              for (const leg of claim.legs.filter(item => item.kind === 'wallet')) leg.status = 'approved';
+            } else if (isMusicianReferralCampaign(campaign) && command.decision === 'rejected') {
+              for (const leg of claim.legs.filter(item => item.kind === 'wallet')) leg.status = 'pending';
+            }
             claim.history.push({ at, action: command.decision, reason, reviewer: owner,
               ...(campaign.template === 'sponsor' && command.decision === 'approved'
                 ? { newAdvertiserReviewed: true, refundAndDisputeReviewed: true } : {}) });
           } else if (command.action === 'prepare-payment') {
             if (claim.status !== 'approved') throw new Error('Reward is not approved or already has an unresolved payment');
+            const leg = isMusicianReferralCampaign(campaign)
+              ? claim.legs.find(item => item.id === command.legId && item.kind === 'wallet')
+              : null;
+            if (isMusicianReferralCampaign(campaign) && (!leg || leg.status !== 'approved')) {
+              throw new Error('Choose one approved wallet reward leg; funding-needed allocations cannot be paid by this router');
+            }
             if (campaign.template === 'sponsor') {
               if (command.confirmRefundAndDisputeReview !== true) throw new Error('Recheck refund and dispute eligibility before preparing payment');
               claim.qualification = await sponsorEvidence(claim, campaign);
             }
             const balance = await funding(campaign.fund);
-            const reserved = next.claims.filter(c => c.fund === campaign.fund && held(c) && c.status !== 'paid')
-              .reduce((n, c) => n + BigInt(c.amountUnits), 0n);
+            const reserved = next.claims.filter(c => c.fund === campaign.fund && held(c))
+              .reduce((n, c) => n + unpaidReservedUnits(c), 0n);
             if (balance < reserved) throw new Error('Promotionals balance cannot cover existing reward commitments');
-            claim.status = 'payment-pending';
-            claim.paymentPreparedAt = at;
+            if (leg) {
+              leg.status = 'payment-pending';
+              leg.paymentPreparedAt = at;
+              claim.status = 'payment-pending';
+            } else {
+              claim.status = 'payment-pending';
+              claim.paymentPreparedAt = at;
+            }
           } else if (command.action === 'release-payment-preparation') {
             if (claim.status !== 'payment-pending' || claim.txHash || command.confirmNoBroadcast !== true) {
               throw new Error('Only an unbroadcast preparation without a transaction hash can be released after wallet-history review');
             }
             const reason = text(command.reason, 'Wallet-history review reason');
+            const leg = isMusicianReferralCampaign(campaign) ? claim.legs.find(item => item.id === command.legId) : null;
+            if (isMusicianReferralCampaign(campaign) && (!leg || leg.kind !== 'wallet' || leg.status !== 'payment-pending' || leg.txHash)) {
+              throw new Error('Choose the prepared wallet reward leg without a transaction hash');
+            }
             claim.paymentHistory ||= [];
-            claim.paymentHistory.push({ at, reviewer: owner, action: 'no-broadcast-confirmed', reason });
-            claim.status = 'approved';
+            claim.paymentHistory.push({ at, reviewer: owner, action: 'no-broadcast-confirmed', reason,
+              ...(leg ? { legId: leg.id } : {}) });
+            if (leg) {
+              leg.status = 'approved';
+              claim.status = 'approved';
+            } else claim.status = 'approved';
           } else {
-            if (!['approved', 'payment-pending'].includes(claim.status)) throw new Error('Claim does not need payment reconciliation');
-            await reconcile(next, claim, command.txHash);
+            const leg = isMusicianReferralCampaign(campaign)
+              ? claim.legs.find(item => item.id === command.legId && item.kind === 'wallet')
+              : null;
+            if (isMusicianReferralCampaign(campaign) && !leg) throw new Error('Choose a wallet reward leg to reconcile');
+            if (!leg && !['approved', 'payment-pending'].includes(claim.status) ||
+                leg && !['approved', 'payment-pending'].includes(leg.status)) throw new Error('Claim or leg does not need payment reconciliation');
+            await reconcile(next, claim, command.txHash, leg);
           }
         } else if (command.action === 'evidence') {
           const claim = next.claims.find(c => c.id === command.claimId && c.wallet === wallet);

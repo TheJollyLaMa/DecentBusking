@@ -1,7 +1,8 @@
-import { PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS, PROMOTIONS_FUND, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, isPromotionsFund,
+import { PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS, MUSICIAN_REFERRAL_PILOT, PROMOTIONS_FUND, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, isPromotionsFund,
   promotionAuthorization, promotionWorkReference, promotionMoney, promotionUnits, promotionLink } from './promotions.mjs';
 import { newYorkInputToUtc, utcToNewYorkInput } from './radio-calendar.mjs';
 import { radioListenerId } from './radio-client.mjs';
+import { getAudibleBroadcast } from './public-broadcast-client.mjs?v=20261120-boundary-sync';
 import { isAdminWallet } from './admin-access.mjs';
 import { escapeLive as escape } from './live-bookings.mjs';
 
@@ -40,8 +41,48 @@ async function signed(command) {
   await w.check();
   return result;
 }
+export async function recordMusicianReferralUpload({ referrer, trackId } = {}) {
+  const referral = String(referrer || '').trim();
+  if (!referral) return null;
+  const publicState = await request();
+  const campaigns = (publicState.campaigns || []).filter(campaign =>
+    campaign.template === 'musician-referral' && campaign.status === 'published' &&
+    Date.parse(campaign.startsAt) <= Date.now() && Date.now() < Date.parse(campaign.endsAt));
+  const linkedId = new URLSearchParams(location.search).get('promotion');
+  const campaign = campaigns.find(item => item.id === linkedId) ||
+    (campaigns.length === 1 ? campaigns[0] : null);
+  if (!campaign) throw new Error(campaigns.length > 1
+    ? 'More than one musician referral campaign is open; register through its campaign link first.'
+    : 'No open musician referral campaign is accepting this upload.');
+  const w = await wallet();
+  const referrerWallet = await resolvedWallet(referral, w.provider);
+  const mine = await signed({ action: 'view' });
+  const member = mine.members?.find(item => item.campaignId === campaign.id &&
+    item.wallet === w.address.toLowerCase());
+  if (member && member.referrer === referrerWallet.toLowerCase() && !trackId) return mine;
+  return member
+    ? signed({ action: 'correct-my-attribution', campaignId: campaign.id, referrer: referrerWallet,
+        trackId, reason: 'Attributed at first upload in the active musician referral campaign' })
+    : signed({ action: 'join', campaignId: campaign.id, referrer: referrerWallet, trackId,
+        acceptTerms: true, termsVersion: campaign.version });
+}
+
+export async function activeMusicianReferralCampaign() {
+  const state = await request();
+  return (state.campaigns || []).filter(campaign =>
+    campaign.template === 'musician-referral' && campaign.status === 'published' &&
+    Date.parse(campaign.startsAt) <= Date.now() && Date.now() < Date.parse(campaign.endsAt));
+}
 const money = value => promotionMoney(value || '0');
 const date = value => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) + ' New York';
+async function resolvedWallet(value, provider) {
+  const input = String(value || '').trim();
+  if (/^0x[0-9a-f]{40}$/i.test(input)) return input;
+  if (!input.includes('.') || !provider?.resolveName) throw new Error('Enter a valid wallet address, or an ENS name resolvable in the connected wallet client');
+  const result = await provider.resolveName(input);
+  if (!/^0x[0-9a-f]{40}$/i.test(result || '')) throw new Error('ENS name did not resolve to a wallet');
+  return result;
+}
 export function promotionInputToUtc(value) {
   const result = newYorkInputToUtc(value);
   const epoch = Date.parse(result);
@@ -60,8 +101,12 @@ function campaignCard(c) {
     ${c.template === 'album' ? `<p>Minimum original tracks: ${c.minOriginalTracks}</p>` : ''}
     ${c.template === 'referral' ? `<p>Required referrals: ${c.requiredReferrals} · activity: ${escape(PROMOTION_ACTIVITY_WINDOWS.find(w => w.id === c.activityWindow)?.label || 'unavailable')}</p>` : ''}
     ${c.template === 'sponsor' ? `<p>Minimum confirmed DVert purchase: ${money(c.minPurchaseUnits)}</p>` : ''}
+    ${c.template === 'musician-referral' ? `<p>Conversion: verified minted playlist track + 10 distinct signed song votes. Allocation: $10 referrer + $5 musician + $5 Top10 funding-needed + $5 Playback funding-needed.</p>
+      <p>Curated referrers: ${(c.curatedReferrers || []).map(escape).join(', ') || 'none'}</p>
+      <p>Supporter token: eligibility only${c.supporterToken?.eligibleWallets?.length ? ` for ${c.supporterToken.eligibleWallets.length} earning referrer(s)` : ''}. No mint/transfer is configured.</p>` : ''}
     <p>${escape(c.criteria)}</p><p class="promotion-terms">${escape(c.terms)}</p>
-    <p>${date(c.startsAt)} – ${date(c.endsAt)}<br>Claim by ${date(c.claimDeadline)}</p>`;
+    <p>${date(c.startsAt)} – ${date(c.endsAt)}<br>Claim by ${date(c.claimDeadline)}</p>
+    ${(c.amendments || []).map(a => `<p><strong>Immutable amendment ${escape(a.id)}:</strong> ${escape(a.reason)} · budget ${money(a.before.budgetUnits)} → ${money(a.after.budgetUnits)} · end ${date(a.before.endsAt)} → ${date(a.after.endsAt)} · claim ${date(a.before.claimDeadline)} → ${date(a.after.claimDeadline)}</p>`).join('')}`;
 }
 export function publicPromotionRecords(state, campaignId) {
   if (!state?.campaigns.some(c => c.id === campaignId)) return '';
@@ -76,6 +121,7 @@ export function publicPromotionRecords(state, campaignId) {
     ${claims.map(c => `<article class="promotion-card">
       <p>${escape(c.wallet)} · ${money(c.amountUnits)} · <strong>${escape(c.status)}</strong></p>
       <p class="promotion-terms">${escape(c.evidence)}</p>
+      ${(c.legs || []).map(leg => `<p>${escape(leg.id)} · ${money(leg.amountUnits)} · ${escape(leg.status)}${leg.recipient ? ` · ${escape(leg.recipient)}` : ` · ${escape(leg.fund)} (funding needed; not paid)`}${leg.txHash ? ` · <a href="https://basescan.org/tx/${escape(leg.txHash)}" target="_blank" rel="noopener">receipt</a>` : ''}</p>`).join('')}
       ${(c.history || []).map(h => `<p>${escape(h.at)} · ${escape(h.reviewer)} · ${escape(h.action)}: ${escape(h.reason)}</p>`).join('')}
       ${c.status === 'paid' && /^0x[0-9a-f]{64}$/i.test(c.txHash || '') ? `<a href="https://basescan.org/tx/${escape(c.txHash)}" target="_blank" rel="noopener">Confirmed payment receipt</a>` : ''}
     </article>`).join('') || '<p>No claims submitted.</p>'}
@@ -83,27 +129,29 @@ export function publicPromotionRecords(state, campaignId) {
       <pre class="promotion-terms">${escape(JSON.stringify({ claims, members, votes }, null, 2))}</pre>
     </details></section>`;
 }
-export async function payPromotion({ claim, snapshot, command, status, storage = localStorage, sponsorReviewConfirmed = false }) {
+export async function payPromotion({ claim, snapshot, command, status, storage = localStorage, sponsorReviewConfirmed = false, leg = null }) {
   const w = await wallet();
   if (!isAdminWallet(w.address)) throw new Error('Connect the admin wallet');
-  const key = `decentbusking:promotion-payment:${claim.id}`;
+  const recipientWallet = leg?.recipient || claim.wallet;
+  const amountUnits = leg?.amountUnits || claim.amountUnits;
+  const key = `decentbusking:promotion-payment:${claim.id}${leg ? `:${leg.id}` : ''}`;
   if (storage.getItem(key)) throw new Error('A payment is unresolved. Reconcile its wallet transaction before retrying; do not clear browser storage.');
   const router = new w.ethers.Contract(snapshot.routerAddress, PROMOTIONS_ROUTER_ABI, w.signer);
-  const ref = w.ethers.id(promotionWorkReference(claim));
+  const ref = w.ethers.id(promotionWorkReference(claim, leg?.id));
   if (await router.completedWorkReferences(ref)) throw new Error('Reward is already paid on-chain; reconcile its transaction instead');
   if (!await router.hasRole(await router.PAYROLL_ROLE(), w.address) || await router.paused()) throw new Error('Payment requires the unpaused router payroll role');
   if (!await router.approvedAssets(PROMOTIONS_USDC)) throw new Error('Native Base USDC is not enabled on the router');
-  const recipient = await router.contributors(claim.wallet);
+  const recipient = await router.contributors(recipientWallet);
   if (!(recipient.approved ?? recipient[1])) throw new Error('Enable this reward recipient on the shared router before paying');
   if (!isPromotionsFund(claim.fund)) throw new Error('Reward has no valid dedicated promotional fund');
   const fundId = w.ethers.id(claim.fund);
   const fund = await router.funds(fundId);
-  if (!fund.exists || !fund.active || await router.fundBalances(fundId, PROMOTIONS_USDC) < BigInt(claim.amountUnits)) throw new Error('Promotionals fund is missing, inactive or underfunded');
-  const args = [fundId, PROMOTIONS_USDC, claim.wallet, BigInt(claim.amountUnits), ref,
-    w.ethers.id('TheJollyLaMa/DecentBusking'), w.ethers.id(claim.wallet), '', w.ethers.ZeroHash];
+  if (!fund.exists || !fund.active || await router.fundBalances(fundId, PROMOTIONS_USDC) < BigInt(amountUnits)) throw new Error('Promotionals fund is missing, inactive or underfunded');
+  const args = [fundId, PROMOTIONS_USDC, recipientWallet, BigInt(amountUnits), ref,
+    w.ethers.id('TheJollyLaMa/DecentBusking'), w.ethers.id(recipientWallet), '', w.ethers.ZeroHash];
   await router.payout.staticCall(...args);
   await w.check();
-  await command({ action: 'prepare-payment', claimId: claim.id, confirmRefundAndDisputeReview: sponsorReviewConfirmed });
+  await command({ action: 'prepare-payment', claimId: claim.id, legId: leg?.id, confirmRefundAndDisputeReview: sponsorReviewConfirmed });
   await w.check();
   storage.setItem(key, JSON.stringify({ status: 'awaiting-wallet', reference: ref }));
   let tx;
@@ -114,11 +162,12 @@ export async function payPromotion({ claim, snapshot, command, status, storage =
   try { storage.setItem(key, JSON.stringify({ hash: tx.hash, reference: ref })); }
   catch (error) { throw new Error(`Payment was sent as ${tx.hash}, but its browser journal failed: ${error.message}. Reconcile this hash; do not send again.`); }
   status.textContent = `Payment pending: ${tx.hash}. Do not send again; reconcile after two confirmations.`;
-  await command({ action: 'reconcile', claimId: claim.id, txHash: tx.hash });
+  await command({ action: 'reconcile', claimId: claim.id, legId: leg?.id, txHash: tx.hash });
   await tx.wait(2);
   await w.check();
-  const next = await command({ action: 'reconcile', claimId: claim.id, txHash: tx.hash });
-  if (next.claims.find(c => c.id === claim.id)?.status === 'paid') storage.removeItem(key);
+  const next = await command({ action: 'reconcile', claimId: claim.id, legId: leg?.id, txHash: tx.hash });
+  const updated = next.claims.find(c => c.id === claim.id);
+  if (leg ? updated?.legs.find(item => item.id === leg.id)?.status === 'paid' : updated?.status === 'paid') storage.removeItem(key);
 }
 
 export async function enablePromotionRecipient({ claim, snapshot, status, confirmAction = globalThis.confirm }) {
@@ -205,6 +254,12 @@ export function mountAdminPromotions(root) {
     input('title').value = t.title;
     input('criteria').value = t.criteria;
     input('terms').value = 'One award per participant. No self-referrals or reward stacking. Admin reviews identity, rights, evidence and disputes before approval. No guaranteed payout. Only wallet-signed song votes recorded through this promotion qualify as activity. No positive-vote requirement. All promotion records, evidence, referral links and review notes are public on IPFS; copies may persist permanently. Do not submit secrets or personal information about others.';
+    if (t.id === MUSICIAN_REFERRAL_PILOT.template) {
+      input('reward').value = '25';
+      input('budget').value = '150';
+      input('maxAwards').value = '6';
+      input('terms').value = 'Six conversions maximum at $25 each. Every conversion requires all four legs and a referred musician with a verified minted DecentBusking playlist track plus 10 distinct campaign-signed song votes. The $5 Top10 and $5 Playback legs remain funding-needed settlement obligations; this UI does not transfer them. Supporter-token outcome is eligibility only, and no NFT is minted or transferred. No self-referrals, guaranteed payout, or silent term changes.';
+    }
     templateFields();
   }
   function reset() {
@@ -228,6 +283,16 @@ export function mountAdminPromotions(root) {
         .map(s => `<button type="button" data-promo-state="${s}">${{ published: 'Publish offer', paused: 'Pause offer', closed: 'Close offer', archived: 'Archive' }[s]}</button>`).join('')}
       ${c.announcement?.status === 'sent' ? `<p>Discord poster sent: <a href="${escape(c.announcement.messageUrl)}" target="_blank" rel="noopener">view message</a></p>` : ''}
       ${c.announcement?.status === 'pending' ? '<p>Discord delivery is uncertain; do not send again.</p><button type="button" data-promo-reconcile-discord>Reconcile Discord delivery</button>' : ''}
+      ${c.template === 'musician-referral' ? `<details><summary>Curate referrer / amend pilot</summary>
+        <label>Curated referrer wallet or ENS<input data-promo-curated-ref maxlength="255"></label>
+        <label>Reason<input data-promo-curated-reason maxlength="2000"></label>
+        <button type="button" data-promo-curate>Record curated referrer</button>
+        <label>Top-up (USDC, optional)<input data-promo-topup type="number" min="0.000001" step="0.000001"></label>
+        ${field('amendedEnd', 'Extend end (New York, optional)', 'datetime-local')}
+        ${field('amendedClaim', 'Extend claim date (New York, optional)', 'datetime-local')}
+        <label>Immutable amendment reason<input data-promo-amend-reason maxlength="2000"></label>
+        <button type="button" data-promo-amend>Record explicit amendment</button>
+      </details>` : ''}
       ${c.status === 'published' && !c.announcement ? `<details ${state.announcementPreview?.campaignId === c.id ? 'open' : ''}><summary>Prepare a Discord poster</summary>
         <p>One poster, one brief supporting sentence and the offer link. No mentions. Preview and confirm before sending.</p>
         <label>HTTPS poster image URL<input data-promo-poster type="url" maxlength="2048"></label>
@@ -244,6 +309,10 @@ export function mountAdminPromotions(root) {
       <p>${escape(c.wallet)} · ${money(c.amountUnits)} · ${escape(c.fund)} · <strong>${escape(c.status)}</strong></p>
       <p class="promotion-terms">${escape(c.evidence)}</p>
       ${c.subjectWallet ? `<p>Musician helped: ${escape(c.subjectWallet)}</p>` : ''}
+      ${c.legs ? `<ul>${c.legs.map(leg => `<li>${escape(leg.id)} · ${money(leg.amountUnits)} · ${escape(leg.status)}${leg.recipient ? ` · ${escape(leg.recipient)}` : ` · ${escape(leg.fund)}`}${leg.txHash ? ` · <a href="https://basescan.org/tx/${escape(leg.txHash)}" target="_blank" rel="noopener">receipt</a>` : ''}
+        ${leg.kind === 'wallet' && leg.status === 'approved' ? `<button type="button" data-promo-leg-enable="${escape(leg.id)}">Enable recipient</button><button type="button" data-promo-leg-pay="${escape(leg.id)}">Pay this leg</button>` : ''}
+        ${leg.kind === 'wallet' && leg.status === 'payment-pending' ? `<label>Leg transaction hash<input data-promo-leg-hash="${escape(leg.id)}" value="${escape(leg.txHash || '')}"></label><button type="button" data-promo-leg-reconcile="${escape(leg.id)}">Reconcile this leg</button><button type="button" data-promo-leg-release="${escape(leg.id)}">Review unbroadcast leg preparation</button>` : ''}
+        ${leg.kind === 'funding-needed' && leg.status !== 'paid' ? `<span> · Funding needed; transfer this exact $5 allocation separately.</span><label>Fund deposit transaction hash<input data-promo-leg-hash="${escape(leg.id)}" value="${escape(leg.txHash || '')}"></label><button type="button" data-promo-leg-funding="${escape(leg.id)}">Verify fund deposit</button>` : ''}</li>`).join('')}</ul>` : ''}
       ${c.qualification?.activity ? `<p>Referral evidence · ${escape(c.qualification.window)} · assessment week ${escape(c.qualification.week)}</p><ul>
         ${c.qualification.activity.map(v => `<li>${escape(v.wallet)} · play ${escape(v.playId)} · ${escape(v.at)} · ${escape(v.week)}</li>`).join('')}</ul>`
       : c.qualification ? `<p>${escape(JSON.stringify(c.qualification))}</p>` : ''}
@@ -255,11 +324,11 @@ export function mountAdminPromotions(root) {
         <label><input type="checkbox" data-promo-refund-reviewed> Refund and attribution dispute policy reviewed</label>` : ''}
       ${['submitted', 'needs-evidence'].includes(c.status) ? ['approved', 'needs-evidence', 'rejected'].map(s =>
         `<button type="button" data-promo-review="${s}">${{ approved: 'Approve & reserve reward', 'needs-evidence': 'Request more evidence', rejected: 'Reject' }[s]}</button>`).join('') : ''}
-      ${c.status === 'approved' ? '<button type="button" data-promo-review="rejected">Reject approved claim</button><button type="button" data-promo-enable>Enable recipient on router</button><button type="button" data-promo-pay>Pay approved reward</button>' : ''}
-      ${c.status === 'payment-pending' && !c.txHash ? '<button type="button" data-promo-release>Review unbroadcast preparation</button>' : ''}
-      ${['approved', 'payment-pending'].includes(c.status) ? `<label>Payment transaction hash<input data-promo-hash value="${escape(c.txHash || '')}"></label>
+      ${c.status === 'approved' ? `<button type="button" data-promo-review="rejected">Reject approved claim</button>${c.legs ? '' : '<button type="button" data-promo-enable>Enable recipient on router</button><button type="button" data-promo-pay>Pay approved reward</button>'}` : ''}
+      ${c.status === 'payment-pending' && !c.txHash && !c.legs ? '<button type="button" data-promo-release>Review unbroadcast preparation</button>' : ''}
+      ${!c.legs && ['approved', 'payment-pending'].includes(c.status) ? `<label>Payment transaction hash<input data-promo-hash value="${escape(c.txHash || '')}"></label>
         <button type="button" data-promo-reconcile>Reconcile payment</button>` : ''}
-      ${c.status === 'paid' ? `<a href="https://basescan.org/tx/${escape(c.txHash)}" target="_blank" rel="noopener">Confirmed payment</a>` : ''}
+      ${c.status === 'paid' && !c.legs ? `<a href="https://basescan.org/tx/${escape(c.txHash)}" target="_blank" rel="noopener">Confirmed payment</a>` : ''}
     </article>`).join('') || '<p>No participant claims.</p>';
     root.querySelector('[data-promo-members]').innerHTML = state.members.map(m => `<article class="promotion-card" data-member="${escape(m.wallet)}" data-member-campaign="${escape(m.campaignId)}">
       <p>${escape(state.campaigns.find(c => c.id === m.campaignId)?.title || m.campaignId)} · ${escape(m.wallet)}</p>
@@ -322,6 +391,24 @@ export function mountAdminPromotions(root) {
       if (target.matches('[data-promo-new]')) return reset();
       const campaign = state?.campaigns.find(c => c.id === target.closest('[data-campaign]')?.dataset.campaign);
       if (campaign) {
+        if (target.matches('[data-promo-curate]')) {
+          const card = target.closest('[data-campaign]');
+          const w = await wallet();
+          return command({ action: 'curate-referrer', campaignId: campaign.id,
+            referrer: await resolvedWallet(card.querySelector('[data-promo-curated-ref]').value, w.provider),
+            reason: card.querySelector('[data-promo-curated-reason]').value });
+        }
+        if (target.matches('[data-promo-amend]')) {
+          const card = target.closest('[data-campaign]');
+          const topup = card.querySelector('[data-promo-topup]').value;
+          const ending = card.querySelector('[name="amendedEnd"]').value;
+          const deadline = card.querySelector('[name="amendedClaim"]').value;
+          return command({ action: 'amend', campaignId: campaign.id,
+            budgetIncreaseUnits: topup ? promotionUnits(topup) : '0',
+            endsAt: ending ? promotionInputToUtc(ending) : campaign.endsAt,
+            claimDeadline: deadline ? promotionInputToUtc(deadline) : campaign.claimDeadline,
+            reason: card.querySelector('[data-promo-amend-reason]').value });
+        }
         if (target.matches('[data-promo-preview-discord]')) {
           const card = target.closest('[data-campaign]');
           return command({ action: 'preview-discord', campaignId: campaign.id,
@@ -338,6 +425,7 @@ export function mountAdminPromotions(root) {
           for (const name of ['title', 'criteria', 'terms', 'template', 'maxAwards', 'fund']) input(name).value = campaign[name];
           input('reward').value = String(Number(campaign.rewardUnits) / 1e6);
           input('budget').value = String(Number(campaign.budgetUnits) / 1e6);
+          if (campaign.template === 'musician-referral' && campaign.status !== 'draft') input('budget').value = '150';
           if (campaign.minOriginalTracks) input('minOriginalTracks').value = campaign.minOriginalTracks;
           if (campaign.requiredReferrals) input('requiredReferrals').value = campaign.requiredReferrals;
           if (campaign.activityWindow) input('activityWindow').value = campaign.activityWindow;
@@ -363,6 +451,34 @@ export function mountAdminPromotions(root) {
       const card = target.closest('[data-claim]');
       const claim = state?.claims.find(c => c.id === card?.dataset.claim);
       if (!claim) return;
+      const legId = target.dataset.promoLegEnable || target.dataset.promoLegPay || target.dataset.promoLegReconcile ||
+        target.dataset.promoLegRelease || target.dataset.promoLegFunding;
+      const leg = claim.legs?.find(item => item.id === legId);
+      if (leg && target.dataset.promoLegEnable) return enablePromotionRecipient({
+        claim: { ...claim, wallet: leg.recipient, status: leg.status, amountUnits: leg.amountUnits }, snapshot: state, status });
+      if (leg && target.dataset.promoLegPay) return payPromotion({ claim, leg, snapshot: state, command, status });
+      if (leg && target.dataset.promoLegReconcile) {
+        const hash = card.querySelector(`[data-promo-leg-hash="${leg.id}"]`).value;
+        const result = await command({ action: 'reconcile', claimId: claim.id, legId: leg.id, txHash: hash });
+        const updated = result.claims.find(item => item.id === claim.id)?.legs.find(item => item.id === leg.id);
+        if (updated && !['payment-pending', 'pending'].includes(updated.status)) {
+          localStorage.removeItem(`decentbusking:promotion-payment:${claim.id}:${leg.id}`);
+        }
+        return result;
+      }
+      if (leg && target.dataset.promoLegRelease) {
+        if (!confirm('Inspect the owner wallet history. Confirm only if no payment transaction was broadcast.')) return;
+        const reason = prompt('Record why this leg was not broadcast:');
+        if (!reason?.trim()) return;
+        const result = await command({ action: 'release-payment-preparation', claimId: claim.id, legId: leg.id,
+          confirmNoBroadcast: true, reason });
+        localStorage.removeItem(`decentbusking:promotion-payment:${claim.id}:${leg.id}`);
+        return result;
+      }
+      if (leg && target.dataset.promoLegFunding) {
+        const hash = card.querySelector(`[data-promo-leg-hash="${leg.id}"]`).value;
+        return command({ action: 'reconcile-funding-leg', claimId: claim.id, legId: leg.id, txHash: hash });
+      }
       if (target.dataset.promoReview) return command({ action: 'review', claimId: claim.id,
         decision: target.dataset.promoReview, reason: card.querySelector('[data-promo-reason]').value,
         confirmNewAdvertiser: card.querySelector('[data-promo-new-advertiser]')?.checked === true,
@@ -429,6 +545,7 @@ export function mountPublicPromotion() {
       <label>Invited by (wallet, optional; fixed at registration)<input data-promo-ref value="${escape(params.get('ref') || '')}"></label>
       <label><input type="checkbox" data-promo-accept> I accept the displayed offer terms and public IPFS publication of my wallet, referral links, evidence, activity and reviews. I will not submit secrets or personal information about others.</label>
       <button type="button" data-promo-join>Register for this offer</button>
+      <button type="button" data-promo-correct-mine>Correct my campaign referrer</button>
       <button type="button" data-promo-invite>Copy my referral invite</button>
       <p>Listen using the radio bar. Cast a wallet-signed vote on a current song in this offer; see its activity window above. Both directions qualify; anonymous past votes cannot be attributed retroactively. If you already voted on this play, wait for the next song.</p>
       <button type="button" data-promo-vote="1">Vote up on current song</button>
@@ -441,6 +558,7 @@ export function mountPublicPromotion() {
           ${field('purchaseHash', 'Confirmed campaign purchase transaction')}
         </div>
         <div data-promo-buddy hidden>${field('subjectWallet', 'Musician helped (different wallet)')}</div>
+        <div data-promo-musician hidden>${field('musicianWallet', 'Referred musician wallet (server checks playlist mint evidence)')}</div>
         <button>Submit claim for review</button>
       </form><div data-promo-my-claims></div>
     </div>`;
@@ -465,7 +583,16 @@ export function mountPublicPromotion() {
     overlay.querySelector('[data-promo-activity]').textContent = member
       ? `Registered · ${activity.week} · ${activity.voted ? 'Song vote recorded this week' : 'No song vote recorded this week'} · Referrals for this offer: ${activity.registered} registered, ${activity.activeThisWeek} active this week, ${activity.activeDuringOffer} active during this offer`
       : 'Not registered for this offer.';
-    overlay.querySelector('[data-promo-ref]').disabled = !!member;
+    const stats = participantState.participantStats?.find(item => item.campaignId === campaignId);
+    if (stats) {
+      overlay.querySelector('[data-promo-activity]').textContent += ` · Qualified ${stats.qualifiedCount}; pending ${money(stats.pendingUnits)}; approved ${money(stats.approvedUnits)}; paid ${money(stats.paidUnits)}; maximum referrer earnings ${money(stats.maxEarningsUnits)}. ${stats.attributedMusicians.length} attributed musicians; curated referrers: ${stats.referrers.join(', ') || 'none'}. Supporter token: ${stats.supporterToken.eligible ? 'eligible' : 'not yet eligible; eligibility only, no token transfer'}.`;
+      const progress = document.createElement('ul');
+      progress.innerHTML = stats.referred.map(item => `<li>${escape(item.wallet)} · votes ${item.voteProgress}/10 · ${escape(item.trackState)}${item.track ? ` · token #${escape(item.track.tokenId)}` : ''}</li>`).join('');
+      let holder = overlay.querySelector('[data-promo-progress]');
+      if (!holder) { holder = document.createElement('div'); holder.dataset.promoProgress = ''; memberPanel.append(holder); }
+      holder.replaceChildren(progress);
+    }
+    overlay.querySelector('[data-promo-ref]').disabled = !!member && campaign.template !== 'musician-referral';
     overlay.querySelector('[data-promo-join]').disabled = !!member;
     const sponsor = overlay.querySelector('[data-promo-sponsor]');
     sponsor.hidden = campaign.template !== 'sponsor';
@@ -473,11 +600,15 @@ export function mountPublicPromotion() {
     const buddy = overlay.querySelector('[data-promo-buddy]');
     buddy.hidden = campaign.template !== 'buddy';
     buddy.querySelectorAll('input').forEach(el => { el.required = !buddy.hidden; el.disabled = buddy.hidden; });
+    const musician = overlay.querySelector('[data-promo-musician]');
+    musician.hidden = campaign.template !== 'musician-referral';
+    musician.querySelectorAll('input').forEach(el => { el.required = !musician.hidden; el.disabled = musician.hidden; });
     const claims = participantState.claims.filter(c => c.campaignId === campaignId && c.wallet === participantState.viewerWallet);
     overlay.querySelector('[data-promo-my-claims]').innerHTML = claims.map(c => `<p>${escape(c.status)} · ${money(c.amountUnits)}</p>
+      ${(c.legs || []).map(leg => `<p>${escape(leg.id)} · ${money(leg.amountUnits)} · ${escape(leg.status)}${leg.kind === 'funding-needed' ? ' · settlement funding needed, not paid' : leg.txHash ? ` · <a href="https://basescan.org/tx/${escape(leg.txHash)}">receipt</a>` : ''}</p>`).join('')}
       ${c.history.map(h => `<p>${escape(h.action)}: ${escape(h.reason)}</p>`).join('')}
       ${c.status === 'needs-evidence' ? `<button type="button" data-promo-evidence="${c.id}">Update evidence from the form above</button>` : ''}
-      ${c.status === 'paid' ? `<a href="https://basescan.org/tx/${escape(c.txHash)}">Payment proof</a>` : ''}`).join('');
+      ${c.status === 'paid' && !c.legs ? `<a href="https://basescan.org/tx/${escape(c.txHash)}">Payment proof</a>` : ''}`).join('');
   }
   async function command(c) {
     participantState = await signed({ ...c, campaignId });
@@ -509,8 +640,20 @@ export function mountPublicPromotion() {
       if (target.matches('[data-promo-join]')) {
         if (!overlay.querySelector('[data-promo-accept]').checked) throw new Error('Accept the offer terms before registering');
         const campaign = state?.campaigns.find(c => c.id === campaignId);
-        return command({ action: 'join', referrer: overlay.querySelector('[data-promo-ref]').value.trim(),
+        const entered = overlay.querySelector('[data-promo-ref]').value.trim();
+        const referrer = entered ? await resolvedWallet(entered, (await wallet()).provider) : '';
+        return command({ action: 'join', referrer,
           acceptTerms: true, termsVersion: campaign?.version });
+      }
+      if (target.matches('[data-promo-correct-mine]')) {
+        const campaign = state?.campaigns.find(c => c.id === campaignId);
+        if (campaign?.template !== 'musician-referral') throw new Error('Retroactive self-correction is only available for the musician pilot');
+        const w = await wallet();
+        const entered = overlay.querySelector('[data-promo-ref]').value.trim();
+        const referrer = entered ? await resolvedWallet(entered, w.provider) : '';
+        const reason = prompt('Why should your campaign referrer be corrected? This public audit note is immutable.');
+        if (!reason?.trim()) throw new Error('An attribution correction reason is required');
+        return command({ action: 'correct-my-attribution', referrer, reason });
       }
       if (target.matches('[data-promo-invite]')) {
         const w = await wallet();
@@ -520,9 +663,14 @@ export function mountPublicPromotion() {
       if (target.dataset.promoVote) {
         const response = await fetch(`${service()}/api/radio`, { cache: 'no-store', signal: AbortSignal.timeout(10000) });
         if (!response.ok) throw new Error('Radio is unavailable');
-        const { nowPlaying } = await response.json();
+        const radio = await response.json();
+        const audible = radio.publicBroadcast?.selected ? getAudibleBroadcast() : null;
+        const nowPlaying = audible?.program || radio.nowPlaying;
         if (!nowPlaying || nowPlaying.isDevert) throw new Error('Wait for a song, not an advert');
-        return command({ action: 'vote', playId: nowPlaying.playId, voterId: radioListenerId(localStorage), vote: Number(target.dataset.promoVote) });
+        const campaign = state?.campaigns.find(item => item.id === campaignId);
+        return command({ action: 'vote', playId: nowPlaying.playId, voterId: radioListenerId(localStorage),
+          vote: Number(target.dataset.promoVote),
+          ...(campaign?.template === 'musician-referral' ? { subjectWallet: (await wallet()).address } : {}) });
       }
       if (target.dataset.promoEvidence) return command({ action: 'evidence', claimId: target.dataset.promoEvidence,
         ...Object.fromEntries(new FormData(overlay.querySelector('form'))) });

@@ -16,6 +16,7 @@ async function fixture(t) {
   const storage = { getItem: key => entries.get(key) || null, setItem: (key, value) => entries.set(key, value), removeItem: key => entries.delete(key) };
   const claim = { id: 'claim-1', campaignId: 'offer-1', wallet: '0x' + '12'.repeat(20),
     fund: 'dbusk-promotionals', amountUnits: '10000000', status: 'approved' };
+  let expectedRecipient = claim.wallet, expectedAmount = claim.amountUnits, expectedLeg = '';
   const router = {
     completedWorkReferences: async () => false, DEFAULT_ADMIN_ROLE: async () => ZeroHash, PAYROLL_ROLE: async () => ZeroHash,
     hasRole: async () => true, paused: async () => false, funds: async () => ({ exists: true, active: true }),
@@ -27,9 +28,9 @@ async function fixture(t) {
     assert.ok(entries.size, 'journal must exist before wallet broadcast');
     assert.equal(prepared, 1, 'server payment reservation must be persisted first');
     assert.equal(args[0], id(claim.fund));
-    assert.equal(args[2], claim.wallet);
-    assert.equal(args[3], 10000000n);
-    assert.equal(args[4], id(`decentbusking:promotions:v1:8453:${claim.campaignId}:${claim.wallet}`));
+    assert.equal(args[2], expectedRecipient);
+    assert.equal(args[3], BigInt(expectedAmount));
+    assert.equal(args[4], id(`decentbusking:promotions:v1:8453:${claim.campaignId}:${claim.wallet}${expectedLeg ? `:${expectedLeg}` : ''}`));
     if (sendError) throw sendError;
     return { hash: txHash, wait: async confirmations => { assert.equal(confirmations, 2); return { status: 1 }; } };
   };
@@ -39,11 +40,14 @@ async function fixture(t) {
   const command = async c => {
     if (c.action === 'prepare-payment') prepared++;
     if (c.action === 'reconcile') { assert.equal(c.txHash, txHash); reconciled++; }
-    return { claims: [{ ...claim, status: reconciled === 2 ? 'paid' : 'payment-pending' }] };
+    return { claims: [{ ...claim, status: reconciled === 2 ? 'paid' : 'payment-pending',
+      ...(expectedLeg ? { legs: [{ id: expectedLeg, status: reconciled === 2 ? 'paid' : 'payment-pending' }] } : {}) }] };
   };
   const execute = () => payPromotion({ claim, snapshot: { routerAddress }, command, status: {}, storage });
   const enable = confirmAction => enablePromotionRecipient({ claim, snapshot: { routerAddress }, status: {}, confirmAction });
   return { execute, router, claim, entries, storage, signer, sends: () => sends,
+    executeLeg: leg => payPromotion({ claim, leg, snapshot: { routerAddress }, command, status: {}, storage }),
+    expectLeg: leg => { expectedRecipient = leg.recipient; expectedAmount = leg.amountUnits; expectedLeg = leg.id; },
     enable, prepared: () => prepared, reconciled: () => reconciled, error: e => { sendError = e; } };
 }
 test('payment UI reserves, journals before broadcast, uses fixed fund/reference and reconciles twice', async t => {
@@ -178,7 +182,16 @@ test('money preserves six-decimal amounts and invite links keep the deployment s
   assert.throws(() => promotionUnits('1e3'), /USDC amount/);
   assert.equal(promotionLink('offer', owner, 'https://site.example/DecentBusking/?tutorial=splits#old'),
     `https://site.example/DecentBusking/?promotion=offer&ref=${owner}`);
-  assert.equal(PROMOTION_TEMPLATES.length, 6);
+  assert.equal(PROMOTION_TEMPLATES.length, 7);
+  assert.ok(PROMOTION_TEMPLATES.some(template => template.id === 'musician-referral'));
+});
+test('conversion UI pays one wallet leg with its own amount and work reference', async t => {
+  const f = await fixture(t);
+  const leg = { id: 'musician', recipient: '0x' + '34'.repeat(20), amountUnits: '5000000', kind: 'wallet',
+    status: 'approved' };
+  f.expectLeg(leg);
+  await f.executeLeg(leg);
+  assert.equal(f.sends(), 1);
 });
 test('entry points expose the admin section and public offer while suppressing automatic tutorial interference', () => {
   const root = require('node:path').join(__dirname, '..');

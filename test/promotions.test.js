@@ -454,6 +454,74 @@ test('reverted payments release only their own hash; failed storage stops furthe
   await assert.rejects(fail.create(), /Writes stopped/);
   await assert.rejects(fail.create(), /Writes stopped/);
 });
+
+test('musician conversion reconciles direct legs separately and never marks funding allocations paid', async () => {
+  const musician = Wallet.createRandom();
+  const playlist = [{ trackId: 'track', title: 'Minted', mintStatus: 'minted', tokenId: '7',
+    mintRecipient: musician.address }];
+  const f = await fixture({ readPlaylist: () => playlist });
+  const c = await f.create(input({ template: 'musician-referral', rewardUnits: '25000000',
+    budgetUnits: '150000000', maxAwards: 6 }));
+  f.setBalance(150000000n); await f.publish(c); await f.join(c, alice);
+  await f.exec({ action: 'join', campaignId: c.id, referrer: alice.address, trackId: 'track',
+    acceptTerms: true, termsVersion: c.version }, musician);
+  for (let index = 0; index < 10; index++) await f.exec({ action: 'vote', campaignId: c.id,
+    playId: `leg-song-${index}`, subjectWallet: musician.address,
+    voterId: `browser-leg-${index}-00000000`, vote: 1 }, musician);
+  const conversion = (await f.exec({ action: 'claim', campaignId: c.id, musicianWallet: musician.address,
+    evidence: 'Minted playlist evidence' }, alice)).claims[0];
+  const approved = await f.exec({ action: 'review', claimId: conversion.id, decision: 'approved', reason: 'All evidence present' });
+  assert.equal(approved.claims[0].legs.filter(leg => leg.status === 'approved').length, 2);
+  await assert.rejects(f.exec({ action: 'prepare-payment', claimId: conversion.id, legId: 'dbusk-top10' }),
+    /funding-needed/);
+  await f.exec({ action: 'prepare-payment', claimId: conversion.id, legId: 'referrer' });
+  const iface = new Interface([
+    'event PayrollPaid(bytes32 indexed fundId,address indexed asset,address indexed recipient,uint256 amount,bytes32 workReference,bytes32 repositoryIdHash,bytes32 contributorIdHash,string metadataUri,bytes32 metadataHash)',
+    'event Transfer(address indexed from,address indexed to,uint256 value)',
+  ]);
+  const payout = iface.encodeEventLog('PayrollPaid', [id(f.shared.PROMOTIONS_FUND), f.shared.PROMOTIONS_USDC,
+    alice.address, 10000000n, id(f.shared.promotionWorkReference(conversion, 'referrer')), id('repo'), id('alice'), '', ZeroHash]);
+  const transfer = iface.encodeEventLog('Transfer', [routerAddress, alice.address, 10000000n]);
+  f.setReceipt({ status: 1, to: routerAddress, blockNumber: 99,
+    logs: [{ ...payout, address: routerAddress }, { ...transfer, address: f.shared.PROMOTIONS_USDC }] });
+  const reconciled = await f.exec({ action: 'reconcile', claimId: conversion.id, legId: 'referrer', txHash });
+  assert.equal(reconciled.claims[0].legs.find(leg => leg.id === 'referrer').status, 'paid');
+  assert.equal(reconciled.claims[0].legs.find(leg => leg.id === 'musician').status, 'approved');
+  assert.deepEqual(reconciled.claims[0].legs.filter(leg => leg.kind === 'funding-needed').map(leg => leg.status),
+    ['funding-needed', 'funding-needed']);
+  assert.equal(reconciled.campaigns[0].paidUnits, '10000000');
+  assert.equal(reconciled.campaigns[0].fundingNeededUnits, '10000000');
+  const fundingHash = '0x' + 'cd'.repeat(32);
+  const fundInterface = new Interface([
+    'event FundFunded(bytes32 indexed fundId,address indexed asset,address indexed funder,uint256 amount)',
+  ]);
+  const funded = fundInterface.encodeEventLog('FundFunded', [id('dbusk-top10'),
+    f.shared.PROMOTIONS_USDC, owner.address, 5000000n]);
+  f.setReceipt({ status: 1, to: routerAddress, blockNumber: 98,
+    logs: [{ ...funded, address: routerAddress }] });
+  const fundedState = await f.exec({ action: 'reconcile-funding-leg', claimId: conversion.id,
+    legId: 'dbusk-top10', txHash: fundingHash });
+  assert.equal(fundedState.claims[0].legs.find(leg => leg.id === 'dbusk-top10').status, 'paid');
+  assert.equal(fundedState.campaigns[0].fundingNeededUnits, '5000000');
+  assert.equal(fundedState.campaigns[0].supporterToken?.eligibleWallets?.includes(alice.address.toLowerCase()) || false, false);
+  f.setBalance(140000000n);
+  await f.exec({ action: 'prepare-payment', claimId: conversion.id, legId: 'musician' });
+});
+
+test('first upload records its owned track on registration for retroactive musician referral', async () => {
+  const musician = Wallet.createRandom();
+  const f = await fixture({ readPlaylist: () => [{ trackId: 'first-upload', mintStatus: 'requested',
+    tokenId: null, mintRecipient: musician.address }] });
+  const c = await f.create(input({ template: 'musician-referral', rewardUnits: '25000000',
+    budgetUnits: '150000000', maxAwards: 6 }));
+  await f.exec({ action: 'curate-referrer', campaignId: c.id, referrer: alice.address, reason: 'Launch referrer' });
+  f.setBalance(150000000n); await f.publish(c);
+  await f.exec({ action: 'join', campaignId: c.id, referrer: alice.address, trackId: 'first-upload',
+    acceptTerms: true, termsVersion: c.version }, musician);
+  const member = f.stored().members.find(item => item.wallet === musician.address.toLowerCase());
+  assert.deepEqual(member.uploadTrackIds, ['first-upload']);
+  assert.equal(member.referrer, alice.address.toLowerCase());
+});
 test('an uncertain payment preparation locks all browsers until an audited no-broadcast review', async () => {
   const f = await fixture(); const c = await f.create(); await f.publish(c); await f.join(c);
   const claim = await f.claim(c);
@@ -608,4 +676,132 @@ test('HTTP public listing includes claimant data without signing; mutations stil
     assert.equal(unavailable.status, 400);
     assert.match((await unavailable.json()).error, /Promotions unavailable/);
   } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('musician pilot is $150 / six conversions with four explicit legs and all-or-nothing playlist evidence', async () => {
+  const musicians = Array.from({ length: 7 }, () => Wallet.createRandom());
+  const playlist = musicians.map((wallet, index) => ({ trackId: `track-${index}`, title: `Minted ${index}`,
+    mintStatus: 'minted', tokenId: String(index + 1), mintRecipient: wallet.address }));
+  const f = await fixture({ readPlaylist: () => playlist });
+  const campaignInput = input({ template: 'musician-referral', title: 'First musician referral pilot',
+    rewardUnits: '25000000', budgetUnits: '150000000', maxAwards: 6,
+    endsAt: '2026-11-13T18:00:00Z', claimDeadline: '2026-11-20T18:00:00Z' });
+  await assert.rejects(f.create(input({ template: 'musician-referral' })), /25 per conversion/);
+  const c = await f.create(campaignInput);
+  assert.equal(c.rewardUnits, '25000000');
+  assert.equal(BigInt(c.rewardUnits) * BigInt(c.maxAwards), 150000000n);
+  f.setBalance(150000000n);
+  await f.publish(c); await f.join(c, alice);
+  for (const [index, musician] of musicians.slice(0, 6).entries()) {
+    await f.exec({ action: 'join', campaignId: c.id, referrer: alice.address, trackId: `track-${index}`,
+      acceptTerms: true, termsVersion: c.version }, musician);
+    for (let vote = 0; vote < 10; vote++) {
+      const playId = `song-${index}-${vote}`;
+      await f.exec({ action: 'vote', campaignId: c.id, playId, subjectWallet: musician.address,
+        voterId: `browser_${index}_${vote}_000000`, vote: 1 }, musician);
+    }
+    if (index === 0) {
+      const missing = structuredClone(musicians[1]);
+      void missing;
+      const view = (await f.view(alice)).participantStats[0];
+      const progress = view.referred.find(item => item.wallet === musician.address.toLowerCase());
+      assert.equal(progress.voteProgress, 10);
+      assert.equal(progress.trackState, 'minted');
+      const musicianStats = (await f.view(musician)).participantStats[0];
+      assert.equal(musicianStats.maxEarningsUnits, '65000000');
+    }
+    const claim = (await f.exec({ action: 'claim', campaignId: c.id, musicianWallet: musician.address,
+      evidence: `Playlist mint token ${index + 1}` }, alice)).claims.find(item => item.subjectWallet === musician.address.toLowerCase());
+    assert.deepEqual(claim.legs.map(leg => [leg.id, leg.amountUnits, leg.status]), [
+      ['referrer', '10000000', 'pending'], ['musician', '5000000', 'pending'],
+      ['dbusk-top10', '5000000', 'funding-needed'], ['dbusk-playback', '5000000', 'funding-needed'],
+    ]);
+    assert.equal(claim.qualification.playIds.length, 10);
+  }
+  assert.equal(f.stored().claims.length, 6);
+  assert.equal(f.stored().claims.reduce((sum, claim) => sum + BigInt(claim.amountUnits), 0n), 150000000n);
+  await f.join(c, musicians[6], alice.address);
+  await assert.rejects(f.exec({ action: 'claim', campaignId: c.id, musicianWallet: musicians[6].address,
+    evidence: 'Seventh conversion attempt' }, alice), /six.*slots/i);
+});
+
+test('musician conversion rejects nine votes, an unminted track and duplicate play IDs', async () => {
+  const musician = Wallet.createRandom();
+  const f = await fixture({ readPlaylist: () => [{ trackId: 'track', title: 'No mint', mintStatus: 'requested',
+    tokenId: '9', mintRecipient: musician.address }] });
+  const c = await f.create(input({ template: 'musician-referral', rewardUnits: '25000000',
+    budgetUnits: '150000000', maxAwards: 6 }));
+  f.setBalance(150000000n); await f.publish(c); await f.join(c, alice);
+  await f.exec({ action: 'join', campaignId: c.id, referrer: alice.address, trackId: 'track',
+    acceptTerms: true, termsVersion: c.version }, musician);
+  await f.join(c, bob);
+  await assert.rejects(f.exec({ action: 'vote', campaignId: c.id, playId: 'forged-for-musician',
+    subjectWallet: musician.address, voterId: 'browser-forged-00000000', vote: 1 }, bob),
+    /own wallet/);
+  for (let index = 0; index < 9; index++) await f.exec({ action: 'vote', campaignId: c.id,
+    playId: `song-${index}`, subjectWallet: musician.address, voterId: `browser-nine-${index}-0000`, vote: 1 }, musician);
+  await f.exec({ action: 'vote', campaignId: c.id, playId: 'song-8', subjectWallet: musician.address,
+    voterId: 'browser-nine-8-0000', vote: -1 }, musician);
+  assert.equal(f.stored().votes.length, 9);
+  await assert.rejects(f.exec({ action: 'claim', campaignId: c.id, musicianWallet: musician.address, evidence: 'pilot' }, alice), /9\/10/);
+  await f.exec({ action: 'vote', campaignId: c.id, playId: 'song-9', subjectWallet: musician.address,
+    voterId: 'browser-ten-00000000', vote: 1 }, musician);
+  await assert.rejects(f.exec({ action: 'claim', campaignId: c.id, musicianWallet: musician.address, evidence: 'pilot' }, alice), /minted track/);
+});
+
+test('musician referrer curation, participant correction, and explicit immutable amendments persist', async () => {
+  const musician = Wallet.createRandom();
+  const f = await fixture({ readPlaylist: () => [{ trackId: 'track', title: 'Minted', mintStatus: 'minted',
+    tokenId: '9', mintRecipient: musician.address }] });
+  const c = await f.create(input({ template: 'musician-referral', rewardUnits: '25000000',
+    budgetUnits: '150000000', maxAwards: 6, endsAt: '2026-11-13T18:00:00Z', claimDeadline: '2026-11-20T18:00:00Z' }));
+  await f.exec({ action: 'curate-referrer', campaignId: c.id, referrer: alice.address, reason: 'Steward pilot outreach' });
+  f.setBalance(250000000n); await f.publish(c); await f.join(c, alice); await f.join(c, musician);
+  await f.exec({ action: 'correct-my-attribution', campaignId: c.id, referrer: alice.address,
+    reason: 'I followed the curated invite before registration' }, musician);
+  await f.exec({ action: 'correct-my-attribution', campaignId: c.id, referrer: alice.address,
+    trackId: 'track', reason: 'Attach the first submitted track after upload' }, musician);
+  assert.equal((await f.view()).members.find(m => m.wallet === musician.address.toLowerCase()).referrer, alice.address.toLowerCase());
+  assert.deepEqual((await f.view()).members.find(m => m.wallet === musician.address.toLowerCase()).uploadTrackIds, ['track']);
+  const corrected = await f.exec({ action: 'amend', campaignId: c.id, budgetIncreaseUnits: '25000000',
+    endsAt: '2026-11-20T18:00:00Z', claimDeadline: '2026-11-27T18:00:00Z', reason: 'One explicit steward-approved top-up and extension' });
+  const amended = corrected.campaigns.find(item => item.id === c.id);
+  assert.equal(amended.budgetUnits, '175000000');
+  assert.equal(amended.amendments.length, 1);
+  assert.equal(amended.amendments[0].before.endsAt, c.endsAt);
+  assert.equal(amended.amendments[0].after.endsAt, '2026-11-20T18:00:00.000Z');
+  await assert.rejects(f.exec({ action: 'amend', campaignId: c.id, budgetIncreaseUnits: '0',
+    endsAt: '2026-11-10T18:00:00Z', claimDeadline: amended.claimDeadline, reason: 'Silent shortening' }), /only extend/);
+});
+
+test('musician attribution freezes once that conversion has a submitted claim', async () => {
+  const musician = Wallet.createRandom();
+  const f = await fixture({ readPlaylist: () => [{ trackId: 'track', title: 'Track', mintStatus: 'minted',
+    tokenId: '9', mintRecipient: musician.address }] });
+  const c = await f.create(input({ template: 'musician-referral', rewardUnits: '25000000',
+    budgetUnits: '150000000', maxAwards: 6 }));
+  f.setBalance(150000000n); await f.publish(c); await f.join(c, alice); await f.join(c, bob);
+  await f.exec({ action: 'join', campaignId: c.id, referrer: alice.address, trackId: 'track',
+    acceptTerms: true, termsVersion: c.version }, musician);
+  for (let index = 0; index < 10; index++) await f.exec({ action: 'vote', campaignId: c.id,
+    playId: `freeze-${index}`, subjectWallet: musician.address,
+    voterId: `freeze-browser-${index}-0000`, vote: 1 }, musician);
+  await f.exec({ action: 'claim', campaignId: c.id, musicianWallet: musician.address,
+    evidence: 'Mint and ten votes' }, alice);
+  await assert.rejects(f.exec({ action: 'correct-my-attribution', campaignId: c.id, referrer: bob.address,
+    reason: 'Cannot redirect a submitted conversion' }, musician), /already has a claim/);
+});
+
+test('pilot amendment checks every other campaign commitment on the same promotional fund', async () => {
+  const f = await fixture();
+  const pilot = await f.create(input({ template: 'musician-referral', rewardUnits: '25000000',
+    budgetUnits: '150000000', maxAwards: 6 }));
+  const other = await f.create(input({ template: 'album', rewardUnits: '10000000',
+    budgetUnits: '50000000', maxAwards: 5 }));
+  f.setBalance(200000000n);
+  await f.publish(pilot); await f.publish(other);
+  f.setBalance(175000000n);
+  await assert.rejects(f.exec({ action: 'amend', campaignId: pilot.id, budgetIncreaseUnits: '25000000',
+    endsAt: '2026-11-07T18:00:00Z', claimDeadline: '2026-11-14T18:00:00Z',
+    reason: 'Cannot overcommit the shared fund' }), /other campaign commitments/);
 });
