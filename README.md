@@ -520,9 +520,22 @@ so a later change never rewrites a closed week. Shared-song tips use the
 every owner's share in the same transaction and holds no funds; the worker
 reads it with `TIP_SPLIT_ROUTER_ADDRESS` and `TIP_SPLIT_START_BLOCK`. Until that
 address is configured, tips on shared songs stay disabled rather than paying one
-wallet. Live performance tips still pay the booked performer. Credits
+wallet. Live performance tips still pay the booked performer in ETH. Credits
 and these shares affect DJuke artist payouts, not NFT ownership or ERC-2981
 royalties.
+
+Recording tips can also be sent through v0.2 with the tip modal's asset
+picker (Ξ ETH, $ USDC, 🎁 NFT gift). USDC tips split by the same owner shares;
+the tipper approves the exact amount and the router forwards it in one
+transaction. The router owner can allow or remove ERC-20 tokens with
+`setTokenAllowed`; only Base USDC is allowed at launch, and further tokens such
+as OMMM are added once they exist on Base. NFT gifts send up to 32 ERC-721 or
+ERC-1155 tokens in one transaction, each to a chosen owner or to every owner
+(ERC-1155 only). ERC-721 gifts use a per-token approval, and ERC-1155 gifts use
+a collection approval. The worker ledger records ETH, token and NFT events from
+v0.2, and the Profile tip ledger shows USDC totals and gifts beside ETH. As a
+prototype safeguard, the router owner can recover tokens or NFTs sent to the
+contract by mistake.
 
 The v0.6 candidate treats an untouched single-payee song as using the album
 default when it joins an album, after that payee approves migration. Existing

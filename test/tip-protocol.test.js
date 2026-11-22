@@ -76,3 +76,37 @@ test('split tips mirror the router rounding and require one exact event per owne
     assert.throws(() => verifySplitTipReceipt({ receipt: receipt(logs), routerAddress: router, intent, ethers }), /every song owner/);
   }
 });
+
+test('token tips and NFT gift batches verify only the exact assets, owners and context that were sent', async () => {
+  const { TIP_ASSET_ABI, createTipContext, decodeAssetTipReceipt, normalizeNftGifts, verifyNftGiftReceipt, verifyTokenTipReceipt } = await import('../js/tip-protocol.mjs');
+  const router = `0x${'cd'.repeat(20)}`, usdc = `0x${'83'.repeat(20)}`, collection = `0x${'ef'.repeat(20)}`;
+  const payer = `0x${'ab'.repeat(20)}`, audio = `0x${'12'.repeat(20)}`, video = `0x${'34'.repeat(20)}`;
+  const intent = { source: 'radio', nftId: `8453:${collection}:49`, payer };
+  const context = createTipContext(intent);
+  const iface = new ethers.Interface(TIP_ASSET_ABI);
+  const id = ethers.id(context.contextRef);
+  const receipt = logs => ({ status: 1, hash: `0x${'56'.repeat(32)}`, logs: logs.map((log, index) => ({ ...log, address: router, index })) });
+  const token = (recipient, amount) => iface.encodeEventLog('TokenTipSent', [payer, recipient, id, usdc, context.sourceKind, amount, context.contextRef]);
+  const split = { ...intent, token: usdc, amountUnits: '1000001', splits: [{ recipient: audio, shareBps: 5000 }, { recipient: video, shareBps: 5000 }] };
+  const paid = receipt([token(audio, 500000n), token(video, 500001n)]);
+  assert.equal(verifyTokenTipReceipt({ receipt: paid, routerAddress: router, intent: split, ethers }).length, 2);
+  assert.equal(decodeAssetTipReceipt({ receipt: paid, routerAddress: router, ethers })[0].token, usdc);
+  assert.throws(() => verifyTokenTipReceipt({ receipt: receipt([token(audio, 500000n)]), routerAddress: router, intent: split, ethers }), /every song owner/);
+  assert.throws(() => verifyTokenTipReceipt({ receipt: paid, routerAddress: router, intent: { ...split, token: collection }, ethers }), /every song owner/);
+
+  const gifts = normalizeNftGifts([
+    { collection, standard: 1, tokenId: 5, amount: 2, recipient: audio },
+    { collection, standard: 0, tokenId: 9, amount: 1, recipient: video },
+  ], [audio, video]);
+  const nft = (recipient, standard, tokenId, amount) => iface.encodeEventLog('NftGiftSent',
+    [payer, recipient, id, collection, standard, tokenId, amount, context.sourceKind, context.contextRef]);
+  const gifted = receipt([nft(video, 0, 9n, 1n), nft(audio, 1, 5n, 2n)]);
+  assert.equal(verifyNftGiftReceipt({ receipt: gifted, routerAddress: router, intent: { ...intent, gifts }, ethers }).length, 2);
+  assert.throws(() => verifyNftGiftReceipt({ receipt: receipt([nft(video, 0, 9n, 1n), nft(audio, 1, 5n, 1n)]), routerAddress: router,
+    intent: { ...intent, gifts }, ethers }), /does not match/);
+  assert.throws(() => normalizeNftGifts([{ collection, standard: 0, tokenId: 9, amount: 2, recipient: audio }], [audio]), /only be gifted once/);
+  assert.throws(() => normalizeNftGifts([{ collection, standard: 0, tokenId: 9, amount: 1, recipient: audio },
+    { collection, standard: 0, tokenId: 9, amount: 1, recipient: video }], [audio, video]), /cannot be gifted twice/);
+  assert.throws(() => normalizeNftGifts([{ collection, standard: 1, tokenId: 5, amount: 1, recipient: payer }], [audio]), /song's owners/);
+  assert.throws(() => normalizeNftGifts(Array(33).fill({ collection, standard: 1, tokenId: 5, amount: 1, recipient: audio }), [audio]), /1 to 32/);
+});

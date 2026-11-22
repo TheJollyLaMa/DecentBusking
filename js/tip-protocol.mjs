@@ -7,6 +7,17 @@ export const TIP_SPLIT_ABI = Object.freeze([
   ...TIP_ABI,
   'function tipSplit(address[] recipients,uint16[] sharesBps,uint8 sourceKind,string contextRef) payable',
 ]);
+export const TIP_ASSET_ABI = Object.freeze([
+  ...TIP_SPLIT_ABI,
+  'function allowedTokens(address token) view returns (bool)',
+  'function tipToken(address token,address recipient,uint256 amount,uint8 sourceKind,string contextRef)',
+  'function tipTokenSplit(address token,address[] recipients,uint16[] sharesBps,uint256 amount,uint8 sourceKind,string contextRef)',
+  'function giftNfts((address collection,uint8 standard,uint256 tokenId,uint256 amount,address recipient)[] gifts,uint8 sourceKind,string contextRef)',
+  'event TokenTipSent(address indexed sender,address indexed recipient,bytes32 indexed contextId,address token,uint8 sourceKind,uint256 amount,string contextRef)',
+  'event NftGiftSent(address indexed sender,address indexed recipient,bytes32 indexed contextId,address collection,uint8 standard,uint256 tokenId,uint256 amount,uint8 sourceKind,string contextRef)',
+]);
+export const NFT_STANDARDS = Object.freeze({ erc721: 0, erc1155: 1 });
+export const MAX_NFT_GIFTS = 32;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const HASH = /^0x[0-9a-fA-F]{64}$/;
 const UINT256_MAX = (1n << 256n) - 1n;
@@ -121,4 +132,92 @@ export function verifySplitTipReceipt({ receipt, routerAddress, intent, ethers }
     if (matches.length !== 1) throw new Error('The shared tip receipt does not match every song owner');
     return matches[0];
   });
+}
+
+function eventContext(sourceKind, contextRef) {
+  try { return { context: parseTipContext({ sourceKind, contextRef }), contextError: '' }; }
+  catch (error) { return { context: null, contextError: error.message }; }
+}
+
+// Decodes v0.2 TokenTipSent (kind 'token') and NftGiftSent (kind 'nft') events from one router.
+export function decodeAssetTipReceipt({ receipt, routerAddress, ethers }) {
+  if (!ADDRESS.test(routerAddress || '') || /^0x0{40}$/i.test(routerAddress)) throw new Error('Invalid tip contract');
+  if (receipt?.status !== 1 || !Array.isArray(receipt.logs)) throw new Error('Tip transaction is not confirmed successfully');
+  const txHash = receipt.hash || receipt.transactionHash;
+  if (!HASH.test(txHash || '')) throw new Error('Tip transaction hash is unavailable');
+  const iface = new ethers.Interface(TIP_ASSET_ABI);
+  const topics = { [iface.getEvent('TokenTipSent').topicHash.toLowerCase()]: 'token', [iface.getEvent('NftGiftSent').topicHash.toLowerCase()]: 'nft' };
+  return receipt.logs.filter(log => log.address?.toLowerCase() === routerAddress.toLowerCase() && topics[log.topics?.[0]?.toLowerCase()])
+    .map(log => {
+      const kind = topics[log.topics[0].toLowerCase()];
+      const args = iface.parseLog(log).args;
+      const logIndex = log.index ?? log.logIndex;
+      if (!Number.isSafeInteger(logIndex) || logIndex < 0 || args.amount <= 0n ||
+          args.contextId !== ethers.id(args.contextRef)) throw new Error('Invalid on-chain tip event');
+      const sourceKind = Number(args.sourceKind);
+      const base = {
+        kind, txHash, logIndex, routerAddress: routerAddress.toLowerCase(),
+        sender: args.sender.toLowerCase(), recipient: args.recipient.toLowerCase(), sourceKind,
+        contextId: args.contextId, contextRef: args.contextRef, ...eventContext(sourceKind, args.contextRef),
+      };
+      if (kind === 'token') return { ...base, token: args.token.toLowerCase(), amountUnits: args.amount.toString() };
+      const standard = Number(args.standard);
+      if (standard !== NFT_STANDARDS.erc721 && standard !== NFT_STANDARDS.erc1155) throw new Error('Invalid on-chain NFT gift event');
+      return { ...base, collection: args.collection.toLowerCase(), standard, tokenId: args.tokenId.toString(), amount: args.amount.toString() };
+    });
+}
+
+// `intent.splits` (shared song) or `intent.recipient` (one owner); `intent.amountUnits` in token base units.
+export function verifyTokenTipReceipt({ receipt, routerAddress, intent, ethers }) {
+  const context = createTipContext(intent);
+  const parts = intent.splits
+    ? splitTipAmounts(intent.amountUnits, intent.splits).map((amount, index) => ({ recipient: intent.splits[index].recipient, amount }))
+    : [{ recipient: intent.recipient, amount: BigInt(intent.amountUnits) }];
+  const events = decodeAssetTipReceipt({ receipt, routerAddress, ethers }).filter(event => event.kind === 'token' &&
+    event.sender === intent.payer.toLowerCase() && event.token === intent.token.toLowerCase() &&
+    event.sourceKind === context.sourceKind && event.contextRef === context.contextRef);
+  if (events.length !== parts.length) throw new Error('The token tip receipt does not match every song owner');
+  return parts.map(part => {
+    const matches = events.filter(event => event.recipient === part.recipient.toLowerCase() && event.amountUnits === part.amount.toString());
+    if (matches.length !== 1) throw new Error('The token tip receipt does not match every song owner');
+    return matches[0];
+  });
+}
+
+const giftKey = gift => [gift.recipient, gift.collection, gift.standard, gift.tokenId, gift.amount].map(v => String(v).toLowerCase()).join('|');
+
+// Validates a gift batch against the song's owners. Returns contract-ready gifts.
+export function normalizeNftGifts(gifts, owners) {
+  const allowed = new Set((owners || []).map(owner => String(owner).toLowerCase()));
+  if (!Array.isArray(gifts) || !gifts.length || gifts.length > MAX_NFT_GIFTS) throw new Error(`Choose 1 to ${MAX_NFT_GIFTS} NFT gifts`);
+  const seen721 = new Set();
+  return Object.freeze(gifts.map(gift => {
+    const collection = String(gift?.collection || '');
+    const standard = Number(gift?.standard);
+    let tokenId, amount;
+    try { tokenId = BigInt(gift.tokenId); amount = BigInt(gift.amount); } catch { throw new Error('Enter a whole-number token ID and amount'); }
+    if (!ADDRESS.test(collection) || /^0x0{40}$/i.test(collection)) throw new Error('Enter a valid NFT collection address');
+    if (standard !== NFT_STANDARDS.erc721 && standard !== NFT_STANDARDS.erc1155) throw new Error('Unsupported NFT standard');
+    if (tokenId < 0n || tokenId > UINT256_MAX || amount <= 0n || amount > UINT256_MAX) throw new Error('Enter a valid token ID and amount');
+    if (standard === NFT_STANDARDS.erc721) {
+      if (amount !== 1n) throw new Error('An ERC-721 NFT can only be gifted once');
+      const key = `${collection.toLowerCase()}:${tokenId}`;
+      if (seen721.has(key)) throw new Error('The same ERC-721 NFT cannot be gifted twice');
+      seen721.add(key);
+    }
+    if (!allowed.has(String(gift.recipient || '').toLowerCase())) throw new Error('Each NFT must go to one of this song\'s owners');
+    return Object.freeze({ collection, standard, tokenId: tokenId.toString(), amount: amount.toString(), recipient: String(gift.recipient) });
+  }));
+}
+
+export function verifyNftGiftReceipt({ receipt, routerAddress, intent, ethers }) {
+  const context = createTipContext(intent);
+  const events = decodeAssetTipReceipt({ receipt, routerAddress, ethers }).filter(event => event.kind === 'nft' &&
+    event.sender === intent.payer.toLowerCase() && event.sourceKind === context.sourceKind && event.contextRef === context.contextRef);
+  const expected = intent.gifts.map(giftKey).sort();
+  const actual = events.map(giftKey).sort();
+  if (expected.length !== actual.length || expected.some((key, index) => key !== actual[index])) {
+    throw new Error('The NFT gift receipt does not match the gifts you sent');
+  }
+  return events;
 }

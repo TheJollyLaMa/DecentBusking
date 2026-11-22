@@ -1095,7 +1095,7 @@ async function main() {
   let liveBookings;
   let tipLedger = null, tipLedgerReady = false, tipConfigurationError = '';
   let tipSplitLedger = null, tipSplitLedgerReady = false;
-  const startTipLedger = ({ routerAddress, startBlock, checkpointName, label, onReady }) => {
+  const startTipLedger = ({ routerAddress, startBlock, checkpointName, label, onReady, assets = false }) => {
     const tipProvider = getRpcRouter().provider('logs', 'native-tip-ledger');
     const tipStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage,
       pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl,
@@ -1119,7 +1119,7 @@ async function main() {
         return undefined;
       }
     };
-    const ledger = createTipLedger({ provider: tipProvider, routerAddress,
+    const ledger = createTipLedger({ provider: tipProvider, routerAddress, assets,
       startBlock: /^[0-9]+$/.test(startBlock || '') ? Number(startBlock) : undefined,
       maxWindowsPerRun: 20,
       restore: tipStore?.restore, save: tipStore?.save,
@@ -1155,12 +1155,12 @@ async function main() {
       console.error('[tip-ledger] Configuration:', error.message);
     }
   }
-  // Shared-song tips use a separate split router with its own deployment block and checkpoint.
+  // The v0.2 router (shared-song ETH, USDC tips, NFT gifts) has its own deployment block and checkpoint.
   if (process.env.TIP_SPLIT_ROUTER_ADDRESS) {
     try {
       tipSplitLedger = startTipLedger({ routerAddress: process.env.TIP_SPLIT_ROUTER_ADDRESS,
         startBlock: process.env.TIP_SPLIT_START_BLOCK, checkpointName: 'decentbusking-tip-split-ledger.json',
-        label: 'tip-split-ledger', onReady: () => { tipSplitLedgerReady = true; } });
+        label: 'tip-split-ledger', assets: true, onReady: () => { tipSplitLedgerReady = true; } });
     } catch (error) {
       console.error('[tip-split-ledger] Configuration:', error.message);
     }

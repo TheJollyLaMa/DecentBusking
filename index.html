@@ -24,7 +24,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261122-musician-referral" />
+  <link rel="stylesheet" href="css/styles.css?v=20261123-song-splits" />
   <link rel="stylesheet" href="css/dmtv.css?v=20261118-dmtv-escrow" />
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth" />
   <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback" />
@@ -766,9 +766,20 @@
       <p id="tip-to-label">Recipient wallet not yet verified.</p>
       <p id="tip-route" class="hint"></p>
       <div id="tip-form">
-        <label for="tip-amount">Amount <span class="hint">(ETH)</span></label>
-        <input id="tip-amount" type="number" step="0.01" min="0.01" value="1.0" />
-        <p id="tip-usdc-estimate" class="tip-usdc-estimate" role="status" aria-live="polite">USDC estimate loading…</p>
+        <div id="tip-asset-picker" class="tip-asset-picker" role="radiogroup" aria-label="What to tip" hidden>
+          <button type="button" role="radio" data-tip-asset="eth" aria-checked="true" title="ETH">Ξ</button>
+          <button type="button" role="radio" data-tip-asset="usdc" aria-checked="false" title="USDC">$</button>
+          <button type="button" role="radio" data-tip-asset="nft" aria-checked="false" title="Gift NFTs">🎁</button>
+        </div>
+        <div id="tip-amount-field">
+          <label for="tip-amount">Amount <span id="tip-amount-unit" class="hint">(ETH)</span></label>
+          <input id="tip-amount" type="number" step="0.01" min="0.01" value="1.0" />
+          <p id="tip-usdc-estimate" class="tip-usdc-estimate" role="status" aria-live="polite">USDC estimate loading…</p>
+        </div>
+        <div id="tip-gift-field" class="tip-gift-field" hidden>
+          <ul id="tip-gift-list" class="tip-gift-list" aria-label="NFT gifts"></ul>
+          <button id="tip-gift-add" type="button" class="tip-gift-add" aria-label="Add another NFT" title="Add another NFT">＋ 🎁</button>
+        </div>
         <div id="tip-status" role="status" aria-live="polite"></div>
         <div class="tip-form-actions">
           <button id="tip-send-btn" disabled>💸 Send Tip</button>

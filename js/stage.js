@@ -7,8 +7,10 @@ import { readLiveTipTarget } from './live-tip-target.mjs?v=20261114-live-directi
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { resolveNowPlayingNFT } from './space.js?v=20261030-ad-cutoff';
 import { nftArtistLabel, nftIdentity } from './nft-loader.js?v=20261012-paging';
-import { TIP_ABI, TIP_SPLIT_ABI, createTipContext, normalizeTipSplit, splitTipAmounts, verifyAttributedTipReceipt, verifySplitTipReceipt } from './tip-protocol.mjs?v=20261123-song-splits';
-import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
+import { NFT_STANDARDS, TIP_ABI, TIP_ASSET_ABI, TIP_SPLIT_ABI, createTipContext, normalizeNftGifts, normalizeTipSplit, splitTipAmounts, verifyAttributedTipReceipt, verifyNftGiftReceipt, verifySplitTipReceipt, verifyTokenTipReceipt } from './tip-protocol.mjs?v=20261123-song-splits';
+import { getBaseReadProvider, waitForAllowance } from './base-chain.mjs?v=20261018-shared-provider';
+import { BASE_USDC_ADDRESS } from './djuke-payment.mjs';
+import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
 import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, getCreatorWatchlistState, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs?v=20261030-ad-cutoff';
 
 let _tipPlayingTrack = null;
@@ -22,6 +24,8 @@ let _tipLookupGeneration = 0;
 let _tipBusy = false;
 let _tipSelectionState = 'idle';
 let _tipSelectionMessage = '';
+let _tipAsset = 'eth';
+let _tipGifts = [];
 let _watchlistTrack = null;
 let _watchlistResolvedNFT = null;
 let _watchlistLookupGeneration = 0;
@@ -397,6 +401,18 @@ function _bindTipModal() {
   prevBtn?.addEventListener('click', () => _stepTipHistory(-1));
   nextBtn?.addEventListener('click', () => _stepTipHistory(1));
   amountInput?.addEventListener('input', _renderTipUsdcEstimate);
+  document.getElementById('tip-asset-picker')?.addEventListener('click', event => {
+    const asset = event.target.closest('[data-tip-asset]')?.dataset.tipAsset;
+    if (!asset || _tipBusy || _tipPending || _tipSelectionState === 'sent') return;
+    _tipAsset = asset;
+    if (asset === 'nft' && !_tipGifts.length) _tipGifts.push(_newTipGift());
+    _renderTipState();
+  });
+  document.getElementById('tip-gift-add')?.addEventListener('click', () => {
+    if (_tipBusy || _tipPending || _tipGifts.length >= 32) return;
+    _tipGifts.push(_newTipGift());
+    _renderTipGifts();
+  });
 
   // Close on backdrop click
   if (modal) {
@@ -427,13 +443,18 @@ async function _handleSendTip() {
     return;
   }
 
-  let amountWei;
-  try {
-    amountWei = _tipPending?.amountWei ?? ethers.parseEther(String(amountInput?.value || '').trim());
-    if (amountWei <= 0n) throw new Error('Tip amount must be positive');
-  } catch {
-    _showStatus('tip-status', '⚠️ Enter a valid tip amount.', true);
-    return;
+  const asset = _tipPending?.intent?.asset ?? _tipAssetFor(tip);
+  // ETH in wei or USDC in 6-decimal units; NFT gifts carry no amount.
+  let amountWei = 0n;
+  if (asset !== 'nft') {
+    try {
+      const value = String(amountInput?.value || '').trim();
+      amountWei = _tipPending?.amountWei ?? (asset === 'usdc' ? ethers.parseUnits(value, 6) : ethers.parseEther(value));
+      if (amountWei <= 0n) throw new Error('Tip amount must be positive');
+    } catch {
+      _showStatus('tip-status', '⚠️ Enter a valid tip amount.', true);
+      return;
+    }
   }
 
   if (!window.ethereum) {
@@ -469,9 +490,11 @@ async function _handleSendTip() {
     if (_tipPending) {
       receipt = await provider.getTransactionReceipt(_tipPending.txHash);
     } else {
-      const intent = { ...tip, recipient: tip.wallet, amountWei: amountWei.toString() };
+      let intent = { ...tip, asset, recipient: tip.wallet, amountWei: amountWei.toString() };
       let tx;
-      if (tip.splits) {
+      if (asset !== 'eth') {
+        ({ tx, intent } = await _submitAssetTip({ tip, asset, amount: amountWei, signer, provider, expectedChain }));
+      } else if (tip.splits) {
         splitTipAmounts(amountWei, tip.splits);
         intent.payer = await signer.getAddress();
         if (await provider.getCode(tip.routerAddress) === '0x') throw new Error('The configured split tip contract is not deployed on this chain');
@@ -508,22 +531,27 @@ async function _handleSendTip() {
       throw new Error('Tip was not confirmed successfully');
     }
     if (receipt?.status !== 1) throw new Error('Tip confirmation is still pending');
-    if (tip.routerAddress) {
+    if (tip.routerAddress || asset !== 'eth') {
       if (receipt.hash?.toLowerCase() !== _tipPending.txHash.toLowerCase()) throw new Error('Receipt does not match the submitted tip transaction');
-      if (tip.splits) verifySplitTipReceipt({ receipt, routerAddress: tip.routerAddress, intent: _tipPending.intent, ethers });
-      else verifyAttributedTipReceipt({ receipt, routerAddress: tip.routerAddress, intent: _tipPending.intent, ethers });
+      const verify = { receipt, routerAddress: asset === 'eth' ? tip.routerAddress : tip.assetRouterAddress, intent: _tipPending.intent, ethers };
+      if (asset === 'usdc') verifyTokenTipReceipt(verify);
+      else if (asset === 'nft') verifyNftGiftReceipt(verify);
+      else if (tip.splits) verifySplitTipReceipt(verify);
+      else verifyAttributedTipReceipt(verify);
     }
+    const giftCount = _tipPending.intent.gifts?.length || 0;
     const txHash = receipt.hash || _tipPending.txHash;
     _tipPending = null;
     _tipSelectionState = 'sent';
-    _tipSelectionMessage = `✅ Tip confirmed for ${tip.artist} — ${tip.title}. ${tip.routerAddress ? 'DecentBusking source recorded on-chain. ' : ''}TX: ${_shortAddr(txHash)}`;
+    _tipSelectionMessage = `✅ ${asset === 'nft' ? '🎁' : 'Tip'} confirmed for ${tip.artist} — ${tip.title}. ${tip.routerAddress || asset !== 'eth' ? 'DecentBusking source recorded on-chain. ' : ''}TX: ${_shortAddr(txHash)}`;
+    if (asset === 'nft') _tipGifts = [];
     _showStatus('tip-status', _tipSelectionMessage);
     announcePaymentCelebration({
       chainId,
       txHash,
-      amountText: ethers.formatEther(amountWei),
-      assetText: 'ETH',
-      summary: `Tip to ${tip.artist} for ${tip.title} (${tip.splits ? `split ${tip.splits.length} ways` : _shortAddr(tip.wallet)})`,
+      amountText: asset === 'nft' ? String(giftCount) : asset === 'usdc' ? ethers.formatUnits(amountWei, 6) : ethers.formatEther(amountWei),
+      assetText: asset === 'nft' ? `NFT gift${giftCount === 1 ? '' : 's'}` : asset === 'usdc' ? 'USDC' : 'ETH',
+      summary: `${asset === 'nft' ? 'Gift' : 'Tip'} to ${tip.artist} for ${tip.title} (${asset === 'nft' ? `${giftCount} NFT${giftCount === 1 ? '' : 's'}` : tip.splits ? `split ${tip.splits.length} ways` : _shortAddr(tip.wallet)})`,
       txLabel: 'Tip confirmed',
     });
   } catch (err) {
@@ -549,11 +577,189 @@ function _tipRoute({ source, bookingId, nft, split = false }) {
     throw new Error('Tip attribution is configured with an invalid contract; direct fallback is disabled');
   }
   if (routerAddress && chainId !== 8453) throw new Error('DecentBusking tip attribution is Base-only');
-  const nftId = routerAddress && source !== 'live' ? nftIdentity(nft) : undefined;
+  // USDC tips and NFT gifts use the v0.2 router for recordings; live tips stay ETH on the live ledger.
+  const assetRouter = cfg.tipSplitRouterAddress || '';
+  const assetRouterAddress = source !== 'live' && chainId === 8453 && /^0x[0-9a-fA-F]{40}$/.test(assetRouter) && !/^0x0{40}$/i.test(assetRouter) ? assetRouter : '';
+  const nftId = (routerAddress || assetRouterAddress) && source !== 'live' ? nftIdentity(nft) : undefined;
   if (nftId && nft.chainId !== undefined && nft.chainId !== chainId) throw new Error('The recording identity belongs to another chain');
-  const route = { source, bookingId, nftId, routerAddress, chainId, chainName: cfg.chainName || 'Base Mainnet' };
-  if (routerAddress) createTipContext(route);
+  const route = { source, bookingId, nftId, routerAddress, assetRouterAddress, chainId, chainName: cfg.chainName || 'Base Mainnet' };
+  if (routerAddress || assetRouterAddress) createTipContext(route);
   return route;
+}
+
+function _tipAssetFor(tip) {
+  return tip?.assetRouterAddress ? _tipAsset : 'eth';
+}
+
+function _tipOwners(tip) {
+  return tip?.splits ? tip.splits.map(part => part.recipient) : tip?.wallet ? [tip.wallet] : [];
+}
+
+function _newTipGift() {
+  return { collection: '', tokenId: '', amount: '1', recipient: 'all' };
+}
+
+const _NFT_PROBE_ABI = ['function supportsInterface(bytes4) view returns (bool)'];
+const _ERC721_GIFT_ABI = [
+  'function ownerOf(uint256) view returns (address)', 'function getApproved(uint256) view returns (address)',
+  'function isApprovedForAll(address,address) view returns (bool)', 'function approve(address,uint256)',
+];
+const _ERC1155_GIFT_ABI = [
+  'function balanceOf(address,uint256) view returns (uint256)', 'function isApprovedForAll(address,address) view returns (bool)',
+  'function setApprovalForAll(address,bool)',
+];
+
+async function _nftStandard(collection, provider) {
+  const probe = new ethers.Contract(collection, _NFT_PROBE_ABI, provider);
+  try {
+    if (await probe.supportsInterface('0x80ac58cd')) return NFT_STANDARDS.erc721;
+    if (await probe.supportsInterface('0xd9b67a26')) return NFT_STANDARDS.erc1155;
+  } catch { /* not ERC-165 */ }
+  throw new Error(`${_shortAddr(collection)} is not an ERC-721 or ERC-1155 collection`);
+}
+
+async function _submitAssetTip({ tip, asset, amount, signer, provider, expectedChain }) {
+  const router = tip.assetRouterAddress;
+  if (!router) throw new Error('USDC tips and NFT gifts are not available for this song');
+  if (await provider.getCode(router) === '0x') throw new Error('The configured tip contract is not deployed on this chain');
+  const payer = await signer.getAddress();
+  const intent = { ...tip, asset, payer, recipient: tip.wallet };
+  const context = createTipContext(intent);
+  const contract = new ethers.Contract(router, TIP_ASSET_ABI, signer);
+  const options = { chainId: expectedChain };
+  if (asset === 'usdc') {
+    if (!await contract.allowedTokens(BASE_USDC_ADDRESS)) throw new Error('USDC tips are paused right now');
+    if (tip.splits) splitTipAmounts(amount, tip.splits);
+    intent.token = BASE_USDC_ADDRESS;
+    intent.amountUnits = amount.toString();
+    const usdc = new ethers.Contract(BASE_USDC_ADDRESS, USDC_BROWSER_ABI, signer);
+    if (await usdc.balanceOf(payer) < amount) throw new Error('Not enough USDC in this wallet');
+    if (await usdc.allowance(payer, router) < amount) {
+      _showStatus('tip-status', `⏳ 1/2 · Approve exactly ${ethers.formatUnits(amount, 6)} USDC for this tip…`);
+      await (await usdc.approve(router, amount, options)).wait();
+      await waitForAllowance(usdc, payer, router, amount);
+    }
+    _showStatus('tip-status', '⏳ Confirm the tip in your wallet…');
+    const tx = tip.splits
+      ? await contract.tipTokenSplit(BASE_USDC_ADDRESS, tip.splits.map(part => part.recipient), tip.splits.map(part => part.shareBps),
+        amount, context.sourceKind, context.contextRef, options)
+      : await contract.tipToken(BASE_USDC_ADDRESS, tip.wallet, amount, context.sourceKind, context.contextRef, options);
+    return { tx, intent };
+  }
+
+  const owners = _tipOwners(tip);
+  const standards = new Map();
+  for (const row of _tipGifts) {
+    const key = String(row.collection || '').trim().toLowerCase();
+    if (!ethers.isAddress(key)) throw new Error('Enter a valid NFT collection address');
+    if (!standards.has(key)) standards.set(key, await _nftStandard(key, provider));
+  }
+  const expanded = _tipGifts.flatMap(row => {
+    const collection = ethers.getAddress(String(row.collection).trim());
+    const standard = standards.get(collection.toLowerCase());
+    // The router refuses self-gifts, so a co-owner gifting "all owners" skips their own wallet.
+    const recipients = row.recipient === 'all' ? owners.filter(owner => owner.toLowerCase() !== payer.toLowerCase()) : [row.recipient];
+    if (!recipients.length || recipients.some(owner => owner.toLowerCase() === payer.toLowerCase())) throw new Error('You cannot gift an NFT to yourself');
+    if (standard === NFT_STANDARDS.erc721 && recipients.length > 1) throw new Error('An ERC-721 NFT can go to one owner only');
+    return recipients.map(recipient => ({ collection, standard, tokenId: String(row.tokenId).trim(), amount: standard === NFT_STANDARDS.erc721 ? '1' : String(row.amount).trim(), recipient }));
+  });
+  const gifts = normalizeNftGifts(expanded, owners);
+  intent.gifts = gifts;
+  const needs1155 = new Map();
+  for (const gift of gifts) {
+    if (gift.standard === NFT_STANDARDS.erc721) {
+      const nft = new ethers.Contract(gift.collection, _ERC721_GIFT_ABI, signer);
+      if ((await nft.ownerOf(gift.tokenId)).toLowerCase() !== payer.toLowerCase()) throw new Error(`You do not own NFT #${gift.tokenId}`);
+      if ((await nft.getApproved(gift.tokenId)).toLowerCase() !== router.toLowerCase() && !await nft.isApprovedForAll(payer, router)) {
+        _showStatus('tip-status', `⏳ Approve NFT #${gift.tokenId} for this gift…`);
+        await (await nft.approve(router, gift.tokenId, options)).wait();
+      }
+    } else {
+      const key = `${gift.collection.toLowerCase()}:${gift.tokenId}`;
+      needs1155.set(key, (needs1155.get(key) || 0n) + BigInt(gift.amount));
+    }
+  }
+  const approved1155 = new Set();
+  for (const [key, total] of needs1155) {
+    const [collection, tokenId] = key.split(':');
+    const nft = new ethers.Contract(collection, _ERC1155_GIFT_ABI, signer);
+    if (await nft.balanceOf(payer, tokenId) < total) throw new Error(`You hold fewer than ${total} of NFT #${tokenId}`);
+    if (approved1155.has(collection) || await nft.isApprovedForAll(payer, router)) { approved1155.add(collection); continue; }
+    _showStatus('tip-status', `⏳ Allow the tip contract to send from ${_shortAddr(collection)}…`);
+    await (await nft.setApprovalForAll(router, true, options)).wait();
+    approved1155.add(collection);
+  }
+  _showStatus('tip-status', '⏳ Confirm the gift in your wallet…');
+  const tx = await contract.giftNfts(gifts.map(gift => [gift.collection, gift.standard, gift.tokenId, gift.amount, gift.recipient]),
+    context.sourceKind, context.contextRef, options);
+  return { tx, intent };
+}
+
+function _renderTipAsset() {
+  const picker = document.getElementById('tip-asset-picker');
+  const available = Boolean(_tipSnapshot?.assetRouterAddress);
+  const asset = available ? _tipAsset : 'eth';
+  const locked = _tipBusy || Boolean(_tipPending);
+  if (picker) {
+    picker.hidden = !available;
+    picker.querySelectorAll('[data-tip-asset]').forEach(button => {
+      button.setAttribute('aria-checked', String(button.dataset.tipAsset === asset));
+      button.disabled = locked;
+    });
+  }
+  const amountField = document.getElementById('tip-amount-field');
+  const giftField = document.getElementById('tip-gift-field');
+  if (amountField) amountField.hidden = asset === 'nft';
+  if (giftField) giftField.hidden = asset !== 'nft';
+  const unit = document.getElementById('tip-amount-unit');
+  if (unit) unit.textContent = asset === 'usdc' ? '(USDC)' : '(ETH)';
+  const estimate = document.getElementById('tip-usdc-estimate');
+  if (estimate) estimate.hidden = asset !== 'eth';
+  if (asset === 'nft') _renderTipGifts();
+}
+
+function _renderTipGifts() {
+  const list = document.getElementById('tip-gift-list');
+  if (!list) return;
+  const owners = _tipOwners(_tipSnapshot);
+  const shares = new Map((_tipSnapshot?.splits || []).map(part => [part.recipient.toLowerCase(), part.shareBps]));
+  const locked = _tipBusy || Boolean(_tipPending);
+  list.replaceChildren(..._tipGifts.map((gift, index) => {
+    const row = document.createElement('li');
+    row.className = 'tip-gift-row';
+    const field = (name, placeholder, attrs = {}) => {
+      const input = document.createElement('input');
+      Object.assign(input, { value: gift[name], placeholder, disabled: locked, ...attrs });
+      input.dataset.gift = name;
+      input.setAttribute('aria-label', placeholder);
+      input.addEventListener('input', () => { gift[name] = input.value; });
+      return input;
+    };
+    const recipient = document.createElement('select');
+    recipient.disabled = locked;
+    recipient.setAttribute('aria-label', 'Gift to');
+    const choices = owners.length > 1 ? [['all', '👥 All owners']] : [];
+    owners.forEach(owner => choices.push([owner, `${_shortAddr(owner)}${shares.has(owner.toLowerCase()) ? ` · ${shares.get(owner.toLowerCase()) / 100}%` : ''}`]));
+    if (!choices.some(([value]) => value === gift.recipient)) gift.recipient = choices[0]?.[0] || '';
+    choices.forEach(([value, label]) => recipient.append(new Option(label, value, false, value === gift.recipient)));
+    recipient.addEventListener('change', () => { gift.recipient = recipient.value; });
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '✕';
+    remove.disabled = locked;
+    remove.setAttribute('aria-label', 'Remove this NFT');
+    remove.addEventListener('click', () => {
+      _tipGifts.splice(index, 1);
+      if (!_tipGifts.length) _tipGifts.push(_newTipGift());
+      _renderTipGifts();
+    });
+    row.append(field('collection', 'Collection 0x…', { spellcheck: false, autocomplete: 'off' }),
+      field('tokenId', 'Token #', { inputMode: 'numeric' }), field('amount', 'Qty', { inputMode: 'numeric', title: 'ERC-1155 quantity (ERC-721 is always 1)' }),
+      recipient, remove);
+    return row;
+  }));
+  const add = document.getElementById('tip-gift-add');
+  if (add) add.disabled = locked || _tipGifts.length >= 32;
 }
 
 const _DJUKE_SONG_ABI = ['function getSong(bytes32) view returns ((string audioURI,bool enabled,address[] recipients,uint16[] sharesBps))'];
@@ -655,12 +861,20 @@ function _renderTipState() {
   if (songEl) songEl.textContent = track?.title || 'No song playing';
   if (positionEl) positionEl.textContent = _tipHistoryLabel();
   const routeEl = document.getElementById('tip-route');
-  if (routeEl) routeEl.textContent = _tipSnapshot?.splits
+  const asset = _tipAssetFor(_tipSnapshot);
+  _renderTipAsset();
+  if (routeEl) routeEl.textContent = asset === 'nft'
+    ? '🎁 Straight from your wallet to the owners you pick.'
+    : asset === 'usdc' && _tipSnapshot?.splits
+    ? `$ Split between ${_tipSnapshot.splits.length} song owners, matching the song's on-chain split.`
+    : asset === 'usdc'
+    ? '$ 100% to the artist via the DecentBusking tip contract.'
+    : _tipSnapshot?.splits
     ? `Split between ${_tipSnapshot.splits.length} song owners via the DecentBusking tip contract, matching the song's on-chain split.`
     : _tipSnapshot?.routerAddress
     ? `100% to the artist via the DecentBusking tip contract. On-chain source: ${_tipSnapshot.source === 'live' ? 'live performance' : _tipSnapshot.source === 'archive' ? 'archive recording' : 'radio recording'}.`
     : 'Legacy direct ETH tip. No DecentBusking source is recorded on-chain until the tip contract is enabled.';
-  if (sendBtn) sendBtn.textContent = _tipPending ? 'Recheck tip' : '💸 Send Tip';
+  if (sendBtn) sendBtn.textContent = _tipPending ? 'Recheck tip' : asset === 'nft' ? '🎁 Send Gifts' : '💸 Send Tip';
   _syncTipNavState();
   if (_tipSelectionState === 'loading') {
     _showStatus('tip-status', _tipSelectionMessage || 'Looking up this song\'s tip wallet...');

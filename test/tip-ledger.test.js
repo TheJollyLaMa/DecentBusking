@@ -16,7 +16,8 @@ async function fixture(options = {}) {
     getTransactionReceipt: async hash => state.receipts.get(hash),
     getLogs: async filter => {
       state.reads.push(filter);
-      return state.logs.filter(log => log.blockNumber >= filter.fromBlock && log.blockNumber <= filter.toBlock);
+      return state.logs.filter(log => log.blockNumber >= filter.fromBlock && log.blockNumber <= filter.toBlock &&
+        (!filter.topics?.[0] || [].concat(filter.topics[0]).includes(log.topics[0])));
     },
   };
   function add({ hash = ethers.id('tip'), blockNumber = 2, index = 0, amount = 5n,
@@ -394,4 +395,52 @@ test('checkpoint history retains native tips as distinct event observations rath
   assert.equal(events.length, 1);
   assert.equal(events[0].type, 'financial');
   assert.equal(events[0].record.logIndex, 1);
+});
+
+test('the v0.2 ledger indexes USDC tips and NFT gifts with per-asset totals and restores them from checkpoints', async () => {
+  const { TIP_ASSET_ABI } = await import('../js/tip-protocol.mjs');
+  const assetIface = new ethers.Interface(TIP_ASSET_ABI);
+  const usdc = `0x${'83'.repeat(20)}`;
+  const ref = `decentbusking:radio:8453:${collection}:80`, contextId = ethers.id(ref);
+  const addAsset = (state, name, args, hash, index = 0, blockNumber = 3) => {
+    const log = { ...assetIface.encodeEventLog(name, args), address: router, index, transactionHash: hash, blockNumber };
+    state.logs.push(log);
+    const receipt = state.receipts.get(hash) || { status: 1, hash, blockNumber,
+      blockHash: ethers.id(`block:${blockNumber}:${state.epoch}`), logs: [] };
+    receipt.logs.push(log);
+    state.receipts.set(hash, receipt);
+  };
+  const seed = state => {
+    addAsset(state, 'TokenTipSent', [sender, recipient, contextId, usdc, 1, 2_500_000n, ref], ethers.id('usdc'));
+    addAsset(state, 'TokenTipSent', [sender, recipient, contextId, usdc, 1, 500_000n, ref], ethers.id('usdc'), 1);
+    addAsset(state, 'NftGiftSent', [sender, recipient, contextId, collection, 1, 5n, 2n, 1, ref], ethers.id('gift'));
+    addAsset(state, 'NftGiftSent', [sender, recipient, contextId, collection, 0, 9n, 1n, 1, ref], ethers.id('gift'), 1);
+  };
+  const { ledger, state, add, createTipLedger, provider } = await fixture({ assets: true });
+  add({ amount: 7n, sourceKind: 1, contextRef: ref });
+  seed(state);
+  await ledger.initialize();
+  assert.equal(state.reads[0].topics[0].length, 3);
+  const result = ledger.getState({ wallet: recipient });
+  assert.equal(result.total, 5);
+  assert.equal(result.attributedWei, '7');
+  assert.deepEqual(result.tokenTotals, { [usdc]: { attributedUnits: '3000000', unattributedUnits: '0' } });
+  assert.deepEqual(result.nftGifts, { attributed: 2, unattributed: 0 });
+  assert.deepEqual(result.entries.filter(entry => entry.kind === 'nft').map(entry => [entry.standard, entry.tokenId, entry.amount]).sort(),
+    [[0, '9', '1'], [1, '5', '2']]);
+
+  const restored = createTipLedger({ provider, routerAddress: router, startBlock: 1, assets: true,
+    resolveContext: async () => ({ status: 'verified' }), restore: async () => state.backup });
+  await restored.initialize();
+  assert.equal(restored.getState().total, 5);
+  const ethOnly = createTipLedger({ provider, routerAddress: router, startBlock: 1,
+    resolveContext: async () => ({ status: 'verified' }), restore: async () => state.backup });
+  await assert.rejects(ethOnly.initialize(), /Invalid tip ledger checkpoint entry/);
+
+  const legacy = await fixture();
+  seed(legacy.state);
+  legacy.add({ hash: ethers.id('usdc'), blockNumber: 3, index: 2, amount: 4n, sourceKind: 1, contextRef: ref });
+  await legacy.ledger.initialize();
+  assert.equal(legacy.ledger.getState().total, 1);
+  assert.equal(legacy.ledger.getState().tokenTotals, undefined);
 });
