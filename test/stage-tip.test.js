@@ -41,7 +41,8 @@ function setup({ resolve = async () => null, receipt = async () => ({ status: 1 
   liveTarget = async () => null, radioState = null, serviceUrl = '', routerAddress = '',
   protocol = {}, pendingReceipt = receipt, contractCode = '0x01', ethersImpl } = {}) {
   const ids = ['hat-btn', 'tip-modal', 'tip-to-label', 'tip-artist', 'tip-song', 'tip-status',
-    'tip-track-position', 'tip-prev-btn', 'tip-next-btn', 'tip-send-btn', 'tip-cancel-btn', 'tip-amount', 'tip-route'];
+    'tip-track-position', 'tip-prev-btn', 'tip-next-btn', 'tip-send-btn', 'tip-cancel-btn', 'tip-amount', 'tip-route',
+    'tip-usdc-estimate'];
   const elements = Object.fromEntries(ids.map(id => [id, element()]));
   const listeners = new Map();
   const document = {
@@ -52,8 +53,10 @@ function setup({ resolve = async () => null, receipt = async () => ({ status: 1 
   const transfers = [];
   const celebrations = [];
   const contractTips = [];
+  const copied = [];
   const context = vm.createContext({
-    console, document, setTimeout, ...protocol,
+    console, document, setTimeout, clearTimeout, ...protocol,
+    navigator: { clipboard: { writeText: async value => { copied.push(value); } } },
     window: { ethereum: {}, _currentBuskerWallet: walletB, DecentConfig: { ipfsUploadServiceUrl: serviceUrl, tipRouterAddress: routerAddress },
       _wallet: { signer: {
         getAddress: async () => walletB,
@@ -87,7 +90,7 @@ function setup({ resolve = async () => null, receipt = async () => ({ status: 1 
     initRadioSync() {}, openMintModal() {},
   });
   vm.runInContext(`${source}\ninitStage();`, context);
-  return { elements, transfers, contractTips, celebrations, context,
+  return { elements, transfers, contractTips, celebrations, copied, context,
     mode: detail => listeners.get('radio-source-mode-change')({ detail }),
     play: detail => listeners.get('dbusk-now-playing')({ detail }),
     stop: () => listeners.get('dbusk-now-playing-stopped')(),
@@ -269,7 +272,7 @@ test('all cached stage importers resolve to the live-tip controller', () => {
     const references = [...importer.matchAll(/['"](\.\/stage\.js[^'"]*)['"]/g)];
     assert.ok(references.length);
     for (const [, reference] of references) {
-      assert.equal(imports[reference.replace('./', './js/')], './js/stage.js?v=20261122-buffered-tips');
+      assert.equal(imports[reference.replace('./', './js/')], './js/stage.js?v=20261122-tip-quote');
     }
   }
   assert.equal(imports['./js/space.js?v=20261030-ad-cutoff'], './js/space.js?v=20261122-hls-tip-match');
@@ -356,6 +359,21 @@ test('hat shows the playing artist/song and first 6 + four ENS icons + last 4 of
   assert.equal(celebrations[0].amountText, '0.01');
   assert.equal(celebrations[0].assetText, 'ETH');
   assert.match(celebrations[0].summary, /Artist A.*Song A.*0x1212/);
+});
+
+test('tip recipient wallet is copyable and ETH amount shows an approximate USDC value', async () => {
+  const { elements, play, copied, context } = setup();
+  play(songA);
+  vm.runInContext('_tipEthUsdcRate = 2500;', context);
+  await elements['hat-btn'].click();
+  elements['tip-amount'].value = '0.5';
+  await vm.runInContext('_renderTipUsdcEstimate()', context);
+  assert.match(elements['tip-usdc-estimate'].textContent, /1,250\.00 USDC/);
+  const copy = elements['tip-to-label'].children.find(child => child.className === 'tip-wallet-copy');
+  assert.ok(copy);
+  await copy.click();
+  assert.deepEqual(copied, [walletA]);
+  assert.equal(copy.textContent, 'Copied');
 });
 
 test('played-song arrows move through history without changing playback', async () => {
