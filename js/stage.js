@@ -617,6 +617,15 @@ async function _selectTipHistoryEntry(index, { openModal = false } = {}) {
       _syncTipNavState();
       return;
     }
+    if (Array.isArray(nft?.creatorSplits) && nft.creatorSplits.length > 1) {
+      _tipSnapshot = null;
+      _tipSelectionState = 'error';
+      _tipSelectionMessage = 'This recording has multiple designated owner shares. Atomic split tips are not enabled yet, so no tip was sent.';
+      _renderTipWallet('');
+      _showStatus('tip-status', _tipSelectionMessage, true);
+      _syncTipNavState();
+      return;
+    }
     track.nft = nft;
     _tipHistory[index] = { ...entry, track };
     _tipSnapshot = Object.freeze({

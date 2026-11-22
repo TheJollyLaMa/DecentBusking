@@ -60,3 +60,12 @@ test('buffered tips bind the audible act, not the next studio act or the previou
   await assert.rejects(read(state, { audibleBroadcast: { ...audibleBroadcast,
     program: { ...program, playId: 'invented' } } }), /changed/);
 });
+
+test('ordinary buffered radio skips live-performer timing and returns to NFT tip lookup', async () => {
+  const state = { serverTime: 25000, liveAudio: null, activeShow: { type: 'normal_rotation' },
+    publicBroadcast: { selected: true, programHistory: [{
+      at: 1000, playId: 'recording:1', trackId: 'recording-1', live: false, isDevert: false,
+    }] } };
+  assert.equal(await read(state, { audibleBroadcast: null }), null);
+  assert.equal(await read(state, { audibleBroadcast: { at: 12000, program: state.publicBroadcast.programHistory[0] } }), null);
+});

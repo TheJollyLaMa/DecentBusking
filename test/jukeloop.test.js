@@ -1718,7 +1718,8 @@ test('site radio waits until Discord is audible instead of playing a premature i
 
 test('anonymous site votes are idempotent per browser and only accepted for the active play', async (t) => {
   const { createJukeLoopSession, submitJukeLoopVote } = await import(pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js')).href);
-  const session = createJukeLoopSession('site-vote-test', { voiceChannel: { guild: { id: 'site-vote-test' } }, textChannel: {}, client: {} });
+  const session = createJukeLoopSession('site-vote-test', { websitePlayback: true,
+    voiceChannel: { guild: { id: 'site-vote-test' } }, textChannel: {}, client: {} });
   t.after(() => session.destroy());
   session._nowPlaying = { playId: 'track:1000', trackId: 'track', audible: true };
   const calls = [];
@@ -1732,6 +1733,19 @@ test('anonymous site votes are idempotent per browser and only accepted for the 
   session._nowPlaying = { playId: 'track:2000', trackId: 'track', audible: true };
   assert.equal((await submitJukeLoopVote({ ...ballot, playId: 'track:2000', vote: -1 }, saveVote)).duplicate, false);
   assert.deepEqual(calls, [['track', 1], ['track', -1]]);
+  const broadcast = { selected: true, programHistory: [{ playId: 'track:1000', trackId: 'track',
+    at: Date.now() - 15000, live: false, isDevert: false }] };
+  assert.equal((await submitJukeLoopVote({ ...ballot, voterId: 'buffered-listener-1234' },
+    saveVote, broadcast)).duplicate, false);
+  assert.deepEqual(calls.at(-1), ['track', 1], 'buffered listeners vote on the exact older broadcast track');
+  assert.equal((await submitJukeLoopVote({ ...ballot, voterId: 'buffered-listener-1234' },
+    saveVote, broadcast)).duplicate, true);
+  await assert.rejects(submitJukeLoopVote({ ...ballot, voterId: 'expired-listener-12345' }, saveVote, {
+    selected: true, programHistory: [{ ...broadcast.programHistory[0], at: Date.now() - 120001 }],
+  }), /ended/);
+  await assert.rejects(submitJukeLoopVote({ ...ballot, voterId: 'live-listener-123456' }, saveVote, {
+    selected: true, programHistory: [{ ...broadcast.programHistory[0], live: true }],
+  }), /ended/);
 });
 
 test('Discord reaction synchronization preserves the event timestamp for payroll-week attribution', async () => {

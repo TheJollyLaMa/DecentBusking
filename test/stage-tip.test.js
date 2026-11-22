@@ -246,6 +246,21 @@ test('archive selection and confirmed ordinary radio retain their existing NFT t
   assert.equal(elements['tip-to-label'].title, walletA);
 });
 
+test('recordings with multiple creator shares fail closed instead of sending a 100% tip', async () => {
+  const { elements, play, transfers, contractTips } = setup({
+    serviceUrl: 'https://worker.test', liveTarget: async () => null,
+    resolve: async () => ({ ...songA.nft, creatorSplits: [
+      { wallet: walletA, shareBps: 6000 }, { wallet: walletB, shareBps: 4000 },
+    ] }),
+  });
+  play({ ...songA, source: 'radio', nft: null });
+  await elements['hat-btn'].click();
+  assert.match(elements['tip-status'].textContent, /multiple designated owner shares/);
+  assert.equal(elements['tip-send-btn'].disabled, true);
+  await elements['tip-send-btn'].click();
+  assert.equal(transfers.length + contractTips.length, 0);
+});
+
 test('all cached stage importers resolve to the live-tip controller', () => {
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const imports = JSON.parse(html.match(/<script type="importmap">\s*([\s\S]*?)<\/script>/)[1]).imports;
@@ -254,7 +269,7 @@ test('all cached stage importers resolve to the live-tip controller', () => {
     const references = [...importer.matchAll(/['"](\.\/stage\.js[^'"]*)['"]/g)];
     assert.ok(references.length);
     for (const [, reference] of references) {
-      assert.equal(imports[reference.replace('./', './js/')], './js/stage.js?v=20261119-quiet-status');
+      assert.equal(imports[reference.replace('./', './js/')], './js/stage.js?v=20261122-buffered-tips');
     }
   }
 });
