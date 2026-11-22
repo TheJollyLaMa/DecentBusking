@@ -197,11 +197,16 @@ test('entry points expose the admin section and public offer while suppressing a
   const root = require('node:path').join(__dirname, '..');
   const html = fs.readFileSync(root + '/index.html', 'utf8');
   const admin = fs.readFileSync(root + '/js/admin.js', 'utf8');
+  const leftAnkh = fs.readFileSync(root + '/js/components/header-admin-inject.js', 'utf8');
   const ui = fs.readFileSync(root + '/js/promotions-ui.mjs', 'utf8');
   const tutorial = fs.readFileSync(root + '/js/tutorial.js', 'utf8');
   assert.match(html, /id="admin-promotions"/);
   assert.match(admin, /mountAdminPromotions/);
   assert.match(admin, /mountPublicPromotion\(\)/);
+  assert.match(leftAnkh, /📻 Radio Programming/);
+  assert.match(leftAnkh, /section: 'radio-programming'/);
+  assert.match(admin, /event\?\.detail\?\.section !== 'radio-programming'/);
+  assert.match(admin, /_radioScheduleSection\.scrollIntoView/);
   assert.match(tutorial, /\.has\('promotion'\)\) return/);
   assert.match(ui, /newYorkInputToUtc/);
   assert.match(ui, /data-promo-curated/);

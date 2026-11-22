@@ -149,12 +149,20 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── Open / Close ──────────────────────────────────────────────────────────────
-function _openModal() {
+async function _openModal(event) {
   if (!isAdminWallet()) return;
   _adminOpen = true;
   _modal?.classList.remove('hidden');
   _refreshPaymentLedger();
-  return _connectWallet();
+  await _connectWallet();
+  if (event?.detail?.section !== 'radio-programming' || _modal?.classList.contains('hidden') ||
+      _radioScheduleSection?.classList.contains('hidden')) return;
+  _radioScheduleSection.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  const heading = _radioScheduleSection.querySelector('h3');
+  if (heading) {
+    heading.tabIndex = -1;
+    heading.focus({ preventScroll: true });
+  }
 }
 
 function _showPaymentLedger(ledger) {
