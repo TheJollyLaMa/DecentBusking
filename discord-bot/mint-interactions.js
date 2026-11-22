@@ -46,6 +46,10 @@ export function createMintRequestInteractionHandler({ getPlaylist, requestTrackM
       await interaction.reply({ content: 'Only the original uploader can request this NFT.', flags: MessageFlags.Ephemeral });
       return true;
     }
+    if (button && track.mintStatus === 'requested') {
+      await interaction.reply({ content: `**${track.title || 'This track'}** is already in the owner approval queue. Nothing else to click. Track ID: \`${track.trackId}\`.`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
     if (track.pinStatus !== 'pinned' || !track.ipfsCid || track.mintStatus === 'minted') {
       await interaction.reply({ content: 'This track is not ready for a mint request, or has already been minted.', flags: MessageFlags.Ephemeral });
       return true;
@@ -92,23 +96,35 @@ export function createMintRequestInteractionHandler({ getPlaylist, requestTrackM
       await interaction.reply({ content: 'Artwork attachments must be PNG, JPEG, WebP, or GIF, up to 10 MB. For larger images, use the artwork file CID field.', flags: MessageFlags.Ephemeral });
       return true;
     }
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: 'Saving your NFT request and artwork…', flags: MessageFlags.Ephemeral });
+    let artworkCid, queued, artworkDescription;
     try {
-      const artworkCid = suppliedArtworkCid || (artwork ? await uploadArtwork(artwork)
+      artworkCid = suppliedArtworkCid || (artwork ? await uploadArtwork(artwork)
         : track.artworkCid || await getDefaultArtwork(interaction.user));
       if (!artworkCid) throw new Error('Could not archive your profile image; retry or upload an artwork image');
-      const queued = requestTrackMint(track.trackId, interaction.user.id, wallet, artworkCid);
+      queued = requestTrackMint(track.trackId, interaction.user.id, wallet, artworkCid);
       if (!queued) throw new Error('The track changed or was minted while the request was being submitted');
       await waitForPersistence();
+      artworkDescription = suppliedArtworkCid ? 'your IPFS image' : artwork ? 'your uploaded image'
+        : track.artworkCid ? 'existing image' : 'your Discord profile image';
+    } catch (error) {
+      console.warn(`[mint-request] Track ${track.trackId} request failed:`, error.message);
+      const outcome = queued
+        ? `Could not confirm durable queueing: ${error.message}\nThe request may already be saved. Do not click again; the owner queue can confirm it.`
+        : `Could not submit the mint request: ${error.message}\nNothing was queued. Click **Request NFT** again to retry.`;
+      await interaction.editReply({ content: outcome, allowedMentions: { parse: [] } })
+        .catch(() => {});
+      return true;
+    }
+    try {
       await interaction.editReply({ content: `Requested owner approval for **${queued.title}**.\n` +
         `Artist and royalty wallet: \`${wallet}\`\n` +
-        `Artwork: ${suppliedArtworkCid ? 'your IPFS image' : artwork ? 'your uploaded image' : track.artworkCid ? 'existing image' : 'your Discord profile image'}.\nNo NFT has been minted yet.`,
+        `Artwork: ${artworkDescription}.\nNo NFT has been minted yet.`,
       embeds: [new EmbedBuilder().setTitle('Selected NFT artwork').setImage(`https://gateway.pinata.cloud/ipfs/${artworkCid}`)],
       allowedMentions: { parse: [] } });
     } catch (error) {
-      console.warn(`[mint-request] Track ${track.trackId} request failed:`, error.message);
-      await interaction.editReply({ content: `Could not submit the mint request: ${error.message}\n` +
-        'Nothing was queued. Click **Request NFT** again to retry.', allowedMentions: { parse: [] } });
+      console.error('[mint-request] Queue saved, but Discord confirmation failed:', error.message);
+      await interaction.followUp({ content: `Your NFT request for **${queued.title}** was saved and is pending owner approval. Track ID: \`${queued.trackId}\`. Nothing else to click.`, flags: MessageFlags.Ephemeral }).catch(() => {});
     }
     return true;
   };

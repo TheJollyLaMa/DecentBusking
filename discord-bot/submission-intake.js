@@ -143,9 +143,11 @@ export function createSubmissionIntake({
         return onChoose({ choice: 'change', record, interaction });
       }
       if (action === 'continue') {
+        await interaction.deferUpdate();
         return finish(record, record.defaultKind, interaction, { resume: true });
       }
       if (action === 'choice' && (choice === 'song' || choice === 'advert')) {
+        if (choice === 'advert') await interaction.deferUpdate();
         return finish(record, choice, interaction);
       }
       return false;

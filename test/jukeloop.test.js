@@ -405,6 +405,33 @@ test('real audio frames advance from an ad back to music without a Discord voice
   assert.notEqual(getActiveJukeLoopSession(), session, 'headless sessions unregister without a voice guild');
 });
 
+test('a freshly minted track replaces only an ordinary prepared next slot', async () => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const { EventEmitter } = require('node:events');
+  const { AudioPlayerStatus } = require('../discord-bot/node_modules/@discordjs/voice');
+  const player = new EventEmitter();
+  player.state = { status: AudioPlayerStatus.Playing };
+  const session = new JukeLoopSession({ audioPlayer: player, websitePlayback: true, schedule: [] });
+  session._resolveShow = () => ({ type: 'normal_rotation' });
+  session._started = true;
+  let primed = 0, killed = 0;
+  session._primeNext = () => { primed++; };
+  session._preparedNext = { track: { trackId: 'ordinary' }, queueIndex: 0,
+    ffmpegProcess: { kill: () => { killed++; } } };
+  const track = { trackId: 'fresh-mint', mintStatus: 'minted', ipfsCid: 'bafy-fresh', plays: 0 };
+  assert.equal(session.queueMintedNext(track), true);
+  assert.equal(session._priorityMintTrack, track);
+  assert.equal(session._preparedNext, null);
+  assert.equal(killed, 1);
+  assert.equal(primed, 1);
+  session._preparedNext = { track: { trackId: 'paid' }, paid: { record: {} }, ffmpegProcess: { kill() {} } };
+  const second = { trackId: 'second-mint', mintStatus: 'minted', ipfsCid: 'bafy-second' };
+  assert.equal(session.queueMintedNext(second), true);
+  assert.equal(session._preparedNext.track.trackId, 'paid', 'protected paid playback remains prepared');
+  assert.equal(session._priorityMintTrack, second, 'fresh mint waits behind paid/protected programming');
+  session.destroy();
+});
+
 test('playlist counters schedule routine writes while pin/mint changes and persistence barriers remain durable', async t => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-playlist-checkpoint-'));
   process.env.JUKELOOP_PLAYLIST_PATH = path.join(tempDir, 'playlist.json');
