@@ -505,13 +505,16 @@ Release order: deploy the matching worker, verify `/api/creator/split-status`,
 then use the matching published frontend. Production authenticated APIs do not
 allow arbitrary localhost origins; use the public app for real signatures.
 
-Enter wallet/ENS, role, and percentage in each row. The total must be exactly
-100%, with 1–16 distinct nonzero wallets. Choose **Review changes** to resolve
-names and compare current and proposed payments. Editing any row invalidates
-that review. Create an approval request only after reviewing. Current payees
-approve through the shared link, then the admin applies the song change
-on-chain. Creating an approval request does not change payments. Credits and
-these shares affect DJuke artist payouts, not NFT ownership or ERC-2981 royalties.
+The editor shows the current split as a pie chart. Hover or focus a slice to
+open its ENS or wallet label and BaseScan link. Enter wallet/ENS, role, and
+percentage in each row; the total must be exactly 100%, with 1–16 distinct
+nonzero wallets. Choose **Review** to resolve names and show the proposed split.
+Editing any row invalidates that review. **Confirm** requests a gasless
+signature only after checking that the matching approval service is available.
+Current payees approve through the shared link, then the admin applies the song
+change on-chain. Creating an approval request does not change payments. Credits
+and these shares affect DJuke artist payouts, not NFT ownership or ERC-2981
+royalties.
 
 The v0.6 candidate treats an untouched single-payee song as using the album
 default when it joins an album, after that payee approves migration. Existing

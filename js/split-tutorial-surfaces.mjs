@@ -1,4 +1,5 @@
 import { createSplitEditor } from './creator-split-editor.mjs?v=20261025-song-splits';
+import { renderCreatorSplitPie } from './creator-split-pie.mjs?v=20261122-split-pies';
 
 export function createSplitTutorialSurfaces({ overlay, document: doc = document }) {
   const profile = doc.getElementById('creator-profile');
@@ -25,8 +26,9 @@ export function createSplitTutorialSurfaces({ overlay, document: doc = document 
     form.dataset.tutorialExample = '';
     form.prepend(note('Tutorial example — not your song, not saved. All actions are disabled.'));
     form.querySelector('[data-song-split-title]').textContent = 'Example song — collaborators & payments';
-    form.querySelector('[data-song-split-identity]').textContent = 'Illustrative recording · no on-chain song selected';
-    form.querySelector('[data-song-split-current]').textContent = 'Example current split: creator 100%';
+    renderCreatorSplitPie(form.querySelector('[data-song-split-current-chart]'), [
+      { wallet: '0x1111111111111111111111111111111111111111', shareBps: 10000 },
+    ], { label: 'Tutorial example current split', lookupName: async () => null, document: doc });
     const fieldset = form.querySelector('[data-song-split-editor]');
     fieldset.querySelector('legend').textContent = 'Proposed song split — tutorial example';
     fieldset.querySelectorAll(':scope > button:not([data-split-add])').forEach(node => node.remove());
@@ -145,7 +147,7 @@ export function createSplitTutorialSurfaces({ overlay, document: doc = document 
       if (hop === 2) return song.querySelector('[data-song-split-editor]');
       if (hop === 3) return song.querySelector('[data-song-split-review]');
       if (hop === 4) return approval;
-      return song.querySelector('[data-song-split-current]');
+      return song.querySelector('[data-song-split-current-chart]');
     },
     close() {
       if (!initialized) return;

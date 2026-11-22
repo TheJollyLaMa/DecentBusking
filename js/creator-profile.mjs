@@ -10,6 +10,7 @@ import { approveCreatorSplitProposal, createCreatorSplitProposal, fetchCreatorSp
 import { buildAlbumSplitTypedData, buildSongAlbumMigrationTypedData, buildSongSplitTypedData, resolveNftSongId } from './creator-splits.mjs?v=20261025-song-splits';
 import { audioCid, isMusicNft } from './nft-loader.js?v=20261025-song-identity';
 import { createSplitEditor } from './creator-split-editor.mjs?v=20261025-song-splits';
+import { renderCreatorSplitPie } from './creator-split-pie.mjs?v=20261122-split-pies';
 import { PENCIL_ICON } from './artwork-edit-badge.mjs';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs?v=20261030-ad-cutoff';
@@ -302,15 +303,20 @@ export function initCreatorProfile() {
   const albumForm = dialog.querySelector('[data-album-form]');
   const songSplitForm = dialog.querySelector('[data-song-split-form]');
   const songSplitTitle = dialog.querySelector('[data-song-split-title]');
-  const songSplitCurrent = dialog.querySelector('[data-song-split-current]');
-  const songSplitReview = dialog.querySelector('[data-song-split-review-text]');
+  const songSplitNotice = dialog.querySelector('[data-song-split-notice]');
+  const songSplitCurrentChart = dialog.querySelector('[data-song-split-current-chart]');
+  const songSplitReviewPanel = dialog.querySelector('[data-song-split-review-panel]');
+  const songSplitReviewChart = dialog.querySelector('[data-song-split-review-chart]');
+  const songSplitConfirm = dialog.querySelector('[data-song-split-propose]');
   let reviewedSongRows = null;
   const songEditor = createSplitEditor(dialog.querySelector('[data-song-split-editor]'), {
     resolveName: name => workerEnsProvider.resolveName(name),
     onChange: () => {
       reviewedSongRows = null;
-      songSplitReview.textContent = '';
-      songSplitForm.querySelector('[data-song-split-propose]').disabled = true;
+      songSplitReviewPanel.hidden = true;
+      songSplitReviewChart.replaceChildren();
+      songSplitConfirm.hidden = true;
+      songSplitConfirm.disabled = true;
     },
   });
   const albumEditor = createSplitEditor(dialog.querySelector('[data-album-split-editor]'), {
@@ -1202,30 +1208,31 @@ export function initCreatorProfile() {
       recipients: [...song.recipients], sharesBps: [...song.sharesBps].map(Number), nft,
       creatorAddress: String(nft.creator || nft.artist || '').toLowerCase() };
     setControls();
-    message(`Editing collaborators & payments for ${activeSong?.title || nft.name || nft.title}`);
+    message('');
     songSplitForm.hidden = false;
     dialog.querySelector('[data-song-section]').open = true;
     songSplitTitle.textContent = `Collaborators & payments: ${activeSong.title}`;
-    dialog.querySelector('[data-song-split-identity]').textContent =
-      `${nft.tokenId !== undefined ? `NFT #${nft.tokenId} · ` : ''}Song ID: ${activeSong.songId}`;
-    dialog.querySelector('[data-song-split-mode]').textContent = inAlbum
-      ? custom ? 'Custom song split. Album default changes will not overwrite this song.'
-        : 'Uses album default. Saving a song-specific split makes this song independent of future album defaults.'
-      : 'Standalone song. These changes apply only to this song.';
+    renderCreatorSplitPie(songSplitCurrentChart, activeSong.recipients.map((wallet, index) => ({
+      wallet, shareBps: activeSong.sharesBps[index],
+    })), { label: 'Current payout split' });
+    const canPropose = activeSong.recipients.some(wallet =>
+      wallet.toLowerCase() === window._wallet?.address?.toLowerCase()) ||
+      activeSong.creatorAddress === window._wallet?.address?.toLowerCase();
+    songSplitNotice.textContent = inAlbum
+      ? custom ? 'Custom song split; album defaults do not overwrite it.'
+        : 'Uses album defaults; a song-specific split becomes independent.'
+      : '';
+    if (!canPropose) songSplitNotice.textContent += ' Only a current payee or the NFT creator can request changes.';
     songSplitForm.elements.namedItem('songId').value = activeSong.songId;
     const positions = new Map((nft.creatorSplits || []).map(entry => [String(entry.wallet || entry.address).toLowerCase(), entry.position || entry.title || '']));
     songEditor.setRows(activeSong.recipients.map((wallet, index) => ({
       wallet, shareBps: activeSong.sharesBps[index], position: positions.get(wallet.toLowerCase()) || '',
     })));
-    songSplitCurrent.textContent = `Current on-chain split: ${activeSong.recipients.map((wallet, index) =>
-      `${wallet} · ${activeSong.sharesBps[index] / 100}%`).join(' / ')}${activeSong.recipients.some(wallet =>
-        wallet.toLowerCase() === window._wallet?.address?.toLowerCase()) ||
-        activeSong.creatorAddress === window._wallet?.address?.toLowerCase()
-        ? '' : ' · Only a current collaborator or the NFT creator can create an update proposal.'}`;
     if (inAlbum && config().djukeContractVersion !== '0.6') {
       activeSong = null;
-      songSplitCurrent.textContent += ' · Individual album-song overrides require DJuke v0.6; this version only supports album-wide changes.';
+      songSplitNotice.textContent = 'Song-specific album splits require DJuke v0.6.';
     }
+    songSplitNotice.hidden = !songSplitNotice.textContent;
     setControls();
     songSplitForm.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
@@ -1441,9 +1448,10 @@ export function initCreatorProfile() {
   songSplitForm.querySelector('[data-song-split-review]').addEventListener('click', () => run(async () => {
     if (!activeSong) throw new Error('Select a registered song in My NFTs first');
     const rows = await songEditor.resolve();
+    renderCreatorSplitPie(songSplitReviewChart, rows, { label: 'Proposed payout split' });
     reviewedSongRows = rows;
-    songSplitReview.textContent = `Proposed for "${activeSong.title}": ${rows.map(row =>
-      `${row.wallet} - ${row.shareBps / 100}%${row.position ? ` (${row.position})` : ''}`).join(' / ')}. Current payees must approve before the admin applies this on-chain.`;
+    songSplitReviewPanel.hidden = false;
+    songSplitConfirm.hidden = false;
   }));
   songSplitForm?.querySelector('[data-song-split-propose]')?.addEventListener('click', () => run(async () => {
     if (!activeSong) throw new Error('Open a registered DJuke song first');
@@ -1476,6 +1484,8 @@ export function initCreatorProfile() {
     });
     activeProposalId = response.request.requestId;
     renderSplitProposal(response.request);
+    reviewedSongRows = null;
+    songSplitConfirm.hidden = true;
     message(response.request.approvals.length === response.request.owners.length
       ? 'Your signature approved the proposal. All current payees have approved; the request is ready in the owner Admin queue. No payments have changed yet.'
       : 'Proposal saved. Share the approval link with the remaining current payees before the owner applies the split.');

@@ -61,7 +61,7 @@ function fixture() {
   admin.groups = new Map([['#admin-modal-inner > *', [mint]]]);
   nfts.selectors = new Map([['[data-my-nfts-items]', list]]);
   form.selectors = new Map([
-    ['[data-song-split-editor]', editor], ['[data-song-split-review]', review], ['[data-song-split-current]', current],
+    ['[data-song-split-editor]', editor], ['[data-song-split-review]', review], ['[data-song-split-current-chart]', current],
   ]);
   form.draft = 'Keep my actual song settings and unsubmitted edits';
   const ids = new Map([
