@@ -70,6 +70,9 @@ window.DecentConfig = {
   ipfsUploadProvider: "pinata",
   ipfsUploadServiceUrl: "https://decentbusking.onrender.com",
   dmtvEscrowAddress: "0x82a21D2039C239d141a26Fa82999bFC2b295aba6",
+  // DMTv pays split songs to a deterministic split wallet from this factory; empty disables paid split videos.
+  songSplitWalletFactory: "0x05D1151d75b4369343f983F5F0233bdcEc5ba84A",
+  songSplitWalletImplementation: "0xC42D8aAE0EF078cAe573824CA784Da2e9743Da6D",
   ipfsApiUrl: "http://127.0.0.1:5001",
   ipfsGateway: "https://gateway.pinata.cloud/ipfs/",
 

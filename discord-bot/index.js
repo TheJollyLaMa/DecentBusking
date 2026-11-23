@@ -52,6 +52,7 @@ import {
 import http from 'http'; 
 import fs from 'node:fs';
 import { Contract, Interface, Wallet, id } from 'ethers';
+import * as ethers from 'ethers';
 import { createPaymentLedger, verifyRepositoryPayment } from './payment-ledger.js';
 import { createTipLedger } from './tip-ledger.js';
 import { createHistoricalTipBookingReader, createTipContextResolver } from './tip-context.js';
@@ -93,6 +94,8 @@ import { createDmtvCatalogRegistrar, dmtvCatalogEntries } from './dmtv-catalog.j
 import { SETTLEMENT_ROUTER_ADDRESS as DMTV_ROUTER } from '../js/fund-contribution.mjs';
 import { BASE_USDC_ADDRESS as DMTV_USDC } from '../js/settlement-funds.mjs';
 import { createDmtvEscrowRuntime } from './dmtv-escrow.js';
+import { createSongSplitPayouts } from './song-split-payouts.js';
+import { songSplitPayeeResolver, SONG_SPLIT_WALLET_FACTORY_ABI } from '../js/song-split-wallet.mjs';
 import { createDmtvStation } from './dmtv-station.js';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
 import { createCheckpointMirror } from './checkpoint-mirror.js';
@@ -1581,6 +1584,9 @@ async function main() {
       };
     } else console.warn('[devert-queue] Read-only: scheduler, durable mirror, Pinata and campaign removal state are required.');
   }
+  // Split songs pay a deterministic split wallet; without a configured factory they fail closed (no payee).
+  const splitPayee = songSplitPayeeResolver({ factory: process.env.SONG_SPLIT_WALLET_FACTORY,
+    implementation: process.env.SONG_SPLIT_WALLET_IMPLEMENTATION }, ethers);
   const dmtvRadioQueue = checkpointMirror && config.pinataJwt && process.env.DMTV_RADIO_CHECKOUT_SECRET
     ? createDmtvRadioQueue({
       provider: getRpcRouter().provider('read', 'dmtv-radio-receipts'),
@@ -1596,7 +1602,7 @@ async function main() {
         const nft = _nftCatalog.find(item => nftIdentity(item) === nftId);
         if (nft?.mediaType !== 'video/mp4') return null;
         const adState = await readDevertState?.();
-        const [item] = dmtvArchiveItems([nft], adState?.campaigns || []);
+        const [item] = dmtvArchiveItems([nft], adState?.campaigns || [], { splitPayee });
         const cid = item?.videoUrl.match(/^ipfs:\/\/(?:ipfs\/)?([a-z0-9]+)$/i)?.[1];
         if (!cid) return null;
         const track = getPlaybackPlaylist().find(track => String(track.ipfsCid || '').replace(/^ipfs:\/\//i, '') === cid);
@@ -1628,15 +1634,26 @@ async function main() {
       const allowed = item => /^ipfs:\/\/(?:ipfs\/)?[a-z0-9]+$/i.test(item.videoUrl) &&
         !blocked.has(item.videoUrl.split('/').at(-1));
       return { archive: dmtvCatalogEntries({ nfts: catalog, playlist: getPlaybackPlaylist(),
-        campaigns: state?.campaigns, blockedMedia: state?.contentBlockedMedia }),
+        campaigns: state?.campaigns, blockedMedia: state?.contentBlockedMedia, splitPayee }),
         ads: state?.paused ? [] : dmtvVideoAds(state?.campaigns || [], catalog).filter(allowed) };
     };
+    const splitFactory = process.env.SONG_SPLIT_WALLET_FACTORY;
+    const songSplits = splitPayee && /^0x[0-9a-f]{40}$/i.test(process.env.DJUKE_CONTRACT_ADDRESS || '')
+      ? createSongSplitPayouts({ signer, token: DMTV_USDC,
+        factory: new Contract(splitFactory, SONG_SPLIT_WALLET_FACTORY_ABI, provider),
+        djuke: new Contract(process.env.DJUKE_CONTRACT_ADDRESS, DJUKE_ABI, provider) })
+      : null;
+    if (songSplits) setInterval(budgetPaced(() => songSplits.flush()), 120_000).unref();
     const resolveMediaUrl = async cid => resolveStreamableIpfsUrl(await discoverDedicatedGateway(config) || config.ipfsGateway, cid);
     if (process.env.DMTV_CATALOG_SYNC_ENABLED === 'true') {
       const register = createDmtvCatalogRegistrar({
         contract: writer, resolveMediaUrl,
-        getCreator: nft => new Contract(nft.contractAddress,
-          ['function creatorOf(uint256) view returns (address)'], provider).creatorOf(nft.tokenId),
+        getCreator: async nft => {
+          const creatorOf = item => new Contract(item.contractAddress,
+            ['function creatorOf(uint256) view returns (address)'], provider).creatorOf(item.tokenId);
+          return songSplits ? songSplits.payeeFor(nft, creatorOf) : creatorOf(nft);
+        },
+        preparePayee: (nft, payee) => songSplits?.prepare(nft, payee),
         getEntries: async () => (await getArchive()).archive,
       });
       let catalogTask;
@@ -1674,8 +1691,10 @@ async function main() {
     };
     const runtime = createDmtvEscrowRuntime({ reader, writer, provider,
       onSettled: result => {
-        recentSettlements.push(result);
+        const { creator, ...settlement } = result;
+        recentSettlements.push(settlement);
         if (recentSettlements.length > 10) recentSettlements.shift();
+        songSplits?.settled(creator).catch(error => console.warn('[song-splits] Distribution deferred:', error.message));
       },
       store: createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
         uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,

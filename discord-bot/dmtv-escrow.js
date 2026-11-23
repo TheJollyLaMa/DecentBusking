@@ -33,7 +33,7 @@ export function createDmtvEscrowRuntime({ reader, writer, provider, store, resol
     if (Number(request.status) === 1 && (refund || Number(request.refundAt) > (await provider.getBlock('latest')).timestamp)) {
       const tx = await (refund ? writer.cancelAndRefund(lane, requestId) : writer.fulfill(lane, requestId, proof));
       if ((await tx.wait(2))?.status !== 1) throw new Error(`DMTv ${refund ? 'refund' : 'settlement'} not confirmed for ${requestId}.`);
-      if (!refund) onSettled?.({ lane, requestId, txHash: tx.hash });
+      if (!refund) onSettled?.({ lane, requestId, txHash: tx.hash, creator: request.creator });
     }
     await persist(evidence.filter(item => item !== entry));
   }

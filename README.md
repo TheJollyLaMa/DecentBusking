@@ -175,6 +175,13 @@ includes “dMTv DBusker CanWeReallyPartyToday” and “Box of Dead Playing Rai
 compressed”, verified as H.264/AAC through the production radio media endpoint
 and registered for both lanes.
 
+Songs with several owners are paid through a deterministic
+[song split wallet](https://basescan.org/address/0x05D1151d75b4369343f983F5F0233bdcEc5ba84A)
+that follows the DJuke split: the catalog sync points the video's escrow payee at
+that wallet, and the worker calls `distribute` after each settled play. Set
+`SONG_SPLIT_WALLET_FACTORY` and `SONG_SPLIT_WALLET_IMPLEMENTATION` in the worker;
+without them, split videos have no payee and cannot be bought.
+
 Set `DMTV_CATALOG_SYNC_ENABLED=true` and grant the escrow worker `CATALOG_ROLE`
 to backfill paid registrations and keep them current. The worker reconciles
 the same configured Base NFT collections used for DJuke mint reconciliation
