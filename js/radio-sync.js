@@ -541,6 +541,7 @@ async function _castRadioVote(vote) {
     try { localStorage.setItem(`decentbusking:votes:v1:${_radioUrl()}`, JSON.stringify([..._votedPlays])); } catch {}
     if (_radio?.playId === playId && _voteStatusEl) _voteStatusEl.textContent = 'Vote recorded';
     document.dispatchEvent(new CustomEvent('dbusk-radio-vote-recorded', { detail: { playId, vote: result.vote } }));
+    void import('./inviter-prompt.mjs?v=20261125-inviter').then(m => m.maybePromptInviter({ source: 'vote' })).catch(() => {});
     if (_radio?.playId === playId) {
       if (_radio.isDevert) {
         // Advert totals arrive with the radio snapshot, not the weekly music chart.

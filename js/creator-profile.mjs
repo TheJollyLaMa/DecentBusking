@@ -19,6 +19,8 @@ import { groupWatchlistByArtist } from './djuke-playlists.mjs?v=20261030-ad-cuto
 import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readContractEarnings, scanLogEarnings,
   summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261023-djuke-v05';
 import { renderTipLedger } from './tip-ledger-ui.mjs?v=20261123-song-splits';
+import { createProfileInbox, activeReferralInvites, renderReferralInviteCard } from './profile-inbox.mjs?v=20261124-profile-inbox';
+import { renderReferredBadge } from './inviter-prompt.mjs?v=20261125-inviter';
 
 import { renderWallet } from './wallet-label.mjs';
 
@@ -374,6 +376,7 @@ export function initCreatorProfile() {
   const bannerImage = dialog.querySelector('[data-profile-banner]');
   const bannerFallback = dialog.querySelector('[data-profile-banner-fallback]');
   const copyAddressButton = dialog.querySelector('[data-profile-copy-address]');
+  const referredBadge = dialog.querySelector('[data-profile-referred-by]');
   const editButton = dialog.querySelector('[data-profile-edit]');
   const copiedNote = dialog.querySelector('[data-profile-copied]');
   let copiedTimer = null;
@@ -924,7 +927,11 @@ export function initCreatorProfile() {
       promotionsTarget.textContent = 'Loading public promotion state…';
       void fetch(`${service()}/api/promotions`, { cache: 'no-store', signal: AbortSignal.timeout(15000) })
         .then(response => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
-        .then(state => renderPromotionProfileSummary(dialog, state, address, ens?.name || ''))
+        .then(state => {
+          renderPromotionProfileSummary(dialog, state, address, ens?.name || '');
+          renderInboxReferrals(state, address);
+          void renderReferredBadge(referredBadge, { wallet: address, own: viewingOwnProfile, state });
+        })
         .catch(() => { promotionsTarget.textContent = 'Promotion state is unavailable; no reward status is being asserted.'; });
     }
     setControls();
@@ -1009,7 +1016,25 @@ export function initCreatorProfile() {
   feeSpotlight.setAttribute('aria-label', 'Your performance pay');
   feeSpotlight.hidden = true;
   const profileCard = dialog.querySelector('.creator-profile-card');
-  profileCard.parentElement.insertBefore(feeSpotlight, profileCard);
+  const inbox = createProfileInbox({ slots: [feeSpotlight], isOwnProfile: () => viewingOwnProfile });
+  profileCard.parentElement.insertBefore(inbox.element, profileCard);
+  const avatarLookups = new Map();
+  const resolveInboxAvatar = wallet => {
+    if (!avatarLookups.has(wallet)) {
+      avatarLookups.set(wallet, resolveCreatorENS(wallet, workerEnsProvider)
+        .then(found => found ? { name: found.name, src: creatorImageURL(found.avatarURI, config().ipfsGateway) } : null)
+        .catch(() => null));
+    }
+    return avatarLookups.get(wallet);
+  };
+  let inboxReferralKey = '';
+  const renderInboxReferrals = (state, wallet) => {
+    const invites = viewingOwnProfile ? activeReferralInvites(state, wallet) : [];
+    const key = JSON.stringify([wallet, invites]);
+    if (key === inboxReferralKey) return;
+    inboxReferralKey = key;
+    inbox.setCards('referrals', invites.map(stats => renderReferralInviteCard(stats, { wallet, resolveAvatar: resolveInboxAvatar })));
+  };
   const paymentBusy = () => [feeSpotlight, livePerformances].some(section => section.querySelector('[data-live-claim-busy="true"]'));
   const paymentFocused = () => [feeSpotlight, livePerformances].some(section => section.contains(document.activeElement));
   const tipReceipts = document.createElement('section');
@@ -1115,6 +1140,9 @@ export function initCreatorProfile() {
     if (!/^0x[0-9a-fA-F]{40}$/.test(target || '')) { message('Connect your wallet in the page header'); if (!dialog.open) dialog.showModal(); return; }
     address = target;
     viewingOwnProfile = !detail?.address || editable();
+    inboxReferralKey = '';
+    inbox.setCards('referrals', []);
+    void renderReferredBadge(referredBadge, { wallet: target, own: viewingOwnProfile });
     profile = {};
     ens = null;
     ensError = '';

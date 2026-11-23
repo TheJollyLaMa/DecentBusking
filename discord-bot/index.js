@@ -15,6 +15,7 @@ import { createLiveRecorder, createLiveRecordingStore, downloadRecordingSegment,
 import { createRehearsalService } from './rehearsal.js';
 import { createRehearsalStore } from './rehearsal-store.js';
 import { createPromotions } from './promotions.js';
+import { createInviterNudge } from './inviter-nudge.js';
 import { createPromotionStore } from './promotions-store.js';
 import { createPromotionAnnouncements } from './promotion-announcements.js';
 // discord-bot/index.js
@@ -955,6 +956,12 @@ async function main() {
       return uri.replace('ipfs://', '');
     },
   });
+  const inviterNudge = createInviterNudge({
+    siteUrl: config.siteUrl,
+    getLinked: discordId => { try { return creatorProfiles?.getByDiscordId(discordId) || null; } catch { return null; } },
+    // `promotions` is created later in main(); until then the nudge stays quiet.
+    getState: async () => { try { return promotions ? await promotions.publicState() : null; } catch { return null; } },
+  });
   const submissionIntake = createSubmissionIntake({
     siteUrl: config.siteUrl,
     isAdmin: interaction => interaction.memberPermissions?.has('ManageMessages') || interaction.memberPermissions?.has('Administrator'),
@@ -979,6 +986,8 @@ async function main() {
         const trackId = getTrackId(track);
         addTrack(track);
         if (!config.disableMintFlow) await handleAudioAttachment(record.message, attachment, config, trackId);
+        void inviterNudge(record.message).then(reply => reply && record.message.reply(reply))
+          .catch(error => console.warn('[submission] Inviter nudge skipped:', error.message));
         return { handled: true };
       }
       const linked = creatorProfiles?.getByDiscordId(record.message.author.id);

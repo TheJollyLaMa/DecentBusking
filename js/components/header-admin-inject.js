@@ -91,7 +91,7 @@ function _injectAdminLink(shadowRoot) {
     li.addEventListener('click', e => {
       e.stopPropagation();
       leftMenu.style.display = 'none';
-      document.dispatchEvent(new CustomEvent('open-admin', { detail: { section: 'radio-programming' } }));
+      document.dispatchEvent(new CustomEvent('open-radio-programming'));
     });
     leftMenu.appendChild(li);
   }

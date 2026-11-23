@@ -1,9 +1,12 @@
 {
   "_comment": "Whitelist of registered contributor accounts for the ETH bounty system. Entries are added exclusively by the maintainer (@TheJollyLaMa) after personal onboarding (video call or direct contact). Do NOT submit PRs to self-register. Each entry tracks a contributor's GitHub username, their Optimism Mainnet wallet address, and cumulative ETH earnings. Wallet addresses are required before any payout can be queued.",
+  "_referralComment": "referredBy records the founding invitation tree shown as a subtle profile badge. It grants no role, payout or campaign reward by itself; later invitations are recorded in the public promotions journal.",
   "_invitationComment": "Wallet-only trial invitations are not GitHub payroll registrations or payout approvals. Verify identity and wallet ownership before promoting an invitation into contributors; no admin role or automatic reward is granted.",
   "invitedParticipants": [
     {
       "displayName": "GrannyLyn",
+      "referredBy": "0x807061DF657A7697c04045dA7d16D941861cAABc",
+      "referredByName": "thejollylama.eth",
       "github": null,
       "walletAddress": "0xF18E19c537a7A99571Bc3F8cef81DCBCaea7c3AE",
       "status": "pending-github-registration",
@@ -14,6 +17,8 @@
     {
       "github": "TheJollyLaMa",
       "displayName": "TheJollyLaMa",
+      "referredBy": "0xcAeEd8422fB5682C298B7F0971906d446fFd4e7a",
+      "referredByName": "decentagency.eth",
       "role": "owner",
       "walletAddress": "0x807061DF657A7697c04045dA7d16D941861cAABc",
       "ethEarned": 0,
@@ -55,6 +60,8 @@
     {
       "github": "copilot",
       "displayName": "Copilot RoboSoul",
+      "referredBy": "0x807061DF657A7697c04045dA7d16D941861cAABc",
+      "referredByName": "thejollylama.eth",
       "role": "contributor",
       "payoutMode": "retain-in-fund",
       "ethEarned": 0,
@@ -103,6 +110,8 @@
     {
       "github": "withinthevacuum",
       "displayName": "withinthevacuum",
+      "referredBy": "0x807061DF657A7697c04045dA7d16D941861cAABc",
+      "referredByName": "thejollylama.eth",
       "role": "tester",
       "walletAddress": "0x405Bb3Cdf23833bb27BAD6629b7cd4f01688235f",
       "ethEarned": 0,
@@ -126,6 +135,8 @@
     {
       "github": "joseacabrerav",
       "displayName": "Jose Cabrera",
+      "referredBy": "0x807061DF657A7697c04045dA7d16D941861cAABc",
+      "referredByName": "thejollylama.eth",
       "role": "contributor",
       "walletAddress": "0x29185eB8cfD22Aa719529217bFbadE61677e0Ad2",
       "ethEarned": 0,
