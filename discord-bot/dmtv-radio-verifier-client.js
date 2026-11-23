@@ -13,6 +13,9 @@ export async function createRadioProofBrowser(executablePath) {
       .filter(name => process.env[name] != null).map(name => [name, process.env[name]])) });
   try {
     const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
+    page.on('console', message => {
+      if (message.text().startsWith('[dmtv-proof]')) console.log(`${new Date().toISOString()} ${message.text()}`);
+    });
     await page.route(`${probeOrigin}/**`, async route => {
       const { pathname } = new URL(route.request().url());
       if (pathname === '/') {
@@ -69,7 +72,7 @@ async function main() {
           active = player.verify(job, base.origin)
             .then(syncedMs => { result = { id: job.id, syncedMs }; })
             .catch(error => {
-              console.error(`[dmtv-verifier] Playback check failed: ${error.name}`);
+              console.error(`${new Date().toISOString()} [dmtv-verifier] Playback check failed: ${error.name}`);
               result = { id: job.id, syncedMs: 0 };
             }).finally(() => { active = undefined; });
         }

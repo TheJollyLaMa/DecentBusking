@@ -690,35 +690,6 @@ export function initDmtv() {
   }
   buy.addEventListener('click', () => void checkout(false));
   radioBuy.addEventListener('click', () => void checkout(true));
-  const refundForm = byId('dmtv-refund');
-  if (refundForm) refundForm.hidden = !isEscrow();
-  refundForm?.addEventListener('submit', async event => {
-    event.preventDefault();
-    if (!isEscrow() || buying) return;
-    buying = true;
-    updateButtons();
-    try {
-      if (!window._wallet?.signer) await window._wallet?.connect?.();
-      const { signer } = window._wallet || {};
-      if (!signer || !window.ethers) throw new Error('Connect a Base wallet first.');
-      await ensureBaseNetwork(signer.provider);
-      const form = new FormData(refundForm);
-      const requestId = String(form.get('requestId') || '');
-      const lane = Number(form.get('lane'));
-      if (!/^\d{1,78}$/.test(requestId) || ![0, 1].includes(lane)) throw new Error('Enter a valid lane and request number.');
-      const escrow = new window.ethers.Contract(escrowAddress(), DMTV_ESCROW_ABI, signer);
-      await escrow.claimRefund.staticCall(lane, requestId);
-      const tx = await escrow.claimRefund(lane, requestId);
-      receipt.textContent = `Refund submitted: ${tx.hash}`;
-      if ((await tx.wait(2))?.status !== 1) throw new Error('The refund transaction did not confirm.');
-      receipt.textContent = `Refund confirmed: ${tx.hash}`;
-    } catch (error) {
-      receipt.textContent = error.shortMessage || error.message;
-    } finally {
-      buying = false;
-      updateButtons();
-    }
-  });
   return () => {
     document.removeEventListener('left-drawer-open', closeForOtherDrawer);
     setOpen(false, { restoreFocus: false });
