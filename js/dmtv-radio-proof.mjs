@@ -82,7 +82,6 @@ export async function verifyRadioPlayback(job, serviceUrl) {
         } catch (error) {
           console.warn('Public radio verification state read failed', error.name);
         } finally {
-          running = false;
           controller = null;
         }
       }
@@ -115,6 +114,7 @@ export async function verifyRadioPlayback(job, serviceUrl) {
       }, 200);
     });
   } finally {
+    running = false;
     clearInterval(stateTimer);
     clearInterval(sampleTimer);
     controller?.abort();
