@@ -1,4 +1,4 @@
-import { createSplitTutorialSurfaces } from './split-tutorial-surfaces.mjs?v=20261122-split-pies';
+import { createSplitTutorialSurfaces } from './split-tutorial-surfaces.mjs?v=20261123-split-admin-pies';
 
 const TUTORIAL_STORAGE_KEY = 'decentbusking:tutorial:seen:v1';
 const TUTORIAL_COMPLETED_KEY = 'decentbusking:tutorial:completed:v1';
@@ -124,15 +124,15 @@ const SPLIT_HOPS = [
     body: 'Follow the bunny through the real Profile and Admin panels to add collaborators and share a song’s artist payout. This read-only walkthrough works without a wallet. It never connects, signs, submits a proposal, buys playback, or changes payments. If no song or request is loaded, clearly labeled, disabled examples show the controls in place.',
   },
   { title: 'Choose the exact song',
-    body: 'When you are ready to do this for real, connect your creator or current-payee wallet in the header. Open Profile → My NFTs, find your song, then choose Collaborators & payments beside it. Your song card offers Add collaborator / split payments too. Check the title, NFT token and song ID. No album is needed.',
+    body: 'When you are ready to do this for real, connect your creator or current-payee wallet in the header. Open Profile → My songs, find your song, then choose the pie-chart edit icon beside it. Your song card offers Add collaborator / split payments too. Check the title, NFT token and song ID. No album is needed.',
   },
   { title: 'Add a wallet, role and share',
     body: 'The editor loads the current on-chain payees. Add a collaborator’s wallet or ENS name, give them a role, and set each percentage. Confirm the resolved wallet with your collaborator. All shares must total exactly 100%. These divide the artist payout, not the platform funds, NFT ownership or NFT royalties.',
   },
-  { title: 'Review before asking for approval',
-    body: 'Choose Review to resolve names and show the proposed split. Check every address, role and percentage. Editing a row invalidates the review. Confirm requests a gasless signature only after checking that the matching approval service is available.',
+  { title: 'Review before confirming',
+    body: 'Choose Review to resolve names and show the proposed split. Check every address, role and percentage. Editing a row invalidates the review. Confirm requests a signature only after checking that the matching approval service is available.',
   },
-  { title: 'Who approves?',
+  { title: 'Admin approval',
     body: 'Confirm signs your request and sends it straight to the admin. Other payees do not need to sign. Requests expire after seven days.',
   },
   { title: 'The owner applies the change',

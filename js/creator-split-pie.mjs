@@ -20,12 +20,12 @@ function slicePath(start, end) {
 }
 
 export function renderCreatorSplitPie(root, rows, {
-  label = 'Payout split', lookupName = lookupEnsName, document: doc = document,
+  label = 'Payout split', size = 'regular', lookupName = lookupEnsName, document: doc = document,
 } = {}) {
   const entries = validateCreatorSplitRows(rows);
   root.replaceChildren();
   const chart = doc.createElement('div');
-  chart.className = 'creator-split-pie';
+  chart.className = `creator-split-pie${size === 'compact' ? ' creator-split-pie--compact' : ''}`;
   const svg = doc.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 240 240');
   svg.setAttribute('role', 'group');

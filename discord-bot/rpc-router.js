@@ -15,12 +15,12 @@ export const DEFAULT_PUBLIC_BASE_URLS = [
   'https://base-mainnet.public.blastapi.io', 'https://base.drpc.org',
 ];
 
-// Approximate Alchemy compute-unit costs; unknown methods count as 20.
+// Alchemy's published EVM JSON-RPC compute-unit costs; unknown methods count as 20.
 const CU_COSTS = {
-  eth_chainId: 0, eth_blockNumber: 10, eth_call: 26, eth_getBalance: 19, eth_getLogs: 75,
-  eth_getBlockByNumber: 16, eth_getBlockByHash: 16, eth_getTransactionReceipt: 15, eth_getTransactionByHash: 17,
-  eth_getTransactionCount: 26, eth_estimateGas: 87, eth_sendRawTransaction: 250, eth_gasPrice: 19,
-  eth_maxPriorityFeePerGas: 10, eth_feeHistory: 10, eth_getCode: 26,
+  eth_chainId: 0, eth_blockNumber: 10, eth_call: 26, eth_getBalance: 20, eth_getLogs: 60,
+  eth_getBlockByNumber: 20, eth_getBlockByHash: 20, eth_getTransactionReceipt: 20, eth_getTransactionByHash: 20,
+  eth_getTransactionCount: 20, eth_estimateGas: 20, eth_sendRawTransaction: 40, eth_gasPrice: 20,
+  eth_maxPriorityFeePerGas: 10, eth_feeHistory: 10, eth_getCode: 20,
 };
 const CRITICAL_METHODS = new Set(['eth_sendRawTransaction', 'eth_getTransactionCount', 'eth_estimateGas']);
 const TIMEOUTS = { read: 4000, logs: 10000, critical: 15000 };
@@ -96,8 +96,8 @@ export function classifyRpcError(error) {
   return 'final';
 }
 
-// Budget for the paid tier, sized for a $33/month Alchemy cap. Our CU counts are estimates,
-// so the default stays under the plan's ~73M CU to leave headroom.
+// 60M estimated CU leaves headroom below ~63.5M at $33 on the published $0.52/M PAYG rate.
+// This local routing limit is not an Alchemy billing cap; actual dashboard usage is authoritative.
 export const DEFAULT_MONTHLY_CU_BUDGET = 60_000_000;
 export const BUDGET_MODES = Object.freeze({
   normal: 'normal',              // paid-first for logs and transactions, public-first for reads
@@ -166,6 +166,7 @@ export function createRpcRouter({
   restoreUsage(initialUsage);
   let requestId = 0;
   let exhaustedUntil = 0;
+  let nextExhaustedProbeAt = 0;
   let lastMode = null;
   let lastModeMonth = '';
 
@@ -258,9 +259,8 @@ export function createRpcRouter({
       [first, second] = cls === 'critical' || transactionPath ? [paid, pub] : [pub, []];
     }
     if (mode === BUDGET_MODES.exhausted) {
-      // Retry the paid tier once per probe window so a new month or raised cap is picked up.
-      const probe = paid.length && exhaustedUntil <= time;
-      [first, second] = [pub, probe && (cls === 'critical' || transactionPath) ? paid : []];
+      const probe = paid.length && exhaustedUntil <= time && (cls === 'critical' || transactionPath);
+      [first, second] = [pub, probe ? paid : []];
     }
     const ordered = [...first, ...second];
     return [...ordered.filter(endpoint => endpoint.openUntil <= time), ...ordered.filter(endpoint => endpoint.openUntil > time)];
@@ -325,6 +325,13 @@ export function createRpcRouter({
     let rangeError = null;
     let ambiguousSend = false;
     for (const endpoint of orderFor(cls, method, params)) {
+      if (endpoint.tier === 'paid' && currentMode() === BUDGET_MODES.exhausted) {
+        const time = now();
+        const transactionPath = CRITICAL_METHODS.has(method) || method === 'eth_getTransactionReceipt';
+        if (!(cls === 'critical' || transactionPath) || time < exhaustedUntil || time < nextExhaustedProbeAt) continue;
+        // Claim only when actually attempting a paid endpoint; concurrent requests share the window.
+        nextExhaustedProbeAt = time + exhaustedProbeMs;
+      }
       try {
         const outcome = await attempt(endpoint, method, params, timeouts[cls] || timeouts.read, consumer);
         if (outcome.error && method === 'eth_sendRawTransaction' && ambiguousSend && ALREADY_SENT_TEXT.test(outcome.error.message || '')) {
