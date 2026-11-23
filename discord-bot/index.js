@@ -2446,9 +2446,26 @@ async function main() {
       if (!paymentLedgerReady) throw new Error('Payment ledger is restoring; retry shortly');
       return paymentLedger.reconcile(txHash);
     },
-    onRadioVote: vote => submitJukeLoopVote(vote, undefined, {
-      ...publicBroadcast.snapshot(), selected: broadcastMode === 'public',
-    }),
+    onRadioVote: async ({ wallet, ...vote }) => {
+      const result = await submitJukeLoopVote(vote, undefined, {
+        ...publicBroadcast.snapshot(), selected: broadcastMode === 'public',
+      });
+      if (!wallet) return result;
+      const playing = getJukeLoopNowPlaying();
+      const broadcast = { ...publicBroadcast.snapshot(), selected: broadcastMode === 'public' };
+      const song = (!playing?.isDevert && playing?.playId === vote.playId) || (broadcast.selected &&
+        broadcast.programHistory?.some(program => program.playId === vote.playId && program.live === false && program.isDevert === false));
+      if (!song) return { ...result, wallet, campaigns: [] };
+      let campaigns = [];
+      try {
+        campaigns = promotions ? await promotions.recordRadioVote({ wallet, voterId: vote.voterId,
+          playId: result.playId, duplicate: result.duplicate }) : [];
+      } catch (error) {
+        console.warn(`[promotions] Wallet vote not counted: ${error.message}`);
+        return { ...result, wallet, campaignError: 'Campaign tally is unavailable right now' };
+      }
+      return { ...result, wallet, campaigns };
+    },
   });
   const port = process.env.PORT || 10000;
   http.createServer(requestHandler).listen(port, () => {

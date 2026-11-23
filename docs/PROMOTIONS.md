@@ -169,8 +169,24 @@ first group by thejollylama.eth. Journal records override the roster.
 Profiles show a subtle **🛸 via …** pill in the banner corner. The label is
 the referrer's ENS name, then their linked Discord name, then their roster
 name, then a short wallet. The pill opens the referrer's profile. An inviter
-record grants no role, payout or campaign reward by itself. Main radio thumbs
-stay anonymous and do not count as campaign votes.
+record grants no role, payout or campaign reward by itself.
+
+## Wallet-tagged radio votes
+
+With a wallet connected, a listener's first 👍/👎 on the main radio asks for
+one free signature (no transaction, no payment). The signed sign-in message is
+a 7-day pass bound to the wallet, the browser's listener ID and the site
+origin; the browser sends it with every vote and the worker verifies it
+(`discord-bot/vote-pass.js`, shared message in `js/vote-pass.mjs`). No server
+secret is needed, so passes survive restarts. Declining or not connecting keeps
+the vote anonymous, and an invalid pass falls back to an anonymous vote.
+
+A wallet-tagged vote on a song (not an advert) counts toward every open
+campaign that wallet has joined, using the same rules as the signed offer-panel
+vote: one browser qualifies one wallet, earlier anonymous votes do not count,
+and musician-pilot votes are tallied as distinct play IDs. The radio bar shows
+the wallet and, for the musician pilot, progress such as 🎯 3/10. A pass proves
+wallet ownership, not a unique human; payouts still require admin review.
 
 ## $150 musician referral pilot template
 

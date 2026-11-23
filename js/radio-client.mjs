@@ -56,11 +56,11 @@ export async function readRadioMediaBlob({ url, fetchImpl = fetch, signal, mime 
   return new Blob(chunks, type ? { type } : {});
 }
 
-export async function sendRadioVote({ radioUrl, playId, voterId, vote, fetchImpl = fetch, signal }) {
+export async function sendRadioVote({ radioUrl, playId, voterId, vote, pass = null, fetchImpl = fetch, signal }) {
   const response = await fetchImpl(`${radioUrl}/vote`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ playId, voterId, vote }),
+    body: JSON.stringify({ playId, voterId, vote, ...(pass ? { pass } : {}) }),
     signal: signal || AbortSignal.timeout(10000),
   });
   const result = await response.json();

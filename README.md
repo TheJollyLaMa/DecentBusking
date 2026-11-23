@@ -356,6 +356,11 @@ First-time voters, uploaders and Discord uploaders are asked once, skippably,
 record, shown as a subtle **🛸 via …** pill on the profile banner. See
 [docs/PROMOTIONS.md](docs/PROMOTIONS.md#who-brought-you-here-inviters).
 
+**🪪 Wallet-tagged votes.** With a wallet connected, one free signature (valid
+7 days) tags every radio 👍/👎 with that wallet, so campaign members' votes
+count automatically. Without a wallet, votes stay anonymous. See
+[docs/PROMOTIONS.md](docs/PROMOTIONS.md#wallet-tagged-radio-votes).
+
 Open **Left ankh → Radio Programming**, refresh the shared calendar, and check one
 **dated occurrence** under **Promote a radio-hour occurrence**. This covers Top10,
 live blocks, other playlist hours, and one-off shows; selecting a recurring show

@@ -16,6 +16,7 @@ import { buildArtworkUpdateAuthorizationMessage, buildArtworkUpdateMetadata } fr
 import { buildDevertRemovalMessage } from '../js/devert-campaigns.mjs';
 import { buildRadioCalendar, radioCalendarOccurrences } from '../js/radio-calendar.mjs';
 import { detectSubmissionMedia, mediaFilename, validateCreatorSplits } from '../js/submission-media.mjs';
+import { createVotePassVerifier } from './vote-pass.js';
 import {
   buildAlbumSplitTypedData, buildAlbumTrackRemovalAuthorizationMessage, buildSongAlbumMigrationTypedData,
   buildSongSplitTypedData, validateCreatorSplitRows,
@@ -336,6 +337,7 @@ export function createWorkerRequestHandler({
   now = () => Date.now(),
   mediaGatewayTimeoutMs = 30_000,
   mediaLog = createRepeatLog(),
+  walletForVote = createVotePassVerifier({ now }),
 }) {
   const origins = new Set(allowedOrigins);
   const radioOrigins = new Set([...allowedOrigins, ...radioAllowedOrigins]);
@@ -1413,8 +1415,11 @@ export function createWorkerRequestHandler({
       if (request.method === 'POST' && requestUrl.pathname === '/api/radio/vote') {
         if (!radioCorsOrigin) throw new Error('Origin is not allowed');
         if (!onRadioVote) throw new Error('Radio voting is not configured');
-        const { playId, voterId, vote } = await readJson(request);
-        sendJson(response, 200, await onRadioVote({ playId, voterId, vote }), radioCorsOrigin);
+        const { playId, voterId, vote, pass } = await readJson(request);
+        let wallet = '', passError = '';
+        try { wallet = walletForVote({ pass, voterId, origin: radioCorsOrigin }); } catch (error) { passError = error.message; }
+        const result = await onRadioVote({ playId, voterId, vote, ...(wallet ? { wallet } : {}) });
+        sendJson(response, 200, { ...result, ...(passError ? { passError } : {}) }, radioCorsOrigin);
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/mint-queue') {

@@ -877,3 +877,20 @@ test('a referred campaign join also records the app-level inviter', async () => 
   assert.deepEqual((await f.service.publicState()).inviters.map(i => [i.wallet, i.referrer, i.source]),
     [[alice.address.toLowerCase(), bob.address.toLowerCase(), 'join']]);
 });
+
+test('wallet-pass radio votes count toward joined musician campaigns with the signed-vote rules', async () => {
+  const musician = Wallet.createRandom();
+  const f = await fixture({ readPlaylist: () => [{ trackId: 'track', mintStatus: 'minted', tokenId: '1', mintRecipient: musician.address }] });
+  const c = await f.create(input({ template: 'musician-referral', rewardUnits: '25000000', budgetUnits: '150000000', maxAwards: 6 }));
+  f.setBalance(150000000n); await f.publish(c); await f.join(c, alice);
+  await f.exec({ action: 'join', campaignId: c.id, referrer: alice.address, trackId: 'track', acceptTerms: true, termsVersion: c.version }, musician);
+  const voterId = 'browser-musician-0000';
+  assert.deepEqual(await f.service.recordRadioVote({ wallet: bob.address, voterId: 'browser-bob-00000000', playId: 'song-0' }), []);
+  assert.equal((await f.service.recordRadioVote({ wallet: musician.address, voterId, playId: 'song-0', duplicate: true }))[0].outcome, 'stale');
+  const [first] = await f.service.recordRadioVote({ wallet: musician.address, voterId, playId: 'song-1' });
+  assert.deepEqual([first.outcome, first.progress, first.required], ['counted', 1, 10]);
+  assert.equal((await f.service.recordRadioVote({ wallet: musician.address, voterId, playId: 'song-1', duplicate: true }))[0].outcome, 'already');
+  await f.join(c, carol);
+  assert.equal((await f.service.recordRadioVote({ wallet: carol.address, voterId, playId: 'song-2' }))[0].outcome, 'other-wallet');
+  assert.deepEqual(f.stored().votes.map(v => [v.wallet, v.subjectWallet, v.playId]), [[musician.address.toLowerCase(), musician.address.toLowerCase(), 'song-1']]);
+});
