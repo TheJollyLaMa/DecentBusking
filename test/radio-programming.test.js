@@ -10,15 +10,123 @@ const track = (id, current, previous, plays = 1) => verifiedRecording({ trackId:
 const program = extra => ({ id: 'program-test', title: 'Our hour', playlistId: 'rising-stars',
   weekday: 2, startMinuteLocal: 630, startDateLocal: '2026-11-03', announce: true, ...extra });
 
+function programmingPanelFixture() {
+  const { load } = require('../discord-bot/node_modules/cheerio');
+  const html = load(readFileSync(require.resolve('../index.html'), 'utf8'));
+  const elements = new Map(), listeners = new Map(), requests = [];
+  let mounted = 0, allowRole = true, roleCheck = Promise.resolve(), promotionsCheck = Promise.resolve();
+  const element = classes => {
+    const names = new Set((classes || '').split(/\s+/));
+    return { open: false, textContent: '', events: {}, children: [],
+      classList: { add: name => names.add(name), remove: name => names.delete(name),
+        contains: name => names.has(name), toggle: (name, enabled) => enabled ? names.add(name) : names.delete(name) },
+      addEventListener(name, handler) { this.events[name] = handler; },
+      setAttribute() {}, removeAttribute() {}, querySelectorAll: () => [], querySelector: () => null,
+      append(child) { this.children.push(child); }, replaceChildren() { this.children = []; },
+      showModal() { this.open = true; }, close() { this.open = false; } };
+  };
+  html('[id]').each((_i, node) => elements.set(node.attribs.id, element(node.attribs.class)));
+  const owner = '0x' + '12'.repeat(20);
+  const context = {
+    document: { getElementById: id => elements.get(id), createElement: () => element(),
+      addEventListener: (name, handler) => listeners.set(name, handler) },
+    window: { _wallet: { address: owner, chainId: 8453, signer: {} },
+      DecentConfig: { ipfsUploadServiceUrl: 'https://worker.test' } },
+    ethers: { Contract: function () { return {
+      DEFAULT_ADMIN_ROLE: async () => { await roleCheck; return 'admin'; }, hasRole: async () => allowRole,
+    }; } },
+    PRODUCT_BATCH_ABI: [], clearMintQueueAuthorization() {}, mountAdminPromotions() {}, mountPublicPromotion() {},
+    isAdminWallet: address => (address || context.window._wallet?.address) === owner,
+    renderWallet: (node, address) => { if (node) node.textContent = address; },
+    renderPlaylistShowPreview() {}, defaultRadioSchedule: () => [], renderAdminRadioAnnouncements() {},
+    mountRadioProgrammingCalendar: () => { mounted++; return { destroy() {}, refresh() {} }; },
+    fetch: async url => {
+      requests.push(url);
+      if (url.endsWith('/api/promotions')) await promotionsCheck;
+      return { ok: true, json: async () => ({ ready: true, events: [], campaigns: [], entries: [] }) };
+    },
+  };
+  const source = readFileSync(require.resolve('../js/admin.js'), 'utf8').replace(/^import .*;\n/gm, '');
+  require('node:vm').runInNewContext(source, context);
+  listeners.get('DOMContentLoaded')();
+  return { html, elements, requests, context, mounted: () => mounted,
+    dispatch: name => listeners.get(name)(),
+    role: value => { allowRole = value; }, waitForRole: promise => { roleCheck = promise; },
+    waitForPromotions: promise => { promotionsCheck = promise; } };
+}
+
+test('left-ankh programming opens its own authorized calendar, not Admin or its other services', async () => {
+  const f = programmingPanelFixture();
+  assert.equal(f.html('#admin-modal #admin-radio-schedule').length, 0);
+  assert.equal(f.html('#radio-programming-modal #admin-radio-schedule').length, 1);
+  assert.equal(f.html('#admin-radio-schedule').is('details'), false);
+  let verify;
+  f.waitForRole(new Promise(resolve => { verify = resolve; }));
+  const opening = f.dispatch('open-radio-programming');
+  assert.equal(f.elements.get('radio-programming-modal').open, true);
+  assert.equal(f.elements.get('admin-modal').classList.contains('hidden'), true);
+  assert.equal(f.elements.get('admin-radio-schedule').classList.contains('hidden'), true);
+  verify();
+  await opening;
+  assert.equal(f.elements.get('admin-radio-schedule').classList.contains('hidden'), false);
+  assert.equal(f.mounted(), 1);
+  assert.deepEqual(f.requests, ['https://worker.test/api/radio/schedule', 'https://worker.test/api/promotions']);
+  f.elements.get('radio-programming-close-btn').events.click();
+  assert.equal(f.elements.get('radio-programming-modal').open, false);
+  await f.dispatch('open-admin');
+  assert.equal(f.elements.get('admin-radio-schedule').classList.contains('hidden'), true);
+  assert.equal(f.elements.get('admin-modal').classList.contains('hidden'), false);
+  assert.equal(f.mounted(), 1);
+});
+
+test('programming keeps wrong-network and missing-role errors in its own window without revealing controls', async () => {
+  for (const scenario of ['network', 'role']) {
+    const f = programmingPanelFixture();
+    if (scenario === 'network') f.context.window._wallet.chainId = 1;
+    else f.role(false);
+    await f.dispatch('open-radio-programming');
+    assert.equal(f.elements.get('radio-programming-modal').open, true);
+    assert.equal(f.elements.get('admin-radio-schedule').classList.contains('hidden'), true);
+    assert.match(f.elements.get('radio-programming-status').textContent, /Switch MetaMask|does not hold DEFAULT_ADMIN_ROLE/);
+    assert.equal(f.requests.length, 0);
+  }
+});
+
+test('late schedule data cannot restore a disconnected wallet and queued close events cannot close a reopened window', async () => {
+  const f = programmingPanelFixture();
+  let finishPromotions;
+  f.waitForPromotions(new Promise(resolve => { finishPromotions = resolve; }));
+  const opening = f.dispatch('open-radio-programming');
+  await new Promise(resolve => setImmediate(resolve));
+  f.context.window._wallet = null;
+  f.dispatch('wallet-disconnected');
+  finishPromotions();
+  await opening;
+  assert.equal(f.mounted(), 0);
+  assert.equal(f.elements.get('admin-radio-schedule').classList.contains('hidden'), true);
+  assert.match(f.elements.get('radio-programming-status').textContent, /Connect your wallet/);
+  f.context.window._wallet = { address: '0x' + '12'.repeat(20), chainId: 8453, signer: {} };
+  await f.dispatch('open-radio-programming');
+  f.elements.get('radio-programming-modal').events.close();
+  assert.equal(f.elements.get('radio-programming-modal').open, true);
+  let stopped = false;
+  f.elements.get('radio-programming-modal').events.keydown({
+    key: 'Escape', preventDefault() {}, stopPropagation() { stopped = true; },
+  });
+  assert.equal(stopped, true);
+  f.dispatch('wallet-connected');
+  assert.equal(f.elements.get('radio-programming-modal').open, false);
+});
+
 test('calendar offers scheduling presets without a front-end rule builder', () => {
   const source = readFileSync(require.resolve('../js/radio-programming-calendar.mjs'), 'utf8');
   assert.doesNotMatch(source, /presetEditor|Rule preset|Save preset|Rule preset builder/);
   assert.match(source, /for \(const preset of presets\(\)\)/);
   assert.match(source, /button\('\+ Live block'/);
   assert.match(source, /Referral campaign/);
-  assert.match(source, /drag = \{ referral: true \}/);
-  assert.match(source, /campaignId: event\.id/);
-  assert.match(source, /14 \* 86400000/);
+  assert.match(source, /drag = \{ referral: true, template \}/);
+  assert.match(source, /openReferralCampaignEditor/);
+  assert.match(source, /openReferralCampaignEditor\(\{ campaign: event\.campaign/);
 });
 
 test('current calendar date and half-hour slot follow New York time and DST', async () => {

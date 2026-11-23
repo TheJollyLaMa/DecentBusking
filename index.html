@@ -33,7 +33,7 @@
   <script type="importmap">
     {"imports":{
       "./js/dbusker.mjs?v=20261116-studio-polish":"./js/dbusker.mjs?v=20261118-github-reports",
-      "./js/radio-sync.js?v=20261030-ad-cutoff":"./js/radio-sync.js?v=20261120-boundary-sync",
+      "./js/radio-sync.js?v=20261030-ad-cutoff":"./js/radio-sync.js?v=20261125-inviter",
       "./js/live-tip-target.mjs?v=20261114-live-direction":"./js/live-tip-target.mjs?v=20261117-public-hls",
       "./js/space.js?v=20261030-ad-cutoff":"./js/space.js?v=20261122-hls-tip-match",
       "./js/stage.js?v=20261030-ad-cutoff":"./js/stage.js?v=20261123-song-splits",
@@ -62,11 +62,13 @@
       "./js/performer-room.mjs?v=20261116-curtain":"./js/performer-room.mjs?v=20261117-booking-assets",
       "./js/radio-schedule-ui.mjs?v=20261025-community-reminder":"./js/radio-schedule-ui.mjs?v=20261122-musician-referral",
       "./js/promotions-ui.mjs?v=20261116-promotions":"./js/promotions-ui.mjs?v=20261122-musician-referral",
-      "./js/mint.js?v=20261030-ad-cutoff":"./js/mint.js?v=20261122-musician-referral",
+      "./js/mint.js?v=20261030-ad-cutoff":"./js/mint.js?v=20261125-inviter",
       "./js/fund-display.mjs?v=20261024-djuke-labels":"./js/fund-display.mjs?v=20261108-live-audio-pilot"
     }}
   </script>
-  <link rel="stylesheet" href="css/radio-programming.css?v=20261122-referral-calendar" />
+  <link rel="stylesheet" href="css/radio-programming.css?v=20261124-referral-week" />
+  <link rel="stylesheet" href="css/profile-inbox.css?v=20261124-profile-inbox" />
+  <link rel="stylesheet" href="css/inviter-prompt.css?v=20261125-inviter" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -901,25 +903,22 @@
     </details>
   </dialog>
 
-  <!-- Admin role-grant modal -->
-  <div id="admin-modal" class="hidden">
-    <div id="admin-modal-inner">
-      <div id="admin-modal-header">
-        <h2>🔑 DecentBusking Admin</h2>
-        <button id="admin-close-btn" aria-label="Close admin panel">✕</button>
-      </div>
-      <div id="admin-connect-section">
-        <span id="admin-connected-addr" class="admin-addr"></span>
-        <span id="admin-connected-role" hidden>DEFAULT_ADMIN_ROLE</span>
-      </div>
-      <div id="admin-status" class="admin-status" role="status"></div>
-      <details id="admin-radio-schedule" class="admin-tool-section hidden" aria-labelledby="admin-radio-schedule-title">
-        <summary><span>📻 Radio Programming</span><small>Weekly calendar, radio hours, and Discord reminders</small></summary>
+  <dialog id="radio-programming-modal" aria-labelledby="radio-programming-title">
+    <div class="radio-programming-header">
+      <h2 id="radio-programming-title">📻 Radio Programming</h2>
+      <button id="radio-programming-close-btn" type="button" aria-label="Close Radio Programming" autofocus>✕</button>
+    </div>
+    <div class="radio-programming-wallet">
+      <span id="radio-programming-connected-addr" class="admin-addr"></span>
+    </div>
+    <div id="radio-programming-status" class="admin-status" role="status"></div>
+    <section id="admin-radio-schedule" class="hidden" aria-label="Radio programming calendar">
         <div class="admin-section-header">
-          <div><h3 id="admin-radio-schedule-title">Radio Programming</h3><p>Build your week. Drop a radio hour onto the calendar, choose a preset, and let the station handle reminders.</p></div>
+          <p>Build your week. Drop a radio hour or referral campaign onto the calendar.</p>
           <button id="admin-radio-schedule-refresh" class="admin-btn admin-btn-secondary" type="button" aria-label="Refresh radio schedule" title="Refresh schedule">↻</button>
         </div>
         <div id="admin-programming-calendar"></div>
+        <p id="admin-radio-schedule-status" class="admin-status" role="status"></p>
         <details class="radio-calendar-advanced">
         <summary>Advanced scheduling and announce-now controls</summary>
         <form id="admin-radio-weekly-form" class="admin-schedule-form admin-weekly-form">
@@ -939,10 +938,23 @@
           <label>Ends (New York time)<input id="admin-radio-event-end" type="datetime-local" required /></label>
           <div class="admin-actions"><button id="admin-radio-event-save" class="admin-btn admin-btn-primary" type="submit">Schedule event</button><button id="admin-radio-event-reset" class="admin-btn admin-btn-secondary" type="button">Clear form</button></div>
         </form>
-        <p id="admin-radio-schedule-status" class="admin-status" role="status"></p>
         <ul id="admin-radio-schedule-events" class="admin-schedule-events"></ul>
         </details>
-        </details>
+    </section>
+  </dialog>
+
+  <!-- Admin role-grant modal -->
+  <div id="admin-modal" class="hidden">
+    <div id="admin-modal-inner">
+      <div id="admin-modal-header">
+        <h2>🔑 DecentBusking Admin</h2>
+        <button id="admin-close-btn" aria-label="Close admin panel">✕</button>
+      </div>
+      <div id="admin-connect-section">
+        <span id="admin-connected-addr" class="admin-addr"></span>
+        <span id="admin-connected-role" hidden>DEFAULT_ADMIN_ROLE</span>
+      </div>
+      <div id="admin-status" class="admin-status" role="status"></div>
       <details id="admin-mint-section" class="admin-tool-section hidden">
         <summary><span>💼 NFT Requests <span id="admin-mint-pending-badge" hidden aria-hidden="true"></span></span><small>Open to sign in and review the private mint queue</small></summary>
         <div class="admin-section-header">
@@ -1171,7 +1183,7 @@
   <script type="module" src="js/payroll-notice.mjs?v=20261118-verified-backlog"></script>
 
   <!-- Inject 🔑 Admin link + owner pending mint badge -->
-  <script type="module" src="js/components/header-admin-inject.js?v=20261122-radio-programming"></script>
+  <script type="module" src="js/components/header-admin-inject.js?v=20261123-standalone"></script>
 
   <!-- Override .title-main color to DecentBusking orange inside AppTitle shadow root -->
   <script type="module" src="js/components/header-title-color-override.js?v=20261017-mercury-release"></script>
@@ -1185,7 +1197,7 @@
   <script type="module" src="js/live-booking-notifications.mjs?v=20261117-booking-assets"></script>
   <script type="module" src="js/live-performance-admin.mjs?v=20261121-typed-review"></script>
   <link rel="stylesheet" href="css/promotions.css?v=20261116-promotions">
-  <script type="module" src="js/admin.js?v=20261123-split-admin-pies"></script>
+  <script type="module" src="js/admin.js?v=20261125-inviter"></script>
   <link rel="stylesheet" href="css/content-review.css?v=20261107-flags">
   <script type="module" src="js/content-review-ui.mjs?v=20261107-flags"></script>
 
@@ -1199,7 +1211,7 @@
   <script type="module" src="js/top-ten-board.mjs?v=20261123-song-splits"></script>
   <script type="module" src="js/djuke.mjs?v=20261112-playlist-continuity"></script>
   <script type="module" src="js/devert-site.mjs?v=20261107-review"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261123-split-admin-pies"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261125-inviter"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261118-artist-artwork"></script>
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/djuke-playlists-ui.mjs?v=20261025-scheduling-info"></script>
@@ -1228,6 +1240,7 @@
       <div class="creator-profile-banner-shell">
         <img data-profile-banner class="creator-profile-banner" alt="Profile banner" hidden />
         <div data-profile-banner-fallback class="creator-profile-banner-fallback" aria-hidden="true"></div>
+        <div data-profile-referred-by class="creator-profile-referred" hidden></div>
         <div class="creator-profile-bubbles" aria-label="Avatar sources">
           <button type="button" class="creator-profile-bubble" data-profile-avatar-bubble="ens" title="ENS avatar" aria-label="ENS avatar">
             <img data-profile-avatar-image="ens" alt="ENS avatar" hidden />

@@ -479,7 +479,7 @@ test('musician conversion reconciles direct legs separately and never marks fund
     'event PayrollPaid(bytes32 indexed fundId,address indexed asset,address indexed recipient,uint256 amount,bytes32 workReference,bytes32 repositoryIdHash,bytes32 contributorIdHash,string metadataUri,bytes32 metadataHash)',
     'event Transfer(address indexed from,address indexed to,uint256 value)',
   ]);
-  const payout = iface.encodeEventLog('PayrollPaid', [id(f.shared.PROMOTIONS_FUND), f.shared.PROMOTIONS_USDC,
+  const payout = iface.encodeEventLog('PayrollPaid', [id(f.shared.REFERRALS_FUND), f.shared.PROMOTIONS_USDC,
     alice.address, 10000000n, id(f.shared.promotionWorkReference(conversion, 'referrer')), id('repo'), id('alice'), '', ZeroHash]);
   const transfer = iface.encodeEventLog('Transfer', [routerAddress, alice.address, 10000000n]);
   f.setReceipt({ status: 1, to: routerAddress, blockNumber: 99,
@@ -686,7 +686,7 @@ test('musician pilot is $150 / six conversions with four explicit legs and all-o
   const campaignInput = input({ template: 'musician-referral', title: 'First musician referral pilot',
     rewardUnits: '25000000', budgetUnits: '150000000', maxAwards: 6,
     endsAt: '2026-11-13T18:00:00Z', claimDeadline: '2026-11-20T18:00:00Z' });
-  await assert.rejects(f.create(input({ template: 'musician-referral' })), /25 per conversion/);
+  await assert.rejects(f.create(input({ template: 'musician-referral' })), /exact multiple|must match the breakdown/);
   const c = await f.create(campaignInput);
   assert.equal(c.rewardUnits, '25000000');
   assert.equal(BigInt(c.rewardUnits) * BigInt(c.maxAwards), 150000000n);
@@ -722,7 +722,7 @@ test('musician pilot is $150 / six conversions with four explicit legs and all-o
   assert.equal(f.stored().claims.reduce((sum, claim) => sum + BigInt(claim.amountUnits), 0n), 150000000n);
   await f.join(c, musicians[6], alice.address);
   await assert.rejects(f.exec({ action: 'claim', campaignId: c.id, musicianWallet: musicians[6].address,
-    evidence: 'Seventh conversion attempt' }, alice), /six.*slots/i);
+    evidence: 'Seventh conversion attempt' }, alice), /conversion slots/i);
 });
 
 test('musician conversion rejects nine votes, an unminted track and duplicate play IDs', async () => {
@@ -797,11 +797,83 @@ test('pilot amendment checks every other campaign commitment on the same promoti
   const pilot = await f.create(input({ template: 'musician-referral', rewardUnits: '25000000',
     budgetUnits: '150000000', maxAwards: 6 }));
   const other = await f.create(input({ template: 'album', rewardUnits: '10000000',
-    budgetUnits: '50000000', maxAwards: 5 }));
+    budgetUnits: '50000000', maxAwards: 5, fund: f.shared.REFERRALS_FUND }));
   f.setBalance(200000000n);
   await f.publish(pilot); await f.publish(other);
   f.setBalance(175000000n);
   await assert.rejects(f.exec({ action: 'amend', campaignId: pilot.id, budgetIncreaseUnits: '25000000',
     endsAt: '2026-11-07T18:00:00Z', claimDeadline: '2026-11-14T18:00:00Z',
     reason: 'Cannot overcommit the shared fund' }), /other campaign commitments/);
+});
+test('Run Campaign saves and publishes a funded referral campaign in one signed command', async () => {
+  const f = await fixture();
+  const pilot = input({ template: 'musician-referral', title: 'Jose', rewardUnits: '25000000',
+    budgetUnits: '150000000', maxAwards: 6, fund: 'dbusk-promotionals', curatedReferrers: [alice.address] });
+  f.setBalance(149999999n);
+  await assert.rejects(f.exec({ action: 'run', campaign: pilot }), /Fund balance cannot cover/);
+  assert.equal((await f.service.publicState()).campaigns.length, 0);
+  f.setBalance(150000000n);
+  const [campaign] = (await f.exec({ action: 'run', campaign: pilot })).campaigns;
+  assert.equal(campaign.status, 'published');
+  assert.equal(campaign.title, 'Jose Referral Campaign');
+  assert.equal(campaign.fund, 'dbusk-referrals');
+  assert.deepEqual(campaign.curatedReferrers, [alice.address.toLowerCase()]);
+  await assert.rejects(f.exec({ action: 'run', campaign: pilot }), /Fund balance cannot cover/);
+  await assert.rejects(f.exec({ action: 'run', campaign: input() }), /new musician referral campaign/);
+});
+
+test('Run Campaign accepts a custom budget, leg breakdown, vote count and referrer names', async () => {
+  const f = await fixture();
+  const legAmounts = { referrer: '20000000', musician: '10000000', 'dbusk-top10': '0', 'dbusk-playback': '10000000' };
+  const custom = input({ template: 'musician-referral', title: 'Spring', rewardUnits: '40000000',
+    budgetUnits: '200000000', maxAwards: 5, legAmounts, requiredVotes: 5,
+    curatedReferrers: [alice.address], curatedReferrerNames: { [alice.address]: 'Alice', [bob.address]: 'Not curated' } });
+  await assert.rejects(f.exec({ action: 'run', campaign: { ...custom, budgetUnits: '210000000' } }), /exact multiple/);
+  await assert.rejects(f.exec({ action: 'run', campaign: { ...custom, maxAwards: 6 } }), /must match the breakdown/);
+  await assert.rejects(f.exec({ action: 'run', campaign: { ...custom, legAmounts: { ...legAmounts, referrer: '0' }, rewardUnits: '20000000', maxAwards: 10 } }), /referrer reward/);
+  f.setBalance(200000000n);
+  const [campaign] = (await f.exec({ action: 'run', campaign: custom })).campaigns;
+  assert.equal(campaign.status, 'published');
+  assert.deepEqual(campaign.legAmounts, legAmounts);
+  assert.equal(campaign.requiredVotes, 5);
+  assert.equal(campaign.maxAwards, 5);
+  assert.deepEqual(campaign.curatedReferrerNames, { [alice.address.toLowerCase()]: 'Alice' });
+  const profile = (await f.service.publicState()).participantProfiles.find(item => item.wallet === alice.address.toLowerCase());
+  assert.equal(profile.invited, true);
+  assert.equal(profile.registered, false);
+  assert.equal(profile.maxEarningsUnits, '100000000');
+  assert.equal(profile.requiredVotes, 5);
+});
+test('inviters are recorded once, reject self and loops, and survive restart; admin corrections are audited', async () => {
+  const f = await fixture();
+  const set = (who, referrer) => f.exec({ action: 'set-inviter', referrer: referrer.address, source: 'vote' }, who);
+  await assert.rejects(set(alice, alice), /yourself/);
+  await set(alice, bob);
+  await assert.rejects(set(alice, carol), /already recorded/);
+  await set(bob, carol);
+  await assert.rejects(set(carol, alice), /loop/);
+  let state = await f.service.publicState();
+  assert.deepEqual(state.inviters.map(i => [i.wallet, i.referrer, i.source]), [
+    [alice.address.toLowerCase(), bob.address.toLowerCase(), 'vote'],
+    [bob.address.toLowerCase(), carol.address.toLowerCase(), 'vote']]);
+  await assert.rejects(f.exec({ action: 'correct-inviter', wallet: alice.address, referrer: dave.address, reason: 'x' }, bob), /Only the configured admin/);
+  await assert.rejects(f.exec({ action: 'correct-inviter', wallet: carol.address, referrer: alice.address, reason: 'loop' }), /loop/);
+  await f.exec({ action: 'correct-inviter', wallet: alice.address, referrer: dave.address, reason: 'Met at the open mic' });
+  const { createPromotions } = await import('../discord-bot/promotions.js');
+  state = await createPromotions({ ...f.cfg, restore: async () => f.stored() }).publicState();
+  assert.equal(state.inviters[0].referrer, dave.address.toLowerCase());
+  assert.equal(state.inviters[0].history[0].from, bob.address.toLowerCase());
+  const { validatePromotionCheckpoint } = await import('../discord-bot/promotions.js');
+  const looped = structuredClone(f.stored());
+  looped.inviters[1].referrer = alice.address.toLowerCase();
+  looped.inviters.push({ wallet: dave.address.toLowerCase(), referrer: bob.address.toLowerCase(), at: looped.inviters[0].at, source: 'vote', history: [] });
+  assert.throws(() => validatePromotionCheckpoint(looped), /Invalid promotions checkpoint/);
+});
+test('a referred campaign join also records the app-level inviter', async () => {
+  const f = await fixture();
+  const c = await f.create(); await f.publish(c);
+  await f.join(c, bob);
+  await f.join(c, alice, bob.address);
+  assert.deepEqual((await f.service.publicState()).inviters.map(i => [i.wallet, i.referrer, i.source]),
+    [[alice.address.toLowerCase(), bob.address.toLowerCase(), 'join']]);
 });

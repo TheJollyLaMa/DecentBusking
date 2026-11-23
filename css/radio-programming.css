@@ -1,6 +1,13 @@
-#admin-modal { width: min(1500px, 97vw); max-height: 96vh; }
-#admin-modal-inner { padding: clamp(12px, 2vw, 28px); min-width: 0; }
-#admin-modal-inner > * { min-width: 0; }
+#radio-programming-modal { box-sizing: border-box; width: min(1500px, 97vw); max-width: 97vw; max-height: 96dvh; padding: clamp(12px, 2vw, 28px); overflow: auto; color: var(--text-primary); background: #090d18; border: 1px solid #a0e0ff; border-radius: var(--stage-radius); box-shadow: 0 0 40px #a0e0ff33; }
+#radio-programming-modal::backdrop { background: #030711b3; }
+.radio-programming-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #a0e0ff33; padding-bottom: 12px; }
+.radio-programming-header h2 { margin: 0; color: #a0e0ff; font: 1.4rem var(--font-display); }
+#radio-programming-close-btn { flex: none; padding: 8px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--text-primary); font-size: 1.1rem; cursor: pointer; }
+#radio-programming-close-btn:hover { background: #ffffff14; }
+#radio-programming-close-btn:focus-visible { outline: 2px solid #a0e0ff; outline-offset: 2px; }
+.radio-programming-wallet { margin: 12px 0; font-size: .85rem; }
+#radio-programming-modal .admin-status { overflow-wrap: anywhere; }
+#radio-programming-modal .admin-status:empty { display: none; }
 .radio-stage-entry { display: grid; gap: 10px; min-width: 0; margin: 12px 0; }
 .radio-stage-entry a[data-live-stage] { display: flex; align-items: center; justify-content: center; box-sizing: border-box; min-height: 48px; width: 100%; padding: 14px 18px; border: 2px solid #b9f49b; border-radius: 12px; background: #b9f49b; color: #10241b; font: 800 1rem/1.3 system-ui, sans-serif; text-align: center; text-decoration: none; white-space: normal; cursor: pointer; box-shadow: 0 3px 12px #0005; }
 .radio-stage-entry a[data-live-stage]:hover { background: #d4ffc1; border-color: #d4ffc1; color: #10241b; }
@@ -40,11 +47,18 @@
 .radio-calendar-event.is-partial span, .radio-calendar-event.is-partial small { display: none; }
 .radio-programming-calendar .radio-calendar-event.is-once { background: #4b3b67; border-color: #baa1eb; }
 .radio-programming-calendar .radio-calendar-event.is-live { background: #654633; border-color: #edbd85; }
-.radio-programming-calendar .radio-calendar-event.is-referral-campaign {
-  top: 0; left: 3px; right: 3px; z-index: 4; min-height: 42px;
-  background: linear-gradient(135deg, #4b3268, #274d57);
-  border-color: #d5a8ff; cursor: pointer;
-}
+.radio-calendar-allday { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px 0; margin: 0 0 8px; padding: 0 1px; }
+.radio-calendar-allday[hidden] { display: none; }
+.radio-calendar-campaign-bar { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0 4px; padding: 6px 14px; overflow: hidden; color: #f6ecff; text-align: left; font: inherit; font-size: .8rem; cursor: pointer; border: 1px solid #d5a8ffaa; border-radius: 999px; background: linear-gradient(90deg, #5a3a80, #3a3f78 55%, #24606a); box-shadow: 0 4px 16px #0006, inset 0 1px #ffffff22; animation: rc-bar-in .35s ease-out both; }
+.radio-calendar-campaign-bar::after { content: ''; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, #ffffff1f 50%, transparent 70%); transform: translateX(-100%); animation: rc-bar-shine 6s ease-in-out infinite; pointer-events: none; }
+.radio-calendar-campaign-bar:hover { filter: brightness(1.15); }
+.radio-calendar-campaign-bar.continues-before { border-top-left-radius: 6px; border-bottom-left-radius: 6px; margin-left: 0; border-left-style: dashed; }
+.radio-calendar-campaign-bar.continues-after { border-top-right-radius: 6px; border-bottom-right-radius: 6px; margin-right: 0; border-right-style: dashed; }
+.radio-calendar-campaign-bar strong { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.radio-calendar-campaign-bar small { flex: none; padding: 2px 8px; border-radius: 999px; background: #00000033; font-size: .72rem; }
+@keyframes rc-bar-in { from { opacity: 0; transform: scaleX(.92); } }
+@keyframes rc-bar-shine { 0%, 70% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .radio-calendar-campaign-bar, .radio-calendar-campaign-bar::after { animation: none; } }
 
 .promotion-calendar-editor-dialog { width: min(980px, 94vw); max-height: 92vh; overflow: auto; }
 .promotion-calendar-editor-close { position: sticky; top: 0; float: right; z-index: 3; }
@@ -62,7 +76,6 @@
   .radio-calendar-event small { display: none; }
 }
 @media(max-width: 700px) {
-  #admin-radio-schedule > .admin-section-header h3,
   #admin-radio-schedule > .admin-section-header p { display: none; }
   #admin-radio-schedule > .admin-section-header { justify-content: flex-end; }
   .radio-programming-calendar { padding: 8px; border-radius: 16px; }
@@ -75,8 +88,71 @@
   .radio-calendar-scroll { max-height: clamp(200px, calc(96dvh - 650px), 620px); }
   .radio-calendar-grid { grid-template-columns: minmax(0, 1fr); }
   .radio-calendar-day:not(.is-selected) { display: none; }
+  .radio-calendar-allday { grid-template-columns: minmax(0, 1fr); padding-right: 1px !important; }
+  .radio-calendar-campaign-bar { grid-column: 1 / -1 !important; grid-row: auto !important; }
+  .radio-calendar-campaign-bar.is-off-day { display: none; }
   .radio-calendar-day-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
   .radio-calendar-day-picker select { flex: 1; min-width: 0; padding: 8px; border-radius: 8px; background: #26354a; color: white; font: inherit; }
   .radio-programming-calendar .radio-calendar-event { left: 44px; }
   .radio-calendar-event small { display: block; }
 }
+
+.referral-blob { --rc-ink: #eef4fb; --rc-soft: #c3d0df; --rc-line: #d5a8ff55; box-sizing: border-box; margin: auto; inset: 0; width: min(360px, 94vw); max-height: min(560px, 88dvh); padding: 0; overflow: hidden; display: flex; flex-direction: column; color: var(--rc-ink); background: linear-gradient(160deg, #24183acc, #13283099), #131d2c; border: 1px solid #d5a8ff88; border-radius: 26px; box-shadow: 0 18px 50px #000a, 0 0 0 6px #d5a8ff14; font-family: system-ui, sans-serif; backdrop-filter: blur(10px); }
+.referral-blob[open] { display: flex; animation: rc-pop .18s ease-out; }
+.referral-blob::backdrop { background: #03071133; }
+@keyframes rc-pop { from { transform: scale(.94); opacity: 0; } }
+.referral-blob button, .referral-blob input { font: inherit; color: inherit; }
+.rc-head { display: flex; align-items: center; gap: 8px; padding: 14px 14px 6px 16px; }
+.rc-badge { font-size: 1.3rem; }
+.rc-title { flex: 1; margin: 0; font-size: 1rem; font-weight: 750; line-height: 1.25; overflow-wrap: anywhere; }
+.rc-pill { flex: none; min-width: 34px; height: 34px; padding: 0 12px; border: 1px solid #ffffff2a; border-radius: 999px; background: #ffffff12; cursor: pointer; }
+.rc-pill:hover { background: #ffffff24; }
+.referral-blob :focus-visible { outline: 2px solid #f4d380; outline-offset: 2px; }
+.rc-info { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 16px 6px; padding: 10px; border-radius: 18px; background: #ffffff0d; font-size: .78rem; }
+.rc-info[hidden] { display: none; }
+.rc-leg { padding: 3px 9px; border-radius: 999px; background: #d5a8ff22; }
+.rc-info-line { flex-basis: 100%; color: var(--rc-soft); }
+.rc-rows { flex: 1; overflow-y: auto; padding: 4px 10px 8px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; align-content: start; }
+.rc-row { border-radius: 18px; }
+.rc-row:has(.rc-edit:not([hidden])) { background: #ffffff0f; }
+.rc-summary { display: flex; align-items: center; gap: 12px; width: 100%; padding: 9px 10px; border: 0; border-radius: 18px; background: transparent; text-align: left; cursor: pointer; }
+.rc-summary:hover:not(:disabled) { background: #ffffff10; }
+.rc-summary:disabled { cursor: default; }
+.rc-icon { width: 1.4em; text-align: center; }
+.rc-value { font-size: .9rem; overflow-wrap: anywhere; }
+.rc-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 2px 10px 12px 44px; }
+.rc-edit[hidden] { display: none; }
+.rc-edit input:not([type=checkbox]) { width: auto; max-width: 100%; padding: 7px 12px; border: 1px solid #ffffff33; border-radius: 999px; background: #0b1220; color-scheme: dark; }
+.rc-picker { background: #d5a8ff33; border-color: #d5a8ff88; font-size: 1rem; }
+.rc-suffix { color: var(--rc-soft); font-size: .8rem; }
+.rc-people { display: grid; gap: 2px; width: 100%; max-height: 170px; overflow-y: auto; }
+.rc-check { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 999px; font-size: .85rem; cursor: pointer; }
+.rc-check:hover { background: #ffffff10; }
+.rc-check small { margin-left: auto; color: var(--rc-soft); font-family: ui-monospace, monospace; font-size: .72rem; }
+.rc-check input { accent-color: #d5a8ff; }
+.rc-all { font-weight: 700; }
+.rc-inline { display: flex; gap: 6px; align-items: center; width: 100%; min-width: 0; }
+.rc-inline input:not([type=checkbox]) { flex: 1 1 13ch; min-width: 0; }
+.rc-inline .rc-name { flex: 0 1 8ch; }
+.rc-inline > button { flex: none; }
+.rc-allocation { margin: 2px 10px; padding: 9px 14px; border-radius: 18px; background: #2b6cb033; color: #a8d4ff; font-size: .82rem; line-height: 1.4; }
+.rc-allocation[data-tone=error] { background: #ff8a7a22; color: #ffb5ae; }
+.rc-stats { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; font-size: .82rem; }
+.rc-stats span { padding: 5px 11px; border-radius: 999px; background: #ffffff10; }
+.rc-status { margin: 0 18px; min-height: 1.2em; color: var(--rc-soft); font-size: .8rem; }
+.rc-status:empty { display: none; }
+.rc-status[data-tone=error] { color: #ffb5ae; }
+.rc-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px 14px; }
+.rc-run { padding: 11px 22px; border: 0; border-radius: 999px; background: linear-gradient(135deg, #b98cf0, #6fd0c4); color: #12101c; font-weight: 800; cursor: pointer; box-shadow: 0 4px 16px #d5a8ff44; }
+.rc-run:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+.radio-calendar-presets .radio-calendar-chip.is-template { background: #3e2d57; border-style: dashed; }
+.rc-money { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 999px; background: #ffffff10; border: 1px solid #ffffff1f; }
+.rc-money input { width: 5ch; padding: 2px 0; border: 0; background: transparent; text-align: right; }
+.rc-money input[type=number] { width: 4ch; }
+.rc-money input.is-bad { color: #ffb4b4; }
+.rc-money .rc-dollar { color: var(--rc-soft); }
+.rc-total input { width: 6ch; font-weight: 700; }
+.rc-legs { display: flex; flex-wrap: wrap; gap: 6px; }
+.rc-math { flex-basis: 100%; margin: 2px 0 0; color: #9fd0ff; font-size: .8rem; }
+.rc-math[data-tone=error] { color: #ffb4b4; }
+.rc-name { width: 9ch; }

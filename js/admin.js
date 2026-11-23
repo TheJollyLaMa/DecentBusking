@@ -16,7 +16,7 @@ import { completeCreatorSplitProposal, fetchCreatorSplitProposal, rejectCreatorS
 import { isAdminWallet } from './admin-access.mjs';
 import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261025-community-reminder';
 import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261116-longform';
-import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?v=20261122-referral-calendar';
+import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?v=20261124-referral-week';
 import { renderAdminRadioAnnouncements, requestRadioAnnouncement } from './admin-radio-announcements.mjs';
 import { removeDevertCampaign } from './devert-campaigns.mjs';
 import { renderWallet } from './wallet-label.mjs';
@@ -40,7 +40,7 @@ const DJUKE_SPLIT_ADMIN_ABI = [
 ];
 
 // ── DOM references (resolved after DOMContentLoaded) ─────────────────────────
-let _modal, _connectedAddr, _roleSection,
+let _modal, _radioModal, _connectedAddr, _roleSection,
   _targetAddr, _roleSelect, _statusEl, _grantBtn, _closeBtn,
   _mintSection, _mintQueueEl, _mintRefreshBtn, _mintSelectedBtn,
   _mintSelectAll, _mintStatusEl, _mintMoreBtn, _mintPendingBadge, _radioScheduleSection, _radioScheduleForm,
@@ -54,6 +54,7 @@ let _mintQueueTotal = 0;
 let _mintQueueLoading = false;
 let _mintBusy = false;
 let _adminOpen = false;
+let _radioOpen = false;
 let _radioSchedule = null;
 let _programmingCalendar = null;
 let _walletCheckId = 0;
@@ -62,6 +63,7 @@ const _artworkPreviewGenerations = new Map();
 let _artworkPreviewId = 0;
 document.addEventListener('DOMContentLoaded', () => {
   _modal        = document.getElementById('admin-modal');
+  _radioModal   = document.getElementById('radio-programming-modal');
   _connectedAddr = document.getElementById('admin-connected-addr');
   _roleSection  = document.getElementById('admin-role-section');
   _targetAddr   = document.getElementById('admin-target-addr');
@@ -89,6 +91,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   _grantBtn?.addEventListener('click', _grantRole);
   _closeBtn?.addEventListener('click', _closeModal);
+  document.getElementById('radio-programming-close-btn')?.addEventListener('click', _closeModal);
+  _radioModal?.addEventListener('close', () => {
+    if (_radioOpen && !_radioModal.open) _closeModal();
+  });
+  _radioModal?.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    _closeModal();
+  });
+  _radioModal?.addEventListener('click', event => {
+    if (event.target !== _radioModal) return;
+    const bounds = _radioModal.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right ||
+        event.clientY < bounds.top || event.clientY > bounds.bottom) _closeModal();
+  });
   _mintRefreshBtn?.addEventListener('click', () => _loadMintQueue({ reset: true }));
   _mintSection?.addEventListener('toggle', () => {
     if (_mintSection.open && _adminOpen && _adminSigner && _adminAddress) void _loadMintQueue();
@@ -137,6 +155,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Listen for the open event dispatched by the header inject script
   document.addEventListener('open-admin', _openModal);
+  document.addEventListener('open-radio-programming', () => _openModal({ detail: { section: 'radio-programming' } }));
+  document.addEventListener('promotions-changed', () => { if (_radioOpen) void _loadRadioSchedule(); });
   document.addEventListener('payroll-ledger-synced', event => _showPaymentLedger(event.detail));
   document.addEventListener('wallet-connected', () => {
     _resetAdminWallet();
@@ -152,18 +172,19 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Open / Close ──────────────────────────────────────────────────────────────
 async function _openModal(event) {
   if (!isAdminWallet()) return;
+  _closeModal();
+  _resetAdminWallet();
+  _radioOpen = event?.detail?.section === 'radio-programming';
+  _connectedAddr = document.getElementById(_radioOpen ? 'radio-programming-connected-addr' : 'admin-connected-addr');
+  _statusEl = document.getElementById(_radioOpen ? 'radio-programming-status' : 'admin-status');
   _adminOpen = true;
-  _modal?.classList.remove('hidden');
-  _refreshPaymentLedger();
-  await _connectWallet();
-  if (event?.detail?.section !== 'radio-programming' || _modal?.classList.contains('hidden') ||
-      _radioScheduleSection?.classList.contains('hidden')) return;
-  _radioScheduleSection.scrollIntoView({ block: 'start', behavior: 'smooth' });
-  const heading = _radioScheduleSection.querySelector('h3');
-  if (heading) {
-    heading.tabIndex = -1;
-    heading.focus({ preventScroll: true });
+  if (_radioOpen) _radioModal.showModal();
+  else {
+    _modal?.classList.remove('hidden');
+    _refreshPaymentLedger();
   }
+  _setStatus('Verifying your admin wallet...');
+  await _connectWallet();
 }
 
 function _showPaymentLedger(ledger) {
@@ -188,8 +209,11 @@ async function _refreshPaymentLedger() {
 
 function _closeModal() {
   _adminOpen = false;
+  _radioOpen = false;
+  ++_walletCheckId;
   if (_mintSection) _mintSection.open = false;
   _modal?.classList.add('hidden');
+  _radioModal?.close();
   _setStatus('');
 }
 
@@ -238,14 +262,18 @@ async function _connectWallet() {
 
     _adminSigner = signer;
     _adminAddress = address;
-    document.getElementById('admin-connected-role')?.removeAttribute('hidden');
     _setStatus('');
+    if (_radioOpen) {
+      _radioScheduleSection?.classList.remove('hidden');
+      await _loadRadioSchedule();
+      return;
+    }
+    document.getElementById('admin-connected-role')?.removeAttribute('hidden');
     _mintSection?.classList.remove('hidden');
     _roleSection?.classList.remove('hidden');
-    _radioScheduleSection?.classList.remove('hidden');
     document.getElementById('admin-devert-campaigns')?.classList.remove('hidden');
     document.getElementById('admin-promotions')?.classList.remove('hidden');
-    await Promise.all([_loadRadioSchedule(), _loadDevertCampaigns()]);
+    await _loadDevertCampaigns();
   } catch (err) {
     if (checkId === _walletCheckId) _setStatus(`❌ ${err.message || 'Wallet verification failed'}`, true);
   }
@@ -355,12 +383,13 @@ async function _loadRadioSchedule() {
       payload.promotionEvents = promotionsResponse.ok ? (promotions.campaigns || [])
         .filter(campaign => campaign.template === 'musician-referral' && ['published', 'paused', 'closed'].includes(campaign.status))
         .map(campaign => ({ id: campaign.id, title: campaign.title, status: campaign.status,
-          startUtc: campaign.startsAt, endUtc: campaign.endsAt, remainingAwards: campaign.remainingAwards })) : [];
+          startUtc: campaign.startsAt, endUtc: campaign.endsAt, remainingAwards: campaign.remainingAwards, campaign })) : [];
       if (!promotionsResponse.ok) payload.promotionEventsError = promotions.error || `Promotions unavailable (${promotionsResponse.status})`;
     } catch (error) {
       payload.promotionEvents = [];
       payload.promotionEventsError = error.message;
     }
+    if (checkId !== _walletCheckId) return;
     _radioSchedule = payload;
     renderPlaylistShowPreview(payload);
     _populateRadioWeeklyForm(payload.schedule || defaultRadioSchedule(payload.weeklySchedule));

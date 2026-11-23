@@ -264,7 +264,18 @@ async function handleSubmission(event) {
     if (artwork && (artwork.size > 10 * 1024 * 1024 || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(artwork.type))) {
       throw new Error('Artwork must be PNG, JPEG, WebP, or GIF, up to 10 MB');
     }
-    const referral = document.getElementById('mint-referrer')?.value.trim();
+    const referralInput = document.getElementById('mint-referrer');
+    const referralOpen = referralInput && !document.getElementById('mint-referral-section')?.hidden &&
+      !document.getElementById('mint-devert')?.checked;
+    if (referralInput && !referralInput.value.trim()) {
+      try {
+        const { maybePromptInviter } = await import('./inviter-prompt.mjs?v=20261125-inviter');
+        // With an open referral campaign the existing join records the inviter in the same signature.
+        const chosen = await maybePromptInviter({ source: 'upload', record: !referralOpen });
+        if (chosen && referralOpen) referralInput.value = chosen;
+      } catch {}
+    }
+    const referral = referralInput?.value.trim();
     pending = true;
     button.disabled = true;
     document.querySelectorAll('#mint-form input, #mint-form button').forEach(control => { control.disabled = true; });

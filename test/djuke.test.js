@@ -271,7 +271,7 @@ test('DJuke replaces operator messaging with a podium, info dialog and decorativ
   assert.match(html, /<dialog id="djuke-instructions"/);
   assert.match(html, /Mint gas comes from your wallet/);
   assert.doesNotMatch(html, /id="admin-reviewed-album-import"/);
-  assert.match(html, /<details id="admin-radio-schedule"/);
+  assert.match(html, /<section id="admin-radio-schedule" class="hidden" aria-label="Radio programming calendar"/);
   assert.match(html, /<details id="admin-role-section"/);
 });
 

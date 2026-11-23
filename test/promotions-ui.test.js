@@ -204,9 +204,9 @@ test('entry points expose the admin section and public offer while suppressing a
   assert.match(admin, /mountAdminPromotions/);
   assert.match(admin, /mountPublicPromotion\(\)/);
   assert.match(leftAnkh, /📻 Radio Programming/);
-  assert.match(leftAnkh, /section: 'radio-programming'/);
-  assert.match(admin, /event\?\.detail\?\.section !== 'radio-programming'/);
-  assert.match(admin, /_radioScheduleSection\.scrollIntoView/);
+  assert.match(leftAnkh, /new CustomEvent\('open-radio-programming'\)/);
+  assert.match(admin, /document\.addEventListener\('open-radio-programming'/);
+  assert.match(admin, /_radioModal\.showModal\(\)/);
   assert.match(tutorial, /\.has\('promotion'\)\) return/);
   assert.match(ui, /newYorkInputToUtc/);
   assert.match(ui, /data-promo-curated/);
@@ -218,4 +218,37 @@ test('entry points expose the admin section and public offer while suppressing a
   const payrollVersions = [...html.matchAll(/js\/payroll\.js\?v=([a-z0-9-]+)/g)].map(match => match[1]);
   assert.equal(payrollVersions.length, 2);
   assert.equal(new Set(payrollVersions).size, 1);
+});
+
+test('referral campaign blob titles, reuses templates and checks the referrals fund', async () => {
+  const { referralCampaignPayload, referralFundAvailability, referralTemplateFrom, dollarsToUnits } = await import('../js/referral-campaign-editor.mjs');
+  const startsAt = new Date(Date.now() + 86400000).toISOString();
+  const endsAt = new Date(Date.now() + 15 * 86400000).toISOString();
+  const claimDeadline = new Date(Date.now() + 22 * 86400000).toISOString();
+  const wallet = '0x' + '12'.repeat(20);
+  const payload = referralCampaignPayload({ title: ' Jose ', startsAt, endsAt, claimDeadline, referrers: [wallet] });
+  assert.equal(payload.title, 'Jose Referral Campaign');
+  assert.equal(payload.fund, 'dbusk-referrals');
+  assert.equal(payload.budgetUnits, '150000000');
+  assert.equal(referralCampaignPayload({ title: '', startsAt, endsAt, claimDeadline, referrers: [] }).title, 'Referral Campaign');
+  assert.throws(() => referralCampaignPayload({ title: '', startsAt: endsAt, endsAt: startsAt, claimDeadline, referrers: [] }), /End must be after start/);
+  const legAmounts = { referrer: '20000000', musician: '10000000', 'dbusk-top10': '5000000', 'dbusk-playback': '5000000' };
+  const custom = referralCampaignPayload({ title: 'Jose', startsAt, endsAt, claimDeadline, referrers: [wallet],
+    names: { [wallet]: 'Jose', ['0x' + '34'.repeat(20)]: 'Dropped' }, legAmounts, budgetUnits: '200000000', requiredVotes: 5 });
+  assert.equal(custom.rewardUnits, '40000000');
+  assert.equal(custom.maxAwards, 5);
+  assert.deepEqual(custom.curatedReferrerNames, { [wallet]: 'Jose' });
+  assert.throws(() => referralCampaignPayload({ title: '', startsAt, endsAt, claimDeadline, referrers: [], legAmounts, budgetUnits: '210000000' }), /exact multiple/);
+  assert.deepEqual(referralTemplateFrom({ ...custom, curatedReferrers: [wallet.toUpperCase().replace('0X', '0x')] }),
+    { title: 'Jose', durationMs: 14 * 86400000, claimGraceMs: 7 * 86400000, referrers: [wallet], names: { [wallet]: 'Jose' },
+      legAmounts, budgetUnits: '200000000', requiredVotes: 5 });
+  assert.equal(dollarsToUnits('$12.5'), '12500000');
+  assert.equal(dollarsToUnits('150'), '150000000');
+  assert.equal(dollarsToUnits('1.234'), null);
+  const campaigns = [{ fund: 'dbusk-referrals', status: 'published', budgetUnits: '150000000', paidUnits: '50000000' },
+    { fund: 'dbusk-promotionals', status: 'published', budgetUnits: '999000000' },
+    { fund: 'dbusk-referrals', status: 'draft', budgetUnits: '150000000' }];
+  assert.deepEqual(referralFundAvailability({ balanceUnits: 200000000n, campaigns }),
+    { balance: 200000000n, committed: 100000000n, available: 100000000n, shortfall: 50000000n });
+  assert.equal(referralFundAvailability({ balanceUnits: 250000000n, campaigns }).shortfall, 0n);
 });

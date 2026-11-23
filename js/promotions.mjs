@@ -1,8 +1,14 @@
 export const PROMOTIONS_FUND = 'dbusk-promotionals';
+export const REFERRALS_FUND = 'dbusk-referrals';
 export const PROMOTIONS_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 export function isPromotionsFund(value) {
   return typeof value === 'string' && value.length <= 64 &&
-    /^dbusk-promotionals(?:-[a-z0-9]+)*$/.test(value);
+    /^dbusk-(?:promotionals|referrals)(?:-[a-z0-9]+)*$/.test(value);
+}
+export function referralCampaignTitle(value) {
+  const title = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!title || /^referral campaign$/i.test(title)) return 'Referral Campaign';
+  return /referral campaign$/i.test(title) ? title : `${title} Referral Campaign`;
 }
 export const PROMOTIONS_ROUTER_ABI = [
   'function funds(bytes32) view returns (string metadataUri,bool active,bool exists)',
@@ -37,9 +43,30 @@ export const MUSICIAN_REFERRAL_PILOT = Object.freeze({
     Object.freeze({ id: 'dbusk-playback', kind: 'funding-needed', fund: 'dbusk-playback', amountUnits: '5000000' }),
   ]),
 });
-export function musicianReferralLegs(referrer, musician) {
-  return MUSICIAN_REFERRAL_PILOT.rewardLegs.map(leg => ({
+export const MUSICIAN_REFERRAL_TERMS = 'Six conversions maximum at $25 each. Every conversion requires all four legs and a referred musician with a verified minted DecentBusking playlist track plus 10 distinct campaign-signed song votes. The $5 Top10 and $5 Playback legs remain funding-needed settlement obligations; this UI does not transfer them. Supporter-token outcome is eligibility only, and no NFT is minted or transferred. No self-referrals, guaranteed payout, or silent term changes.';
+const UNIT = /^(?:0|[1-9]\d{0,14})$/;
+// Campaigns saved before custom breakdowns existed fall back to the $150 pilot terms.
+export function musicianReferralConfig(campaign = {}) {
+  const amounts = campaign.legAmounts ||
+    Object.fromEntries(MUSICIAN_REFERRAL_PILOT.rewardLegs.map(leg => [leg.id, leg.amountUnits]));
+  const baseBudgetUnits = campaign.baseBudgetUnits || MUSICIAN_REFERRAL_PILOT.budgetUnits;
+  const requiredVotes = campaign.requiredVotes ?? MUSICIAN_REFERRAL_PILOT.requiredVotes;
+  const legIds = MUSICIAN_REFERRAL_PILOT.rewardLegs.map(leg => leg.id);
+  const validAmounts = amounts && typeof amounts === 'object' && !Array.isArray(amounts) &&
+    Object.keys(amounts).length === legIds.length && legIds.every(id => UNIT.test(amounts[id] ?? ''));
+  const rewardUnits = validAmounts ? legIds.reduce((sum, id) => sum + BigInt(amounts[id]), 0n) : 0n;
+  const valid = validAmounts && BigInt(amounts.referrer) > 0n && rewardUnits > 0n &&
+    /^[1-9]\d{0,14}$/.test(baseBudgetUnits) && BigInt(baseBudgetUnits) % rewardUnits === 0n &&
+    BigInt(baseBudgetUnits) / rewardUnits <= 100n &&
+    Number.isSafeInteger(requiredVotes) && requiredVotes >= 1 && requiredVotes <= 100;
+  return { valid, amounts: { ...amounts }, baseBudgetUnits, requiredVotes,
+    rewardUnits: rewardUnits.toString(), maxConversions: valid ? Number(BigInt(baseBudgetUnits) / rewardUnits) : 0 };
+}
+export function musicianReferralLegs(referrer, musician, campaign) {
+  const { amounts } = musicianReferralConfig(campaign);
+  return MUSICIAN_REFERRAL_PILOT.rewardLegs.filter(leg => BigInt(amounts[leg.id]) > 0n).map(leg => ({
     ...leg,
+    amountUnits: amounts[leg.id],
     ...(leg.kind === 'wallet' ? { recipient: (leg.recipientRole === 'referrer' ? referrer : musician).toLowerCase() } : {}),
     status: leg.kind === 'wallet' ? 'pending' : 'funding-needed',
   }));

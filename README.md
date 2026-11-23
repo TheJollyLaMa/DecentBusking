@@ -341,7 +341,22 @@ Friday's **Top 10 Hype Hour** (8-9 p.m. America/New_York by default) plays a che
 
 ### Announcing a radio hour to Discord (owner only)
 
-Open **Admin → Radio Programming**, refresh the shared calendar, and check one
+**Left ankh → Radio Programming** opens the standalone calendar directly, not
+the Admin panel. The calendar retains owner-wallet and contract-role checks;
+the right-ankh schedule remains the public view. Drag **🤝 Referral campaign**
+onto a day to open the compact campaign editor. Set the budget, per-musician
+breakdown, vote count and named referrers there. **Run Campaign** funds
+`dbusk-referrals` if needed, signs once, and places a continuous bar across the
+week. Invited referrers see a live invite card in their profile's **✨ For you**
+inbox. See
+[docs/PROMOTIONS.md](docs/PROMOTIONS.md#running-a-referral-campaign-from-the-calendar).
+
+First-time voters, uploaders and Discord uploaders are asked once, skippably,
+**👽 Who brought you here?** The answer is a public, one-per-wallet inviter
+record, shown as a subtle **🛸 via …** pill on the profile banner. See
+[docs/PROMOTIONS.md](docs/PROMOTIONS.md#who-brought-you-here-inviters).
+
+Open **Left ankh → Radio Programming**, refresh the shared calendar, and check one
 **dated occurrence** under **Promote a radio-hour occurrence**. This covers Top10,
 live blocks, other playlist hours, and one-off shows; selecting a recurring show
 never promotes its entire series. Checking/unchecking only selects — it never
@@ -392,7 +407,7 @@ Cancelled live slots leave automated radio running. After Friday Hype, or when s
 
 ### Songs Awaiting Your Vote — one-off playlist hours
 
-The owner can schedule **Songs Awaiting Your Vote** in **Admin → Radio Programming**:
+The owner can schedule **Songs Awaiting Your Vote** in **Left ankh → Radio Programming**:
 choose **Playlist show**, keep the reusable **Songs Awaiting Your Vote — no votes ever**
 definition, enter the title and New York start/end dates, review the rule/count/duration
 preview, then **Schedule event** and authorize the calendar update with the owner wallet.

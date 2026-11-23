@@ -1,4 +1,4 @@
-import { PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS, MUSICIAN_REFERRAL_PILOT, PROMOTIONS_FUND, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, isPromotionsFund,
+import { PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS, MUSICIAN_REFERRAL_PILOT, MUSICIAN_REFERRAL_TERMS, PROMOTIONS_FUND, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, isPromotionsFund,
   promotionAuthorization, promotionWorkReference, promotionMoney, promotionUnits, promotionLink } from './promotions.mjs';
 import { newYorkInputToUtc, utcToNewYorkInput } from './radio-calendar.mjs';
 import { radioListenerId } from './radio-client.mjs';
@@ -41,6 +41,10 @@ async function signed(command) {
   await w.check();
   return result;
 }
+export const fetchPromotionsState = () => request();
+export const signedPromotionCommand = command => signed(command);
+export const promotionWallet = () => wallet();
+export const resolvePromotionWallet = (value, provider) => resolvedWallet(value, provider);
 export async function recordMusicianReferralUpload({ referrer, trackId } = {}) {
   const referral = String(referrer || '').trim();
   if (!referral) return null;
@@ -285,7 +289,7 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       input('reward').value = '25';
       input('budget').value = '150';
       input('maxAwards').value = '6';
-      input('terms').value = 'Six conversions maximum at $25 each. Every conversion requires all four legs and a referred musician with a verified minted DecentBusking playlist track plus 10 distinct campaign-signed song votes. The $5 Top10 and $5 Playback legs remain funding-needed settlement obligations; this UI does not transfer them. Supporter-token outcome is eligibility only, and no NFT is minted or transferred. No self-referrals, guaranteed payout, or silent term changes.';
+      input('terms').value = MUSICIAN_REFERRAL_TERMS;
     }
     templateFields();
   }

@@ -2,8 +2,8 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { Contract, Interface, id, verifyMessage, isAddress } from 'ethers';
 import { PAYMENT_EVENT_ABI } from './payment-ledger.js';
 import { currentPayrollPeriod } from '../js/payroll-week.mjs';
-import { PROMOTIONS_FUND, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS,
-  MUSICIAN_REFERRAL_PILOT, isMusicianReferralCampaign, musicianReferralLegs,
+import { PROMOTIONS_FUND, REFERRALS_FUND, referralCampaignTitle, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS,
+  MUSICIAN_REFERRAL_PILOT, isMusicianReferralCampaign, musicianReferralLegs, musicianReferralConfig,
   isPromotionsFund, promotionAnnouncementDraft, promotionAuthorization, promotionWorkReference } from '../js/promotions.mjs';
 
 const address = value => {
@@ -45,6 +45,28 @@ const fundInterface = new Interface([
   'event FundFunded(bytes32 indexed fundId,address indexed asset,address indexed funder,uint256 amount)',
 ]);
 const lower = value => String(value || '').toLowerCase();
+export const INVITER_SOURCES = new Set(['vote', 'upload', 'discord', 'profile', 'link', 'join']);
+
+function inviterCycle(invited, wallet) {
+  const seen = new Set([wallet]);
+  for (let next = invited.get(wallet); next; next = invited.get(next)) {
+    if (seen.has(next)) return true;
+    seen.add(next);
+  }
+  return false;
+}
+
+function recordInviter(next, wallet, referrer, at, source) {
+  next.inviters ||= [];
+  if (!referrer) throw new Error('Choose who invited you');
+  if (referrer === wallet) throw new Error('You cannot invite yourself');
+  if (next.inviters.some(i => i.wallet === wallet)) throw new Error('Your inviter is already recorded');
+  if (next.inviters.length >= 10000) throw new Error('Inviter capacity reached');
+  const invited = new Map(next.inviters.map(i => [i.wallet, i.referrer]));
+  invited.set(wallet, referrer);
+  if (inviterCycle(invited, wallet)) throw new Error('That would make an invitation loop');
+  next.inviters.push({ wallet, referrer, at, source: INVITER_SOURCES.has(source) ? source : 'profile', history: [] });
+}
 
 export function validatePromotionCheckpoint(value) {
   const fail = () => { throw new Error('Invalid promotions checkpoint; restore a verified backup before accepting writes'); };
@@ -71,10 +93,14 @@ export function validatePromotionCheckpoint(value) {
           !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(c.matchTargetFund || '') ||
           !/^[1-9]\d{0,14}$/.test(c.minContributionUnits || ''))) fail();
     if (BigInt(c.budgetUnits) < BigInt(c.rewardUnits)) fail();
-    if (isMusicianReferralCampaign(c) && (c.rewardUnits !== MUSICIAN_REFERRAL_PILOT.rewardUnits ||
-        c.maxAwards !== MUSICIAN_REFERRAL_PILOT.maxConversions ||
-        BigInt(c.budgetUnits) % BigInt(MUSICIAN_REFERRAL_PILOT.rewardUnits) !== 0n ||
-        BigInt(c.budgetUnits) > BigInt(MUSICIAN_REFERRAL_PILOT.budgetUnits) + (c.amendments || []).reduce((n, a) => n + BigInt(a?.budgetIncreaseUnits || 0), 0n) ||
+    const referralConfig = isMusicianReferralCampaign(c) ? musicianReferralConfig(c) : null;
+    if (referralConfig && (!referralConfig.valid || c.rewardUnits !== referralConfig.rewardUnits ||
+        c.maxAwards !== referralConfig.maxConversions ||
+        BigInt(c.budgetUnits) % BigInt(referralConfig.rewardUnits) !== 0n ||
+        BigInt(c.budgetUnits) > BigInt(referralConfig.baseBudgetUnits) + (c.amendments || []).reduce((n, a) => n + BigInt(a?.budgetIncreaseUnits || 0), 0n) ||
+        c.curatedReferrerNames !== undefined && (!c.curatedReferrerNames || typeof c.curatedReferrerNames !== 'object' ||
+          Object.entries(c.curatedReferrerNames).some(([w, name]) => !c.curatedReferrers?.includes(w) ||
+            typeof name !== 'string' || !name.trim() || name.length > 40)) ||
         !Array.isArray(c.curatedReferrers) || !Array.isArray(c.amendments) ||
         !c.supporterToken || c.supporterToken.status !== 'eligibility-only' ||
         !Array.isArray(c.supporterToken.eligibleWallets) ||
@@ -86,7 +112,7 @@ export function validatePromotionCheckpoint(value) {
           !c.curatedReferrers.includes(curation.wallet)) fail();
       text(curation.reason, 'Checkpoint curation reason');
     }
-    let amendmentBudget = BigInt(MUSICIAN_REFERRAL_PILOT.budgetUnits), amendmentEnd = null;
+    let amendmentBudget = BigInt(referralConfig?.baseBudgetUnits || MUSICIAN_REFERRAL_PILOT.budgetUnits), amendmentEnd = null;
     for (const amendment of c.amendments || []) {
       if (!amendment || !validId(amendment.id) || !validWallet(amendment.reviewer) || !validDate(amendment.at) ||
           !validDate(amendment.before?.endsAt) || !validDate(amendment.after?.endsAt) ||
@@ -133,6 +159,20 @@ export function validatePromotionCheckpoint(value) {
   }
   if (value.members.some(m => m.referrer && !members.has(`${m.campaignId}:${m.referrer}`) &&
       !campaigns.get(m.campaignId)?.curatedReferrers?.includes(m.referrer))) fail();
+  if (value.inviters !== undefined) {
+    if (!Array.isArray(value.inviters) || value.inviters.length > 10000) fail();
+    const invited = new Map();
+    for (const i of value.inviters) {
+      if (!i || !validWallet(i.wallet) || !validWallet(i.referrer) || i.referrer === i.wallet || invited.has(i.wallet) ||
+          !validDate(i.at) || !INVITER_SOURCES.has(i.source) || !Array.isArray(i.history)) fail();
+      for (const h of i.history) {
+        if (!h || !validDate(h.at) || !validWallet(h.reviewer) || h.from && !validWallet(h.from) || !validWallet(h.to)) fail();
+        text(h.reason, 'Checkpoint inviter reason');
+      }
+      invited.set(i.wallet, i.referrer);
+    }
+    if (value.inviters.some(i => inviterCycle(invited, i.wallet))) fail();
+  }
   const participantClaims = new Set(), heldWallets = new Set(), heldSubjects = new Set(), transactionHashes = new Set();
   const reservations = new Map();
   const voteKey = (campaignId, wallet, week, playId, at) => JSON.stringify([campaignId, wallet, week, playId, at]);
@@ -166,13 +206,14 @@ export function validatePromotionCheckpoint(value) {
           campaign.activityWindow === 'current-week' && v.week !== c.qualification.week ||
           !recordedVotes.has(voteKey(c.campaignId, v.wallet, v.week, v.playId, v.at))))) fail();
     if (conversion) {
-      const expected = musicianReferralLegs(c.wallet, c.subjectWallet);
+      const expected = musicianReferralLegs(c.wallet, c.subjectWallet, campaign);
+      const { requiredVotes } = musicianReferralConfig(campaign);
       const member = members.get(`${campaign.id}:${c.subjectWallet}`);
       if (!validWallet(c.subjectWallet) || c.subjectWallet === c.wallet || !member || member.referrer !== c.wallet ||
-            !c.qualification || c.qualification.voteCount !== MUSICIAN_REFERRAL_PILOT.requiredVotes ||
+            !c.qualification || c.qualification.voteCount !== requiredVotes ||
             !Array.isArray(c.qualification.playIds) ||
-            c.qualification.playIds.length !== MUSICIAN_REFERRAL_PILOT.requiredVotes ||
-            new Set(c.qualification.playIds).size !== MUSICIAN_REFERRAL_PILOT.requiredVotes ||
+            c.qualification.playIds.length !== requiredVotes ||
+            new Set(c.qualification.playIds).size !== requiredVotes ||
             c.qualification.playIds.some(playId => !value.votes.some(v => v.campaignId === campaign.id && v.playId === playId &&
               v.subjectWallet === c.subjectWallet &&
               Date.parse(v.at) >= Date.parse(member.joinedAt) && Date.parse(v.at) < Date.parse(campaign.endsAt))) ||
@@ -318,6 +359,15 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       } : {}) };
   }
   const open = campaign => campaign.status === 'published' && Date.parse(campaign.startsAt) <= now() && now() < Date.parse(campaign.endsAt);
+  async function assertPublishable(next, campaign) {
+    if (campaign.template === 'sponsor-match') throw new Error('Sponsor matching is draft-only until fund-to-fund settlement is implemented and verified');
+    if (now() >= Date.parse(campaign.endsAt)) throw new Error('Offer has expired');
+    const balance = await funding(campaign.fund);
+    const paid = id => next.claims.filter(q => q.campaignId === id && q.status === 'paid').reduce((sum, q) => sum + BigInt(q.amountUnits), 0n);
+    const otherBudgets = next.campaigns.filter(c => c.id !== campaign.id && c.fund === campaign.fund && ['published', 'paused', 'closed'].includes(c.status))
+      .reduce((n, c) => n + BigInt(c.budgetUnits) - paid(c.id), 0n);
+    if (balance < otherBudgets + BigInt(campaign.budgetUnits) - paid(campaign.id)) throw new Error('Fund balance cannot cover campaign budgets already earmarked');
+  }
   async function funding(fundSlug = PROMOTIONS_FUND) {
     if (!isPromotionsFund(fundSlug)) throw new Error('A dedicated Promotionals fund is required');
     if (readFunding) return readFunding(fundSlug);
@@ -415,10 +465,11 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       Date.parse(v.at) >= Date.parse(member.joinedAt) && Date.parse(v.at) >= Date.parse(campaign.startsAt) &&
       Date.parse(v.at) < Date.parse(campaign.endsAt));
     const playIds = [...new Set(votes.map(v => v.playId))].sort();
-    if (playIds.length < MUSICIAN_REFERRAL_PILOT.requiredVotes) {
-      throw new Error(`${playIds.length}/${MUSICIAN_REFERRAL_PILOT.requiredVotes} distinct signed song votes recorded; qualification is all-or-nothing`);
+    const { requiredVotes } = musicianReferralConfig(campaign);
+    if (playIds.length < requiredVotes) {
+      throw new Error(`${playIds.length}/${requiredVotes} distinct signed song votes recorded; qualification is all-or-nothing`);
     }
-    playIds.splice(MUSICIAN_REFERRAL_PILOT.requiredVotes);
+    playIds.splice(requiredVotes);
     return { voteCount: playIds.length, playIds, track: mintedTrackEvidence(member.wallet, member.uploadTrackIds) };
   }
   function participantStats(wallet) {
@@ -426,7 +477,9 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
     const result = [];
     for (const campaign of campaigns) {
       const memberWallets = state.members.filter(m => m.campaignId === campaign.id).map(m => m.wallet);
-      if (!memberWallets.includes(wallet)) continue;
+      const invited = !!campaign.curatedReferrers?.includes(wallet);
+      if (!memberWallets.includes(wallet) && !invited) continue;
+      const config = musicianReferralConfig(campaign);
       const claims = state.claims.filter(c => c.campaignId === campaign.id);
       const earned = claims.filter(c => c.status !== 'rejected' && c.legs?.some(l => l.recipient === wallet));
       const totals = status => earned.flatMap(c => c.legs || []).filter(l => l.kind === 'wallet' && l.recipient === wallet && l.status === status)
@@ -436,7 +489,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       const remainingConversions = Math.max(0, Math.min(
         campaign.maxAwards - reservedConversions,
         Number((BigInt(campaign.budgetUnits) - BigInt(summary(campaign).committedUnits)) /
-          BigInt(MUSICIAN_REFERRAL_PILOT.rewardUnits))));
+          BigInt(config.rewardUnits))));
       const ownConversion = state.members.find(member => member.campaignId === campaign.id &&
         member.wallet === wallet && member.referrer);
       const referred = relevantMembers.map(member => {
@@ -447,14 +500,18 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           Date.parse(v.at) >= Date.parse(member.joinedAt) && (!isMusicianReferralCampaign(campaign) || v.subjectWallet === member.wallet) &&
           Date.parse(v.at) < Date.parse(campaign.endsAt)).map(v => v.playId));
         return { wallet: member.wallet, self: member.wallet === wallet,
-          referrer: member.referrer, voteProgress: Math.min(MUSICIAN_REFERRAL_PILOT.requiredVotes, progress.size),
+          referrer: member.referrer, voteProgress: Math.min(config.requiredVotes, progress.size),
           track: track ? { trackId: track.trackId, tokenId: track.tokenId } : null, trackState: track ? 'minted' : 'missing-minted-track' };
       });
-      result.push({ campaignId: campaign.id, qualifiedCount: earned.filter(c => c.status !== 'rejected').length,
+      result.push({ campaignId: campaign.id, title: campaign.title, status: campaign.status,
+        startsAt: campaign.startsAt, endsAt: campaign.endsAt, claimDeadline: campaign.claimDeadline,
+        invited, registered: memberWallets.includes(wallet), requiredVotes: config.requiredVotes,
+        legAmounts: config.amounts, maxConversions: config.maxConversions, remainingConversions,
+        qualifiedCount: earned.filter(c => c.status !== 'rejected').length,
         pendingUnits: (totals('pending') + totals('payment-pending')).toString(),
         approvedUnits: totals('approved').toString(), paidUnits: totals('paid').toString(),
-        maxEarningsUnits: (BigInt(remainingConversions) * 10_000_000n +
-          (ownConversion && !claims.some(claim => claim.subjectWallet === wallet) ? 5_000_000n : 0n)).toString(),
+        maxEarningsUnits: (BigInt(remainingConversions) * BigInt(config.amounts.referrer) +
+          (ownConversion && !claims.some(claim => claim.subjectWallet === wallet) ? BigInt(config.amounts.musician) : 0n)).toString(),
         referrers: campaign.curatedReferrers,
         attributedMusicians: state.members.filter(m => m.campaignId === campaign.id && m.referrer === wallet).map(m => m.wallet),
         referred, curated: campaign.curatedReferrers.includes(wallet),
@@ -466,9 +523,9 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
   function updateSupporterEligibility(next, campaign) {
     if (!isMusicianReferralCampaign(campaign)) return;
     const qualifyingClaims = next.claims.filter(item => item.campaignId === campaign.id &&
-      item.legs?.length === 4 && item.legs.every(leg => leg.status === 'paid' && leg.paidAt &&
+      item.legs?.length && item.legs.every(leg => leg.status === 'paid' && leg.paidAt &&
         Date.parse(leg.paidAt) < Date.parse(campaign.endsAt)));
-    if (qualifyingClaims.length !== MUSICIAN_REFERRAL_PILOT.maxConversions) return;
+    if (qualifyingClaims.length !== musicianReferralConfig(campaign).maxConversions) return;
     campaign.supporterToken ||= { status: 'eligibility-only', eligibleWallets: [] };
     campaign.supporterToken.eligibleWallets = [...new Set(qualifyingClaims.map(item => item.wallet))];
     campaign.supporterToken.evaluatedAt = new Date(now()).toISOString();
@@ -492,7 +549,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
         votedDuringOffer: activeDuringOffer.has(`${member.campaignId}:${member.wallet}`),
         ...(referralCounts.get(member.campaignId) || { registered: 0, activeThisWeek: 0, activeDuringOffer: 0 }) };
     }) : [];
-    const fundSlugs = admin ? [...new Set([PROMOTIONS_FUND, ...state.campaigns.map(c => c.fund)])] : [];
+    const fundSlugs = admin ? [...new Set([PROMOTIONS_FUND, REFERRALS_FUND, ...state.campaigns.map(c => c.fund)])] : [];
     const funds = await Promise.all(fundSlugs.map(async slug => {
       try { return { slug, balanceUnits: (await funding(slug)).toString(), error: '' }; }
       catch (error) { return { slug, balanceUnits: null, error: error.message }; }
@@ -504,6 +561,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       claims: state.claims,
       members: state.members,
       votes: state.votes,
+      inviters: state.inviters || [],
       participation,
       participantStats: participantStats(wallet),
       activity: wallet ? { week, voted: state.votes.some(v => v.wallet === wallet && v.week === week) } : null,
@@ -573,9 +631,11 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
     async publicState() {
       return run(async () => {
         await refresh();
-        const participantProfiles = [...new Set(state.members.map(member => member.wallet))].flatMap(wallet =>
+        const participantProfiles = [...new Set([...state.members.map(member => member.wallet),
+          ...state.campaigns.filter(c => isMusicianReferralCampaign(c) && c.status !== 'draft' && c.status !== 'archived')
+            .flatMap(c => c.curatedReferrers || [])])].flatMap(wallet =>
           participantStats(wallet).map(stats => ({ wallet, ...stats })));
-        return structuredClone({ ...state, campaigns: state.campaigns.map(c => summary(c, true)),
+        return structuredClone({ ...state, inviters: state.inviters || [], campaigns: state.campaigns.map(c => summary(c, true)),
           checkpointUri: getCheckpointUri(), participantProfiles,
           notice: 'All promotion records, including drafts, evidence, referral links, activity and review notes, are public and checkpointed to IPFS. Do not submit secrets or personal information about others. Drafts are not live offers. Rewards require admin approval; budgets are earmarked, not escrowed.' });
       });
@@ -599,7 +659,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
         const next = structuredClone(state);
         const at = new Date(now()).toISOString();
         let campaign = next.campaigns.find(c => c.id === command.campaignId);
-        const adminActions = ['save', 'amend', 'curate-referrer', 'status', 'review', 'correct-attribution', 'prepare-payment', 'release-payment-preparation',
+        const adminActions = ['save', 'run', 'amend', 'curate-referrer', 'correct-inviter', 'status', 'review', 'correct-attribution', 'prepare-payment', 'release-payment-preparation',
           'reconcile', 'reconcile-funding-leg', 'preview-discord', 'send-discord', 'reconcile-discord'];
         if (adminActions.includes(command.action)) {
           if (!admin) throw new Error('Only the configured admin may manage promotions');
@@ -648,7 +708,11 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           if (!announcements || campaign?.announcement?.status !== 'pending') throw new Error('No pending Discord delivery to reconcile');
           Object.assign(campaign.announcement, await announcements.reconcile(campaign.announcement), { status: 'sent' });
           validateCheckpoint(next);
-        } else if (command.action === 'save') {
+        } else if (command.action === 'save' || command.action === 'run') {
+          const running = command.action === 'run';
+          if (running && (campaign || command.campaign?.template !== MUSICIAN_REFERRAL_PILOT.template)) {
+            throw new Error('Run Campaign starts a new musician referral campaign');
+          }
           if (!campaign && next.campaigns.length >= 1000) throw new Error('Promotion storage capacity reached; export and review before adding offers');
           if (campaign && campaign.status !== 'draft') throw new Error('Published terms are immutable; duplicate into a new draft');
           const input = command.campaign;
@@ -660,7 +724,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           if (!Number.isSafeInteger(input.maxAwards) || input.maxAwards < 1 || input.maxAwards > 10000) throw new Error('Max awards must be 1-10000');
           const rewardUnits = units(input.rewardUnits), budgetUnits = units(input.budgetUnits);
           if (BigInt(budgetUnits) < BigInt(rewardUnits)) throw new Error('Budget must cover at least one reward');
-          const fund = input.fund || PROMOTIONS_FUND;
+          const fund = input.template === MUSICIAN_REFERRAL_PILOT.template ? REFERRALS_FUND : input.fund || PROMOTIONS_FUND;
           if (!isPromotionsFund(fund)) throw new Error('Use a dedicated dbusk-promotionals fund, not artist, pinner or repo funds');
           if (new Set([...next.campaigns.map(c => c.fund), fund]).size > 20) throw new Error('At most 20 dedicated promotional funds are supported');
           const curatedReferrers = input.curatedReferrers === undefined
@@ -685,14 +749,28 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
             }
             qualification = { requiredReferrals: input.requiredReferrals, activityWindow: input.activityWindow };
           } else if (input.template === MUSICIAN_REFERRAL_PILOT.template) {
-            const expectedBudget = campaign?.amendments?.length ? campaign.budgetUnits : MUSICIAN_REFERRAL_PILOT.budgetUnits;
-            if (units(input.rewardUnits) !== MUSICIAN_REFERRAL_PILOT.rewardUnits ||
-                units(input.budgetUnits) !== expectedBudget ||
-                input.maxAwards !== MUSICIAN_REFERRAL_PILOT.maxConversions) {
-              throw new Error('The musician referral pilot must use $25 per conversion, a $150 budget, and six conversions');
+            if (campaign?.amendments?.length && units(input.budgetUnits) !== campaign.budgetUnits) {
+              throw new Error('Amended budgets change only through an explicit amendment');
             }
+            const config = musicianReferralConfig({
+              legAmounts: input.legAmounts === undefined ? campaign?.legAmounts : input.legAmounts,
+              baseBudgetUnits: campaign?.amendments?.length ? musicianReferralConfig(campaign).baseBudgetUnits : units(input.budgetUnits),
+              requiredVotes: input.requiredVotes === undefined ? campaign?.requiredVotes : input.requiredVotes });
+            if (!config.valid) {
+              throw new Error('Referral breakdown needs a referrer reward, votes 1–100, and a budget that is an exact multiple of the per-musician total (max 100)');
+            }
+            if (units(input.rewardUnits) !== config.rewardUnits || input.maxAwards !== config.maxConversions) {
+              throw new Error('Per-musician reward and conversion count must match the breakdown');
+            }
+            const names = input.curatedReferrerNames === undefined ? campaign?.curatedReferrerNames || {} : input.curatedReferrerNames;
+            if (!names || typeof names !== 'object' || Array.isArray(names)) throw new Error('Referrer names must be wallet → name');
+            const curatedReferrerNames = Object.fromEntries(Object.entries(names)
+              .map(([w, name]) => [isAddress(w) ? w.toLowerCase() : w, String(name ?? '').trim()])
+              .filter(([w, name]) => name && curatedReferrers.includes(w)));
+            if (Object.values(curatedReferrerNames).some(name => name.length > 40)) throw new Error('Referrer names are 40 characters max');
             qualification = { campaignConfigId: MUSICIAN_REFERRAL_PILOT.id,
-              curatedReferrers, amendments: campaign?.amendments || [],
+              legAmounts: config.amounts, baseBudgetUnits: config.baseBudgetUnits, requiredVotes: config.requiredVotes,
+              curatedReferrerNames, curatedReferrers, amendments: campaign?.amendments || [],
               supporterToken: campaign?.supporterToken || { status: 'eligibility-only', eligibleWallets: [],
                 note: 'No exact edition or authority is configured; no NFT may be minted or transferred.' } };
           } else if (input.template === 'sponsor') {
@@ -702,12 +780,17 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
             if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(target) || target === fund) throw new Error('Choose a different valid artist fund');
             qualification = { matchTargetFund: target, minContributionUnits: units(input.minContributionUnits) };
           }
-          const saved = { id: campaign?.id || randomUUID(), status: 'draft', version: 1, title: text(input.title, 'Title', 100),
+          const saved = { id: campaign?.id || randomUUID(), status: 'draft', version: 1,
+            title: running ? text(referralCampaignTitle(input.title), 'Title', 100) : text(input.title, 'Title', 100),
             template: input.template, criteria: text(input.criteria, 'Qualification terms'), terms: text(input.terms, 'Limits, privacy, disputes and refund terms'),
             rewardUnits, budgetUnits, maxAwards: input.maxAwards, startsAt, endsAt, claimDeadline,
             fund, ...qualification, createdAt: campaign?.createdAt || at, updatedAt: at };
           if (campaign) Object.assign(campaign, saved);
           else next.campaigns.push(saved);
+          if (running) {
+            await assertPublishable(next, saved);
+            saved.status = 'published';
+          }
         } else if (command.action === 'curate-referrer') {
           if (!campaign || !isMusicianReferralCampaign(campaign) || !['draft', 'published', 'paused'].includes(campaign.status) ||
               now() > Date.parse(campaign.endsAt)) throw new Error('Curated referrers can only be changed in an active or draft pilot');
@@ -758,16 +841,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           if (!campaign || !statuses.has(command.status)) throw new Error('Invalid campaign status');
           const allowed = { draft: ['published', 'archived'], published: ['paused', 'closed'], paused: ['published', 'closed'], closed: ['archived'], archived: [] };
           if (!allowed[campaign.status].includes(command.status)) throw new Error('Invalid campaign transition');
-          if (command.status === 'published') {
-            if (campaign.template === 'sponsor-match') throw new Error('Sponsor matching is draft-only until fund-to-fund settlement is implemented and verified');
-            if (now() >= Date.parse(campaign.endsAt)) throw new Error('Offer has expired');
-            const balance = await funding(campaign.fund);
-            const otherBudgets = next.campaigns.filter(c => c.id !== campaign.id && c.fund === campaign.fund && ['published', 'paused', 'closed'].includes(c.status))
-              .reduce((n, c) => n + BigInt(c.budgetUnits) - next.claims.filter(q => q.campaignId === c.id && q.status === 'paid')
-                .reduce((sum, q) => sum + BigInt(q.amountUnits), 0n), 0n);
-            if (balance < otherBudgets + BigInt(campaign.budgetUnits) - next.claims.filter(c => c.campaignId === campaign.id && c.status === 'paid')
-              .reduce((n, c) => n + BigInt(c.amountUnits), 0n)) throw new Error('Promotionals balance cannot cover campaign budgets already earmarked');
-          }
+          if (command.status === 'published') await assertPublishable(next, campaign);
           if (command.status === 'archived' && next.claims.some(c => c.campaignId === campaign.id && c.status !== 'paid' && c.status !== 'rejected')) throw new Error('Resolve outstanding claims before archiving');
           campaign.status = command.status;
           campaign.updatedAt = at;
@@ -789,6 +863,26 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           }
           next.members.push({ wallet, campaignId: campaign.id, referrer, joinedAt: at,
             termsVersion: campaign.version, acceptedAt: at, attributionHistory: [], uploadTrackIds });
+          if (referrer && !next.inviters?.some(i => i.wallet === wallet)) {
+            try { recordInviter(next, wallet, referrer, at, 'join'); } catch {}
+          }
+        } else if (command.action === 'set-inviter') {
+          recordInviter(next, wallet, address(command.referrer), at, command.source);
+        } else if (command.action === 'correct-inviter') {
+          const member = address(command.wallet);
+          const referrer = address(command.referrer);
+          const reason = text(command.reason, 'Inviter correction reason');
+          const current = next.inviters?.find(i => i.wallet === member);
+          if (!current) recordInviter(next, member, referrer, at, 'profile');
+          else {
+            if (referrer === member) throw new Error('A wallet cannot invite itself');
+            if (current.referrer === referrer) throw new Error('Inviter is unchanged');
+            const invited = new Map(next.inviters.map(i => [i.wallet, i.referrer]));
+            invited.set(member, referrer);
+            if (inviterCycle(invited, member)) throw new Error('That would make an invitation loop');
+            current.history.push({ at, reviewer: owner, from: current.referrer, to: referrer, reason });
+            current.referrer = referrer;
+          }
         } else if (command.action === 'vote') {
           if (next.votes.length >= 30000) throw new Error('Promotion activity capacity reached');
           if (!campaign || !open(campaign) || !next.members.some(m => m.wallet === wallet && m.campaignId === campaign.id)) throw new Error('Join an open promotion first');
@@ -822,8 +916,8 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           const member = next.members.find(m => m.wallet === wallet && m.campaignId === campaign.id);
           if (!member) throw new Error('Register before the promotion closes');
           if (isMusicianReferralCampaign(campaign) && next.claims.filter(c =>
-              c.campaignId === campaign.id && c.status !== 'rejected').length >= MUSICIAN_REFERRAL_PILOT.maxConversions) {
-            throw new Error('All six musician referral conversion slots are already recorded');
+              c.campaignId === campaign.id && c.status !== 'rejected').length >= campaign.maxAwards) {
+            throw new Error('All musician referral conversion slots are already recorded');
           }
           const duplicate = next.claims.some(c => c.campaignId === campaign.id && c.wallet === wallet &&
             (!isMusicianReferralCampaign(campaign) || c.subjectWallet === address(command.musicianWallet)));
@@ -835,7 +929,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           if (isMusicianReferralCampaign(campaign)) {
             claim.subjectWallet = address(command.musicianWallet);
             claim.qualification = musicianReferralEvidence(next, claim, campaign);
-            claim.legs = musicianReferralLegs(claim.wallet, claim.subjectWallet);
+            claim.legs = musicianReferralLegs(claim.wallet, claim.subjectWallet, campaign);
           }
           if (campaign.template === 'sponsor') await setSponsorEvidence(next, claim, campaign, command);
           if (campaign.template === 'buddy') setBuddySubject(next, claim, command);

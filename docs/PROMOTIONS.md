@@ -70,6 +70,54 @@ actions. The admin may instead choose a dedicated slug beginning
 source is accounted independently. Playback, Top 10, pinner, live-performer,
 and repo-development funds cannot be selected as promotional reward sources.
 
+Musician referral campaigns always use **Referrals (`dbusk-referrals`)**. Create
+that fund once in Payroll; the calendar does not create router funds.
+
+### Running a referral campaign from the calendar
+
+Drag **🤝 Referral campaign** onto a day in **Left ankh → Radio Programming**
+(or tap it on a phone to use the selected day). A compact editor opens with the
+title, start, end, claims-close, referrers and 💵 budget. The default
+title is "Referral Campaign"; a custom title is shown as "<title> Referral
+Campaign". Referrers come from whitelisted contributors in
+`contributor-accounts.json`; extra wallets or ENS names can be added with an
+optional display name (up to 40 characters).
+
+The budget defaults to the $150 pilot but every part is editable: the total,
+the four per-musician legs (🤝 referrer, 🎤 musician, 🏆 Top 10, 📻 Playback)
+and the 🗳 vote count (1–100). The referrer leg must be above zero, other legs
+may be $0 (zero legs are not created), and the total must be an exact multiple
+of the per-musician reward, up to 100 musicians. Run stays disabled until the
+breakdown is valid. Campaigns saved before this change keep the pilot terms.
+
+Nothing is signed while editing. **Run Campaign** re-reads `dbusk-referrals`.
+If unearmarked USDC is short, the button becomes **Fund $X & Run** and deposits
+only the shortfall through the existing router deposit flow. It then signs a
+single `run` command. The server rejects underfunded or overcommitted runs, and
+saves and publishes the campaign in one journal revision. Only then does its
+bar appear on the calendar. Campaigns that already ran appear as dashed
+template chips so the same rules, breakdown and named referrers can be
+dragged onto new dates.
+
+On the week view each published campaign is one continuous bar across the
+days it runs, stacked above the time grid like iCal all-day events.
+
+### Profile "For you" inbox
+
+The user's own profile has a permanent **✨ For you** carousel (‹ › arrows)
+for platform notifications: live-performer after-show payments and referral
+campaign invites. Every curated referrer of a published or paused campaign sees
+an invite card until claims close, even before joining. It shows earned versus
+possible USDC as a ring, the leg amounts, required votes, open slots, the
+Supporter-token goal, and an avatar for each referred musician (ENS avatar or
+👽) with a vote-progress ring. **🔗 Copy invite** copies the referral link
+without a signature. Cards disappear when their action is complete.
+
+The current prize pool is Base USDC only. The router can also hold ETH and
+approved ERC-20 tokens, but promotions accounting and the UI do not support
+them yet. Supporter NFT prizes would need either a router upgrade or separate
+escrow with admin recovery.
+
 Open **Admin → Invites & Promotions → Unlock / refresh promotions** and sign the
 origin-bound read authorization. Missing storage, RPC, roles, active fund, or
 funding produces an explicit error. Draft editing does not require money.
@@ -94,11 +142,42 @@ publish or move funds. The existing router has no verified atomic fund-to-fund
 settlement path; do not treat a wallet payout or recover/deposit as an
 implemented match. Fund contributions are not refundable ad purchases.
 
+### Who brought you here? (inviters)
+
+Every wallet can record one inviter. The question appears once, as a small
+👽 card. It never blocks the action that triggered it:
+
+- after a wallet's first successful radio vote;
+- before a wallet's first Briefcase upload. If a musician referral campaign is
+  open, the choice fills the referral field, so the campaign `join` records the
+  inviter in the same signature;
+- after a first Discord song upload. DBusker replies with a **🛸 Tell us** link
+  (`?inviter=1`), which asks once the wallet is connected;
+- from the faint **👽 who invited you?** link on your own profile.
+
+**Skip** needs no signature; the card does not ask that wallet again in that
+browser. **That's them** signs a `set-inviter` action. Records are public,
+one per wallet and immutable, and cannot invite yourself or create a loop.
+Only the owner can change one, with `correct-inviter` and a reason; the change
+is kept in the record's `history`. A referred campaign `join` records the
+inviter automatically when none exists yet.
+
+The founding tree lives in `contributor-accounts.json` (`referredBy` and
+`referredByName`): thejollylama.eth was invited by decentagency.eth, and the
+first group by thejollylama.eth. Journal records override the roster.
+
+Profiles show a subtle **🛸 via …** pill in the banner corner. The label is
+the referrer's ENS name, then their linked Discord name, then their roster
+name, then a short wallet. The pill opens the referrer's profile. An inviter
+record grants no role, payout or campaign reward by itself. Main radio thumbs
+stay anonymous and do not count as campaign votes.
+
 ## $150 musician referral pilot template
 
 The **First musician referral pilot** is an extension of this same promotions
-journal, not a separate service. Its base configuration is fixed at six
-conversions, $25 per conversion and $150 total. Qualification is all-or-nothing:
+journal, not a separate service. Its default configuration is six
+conversions, $25 per conversion and $150 total; the calendar editor can change
+the total, legs and vote count (see above). Qualification is all-or-nothing:
 the referred musician must own a playlist entry that the restored worker
 playlist marks `minted` with a token ID, and that musician must have 10 distinct
 play IDs with campaign-scoped signed song votes. The votes are associated with

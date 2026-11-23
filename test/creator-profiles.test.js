@@ -20,6 +20,7 @@ test('slow Profile payment loads survive periodic refresh and retain visible fai
     dialog: { open: true, querySelector: () => disclosure, addEventListener() {} },
     viewingOwnProfile: true, revision: 1, address: 'performer', config: () => ({ ipfsUploadServiceUrl: 'worker' }),
     window: { ethers: {} },
+    createProfileInbox: () => ({ setCards() {} }), activeReferralInvites: () => [], renderReferralInviteCard: () => ({}),
     renderLivePerformances: ({ container }) => {
       calls++;
       return new Promise((done, fail) => {

@@ -1,7 +1,7 @@
 import { radioCalendarOccurrences, utcToNewYorkInput, newYorkInputToUtc } from './radio-calendar.mjs?v=20261024-programming-calendar';
 import { RADIO_PLAYLISTS } from './radio-playlists.mjs?v=20261116-longform';
 import { upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, validateRadioProgrammingConflicts } from './radio-schedule.mjs?v=20261116-longform';
-import { openPromotionCalendarEditor } from './promotions-ui.mjs?v=20261122-musician-referral';
+import { openReferralCampaignEditor, referralTemplateFrom } from './referral-campaign-editor.mjs?v=20261124-referral-week';
 
 const zone = 'America/New_York';
 const dateLabel = new Intl.DateTimeFormat('en-US', { timeZone: zone, weekday: 'short', month: 'short', day: 'numeric' });
@@ -217,7 +217,7 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
     root.className = 'radio-programming-calendar';
     const heading = node('div', undefined, 'radio-calendar-toolbar');
     const dates = programmingWeek(Date.now(), offset);
-    heading.append(node('div', 'Your station. Your week.', 'radio-calendar-title'),
+    heading.append(node('div', 'Community Radio Calendar and Schedule of Events', 'radio-calendar-title'),
       button('Previous week', () => { offset--; render(); }),
       button('Today · now', () => { offset = 0; selectedDay = programmingNow().date; scrollToNow = true; render(); }),
       button('Next week', () => { offset++; render(); }));
@@ -232,14 +232,23 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
       chip.addEventListener('dragstart', e => { drag = { preset: preset.id }; e.dataTransfer.setData('text/plain', preset.id); });
       palette.append(chip);
     }
-    const referral = button('🤝 Referral campaign', () => {
-      const start = newYorkInputToUtc(`${selectedDay}T09:00`);
-      openPromotionCalendarEditor({ startsAt: start, endsAt: new Date(Date.parse(start) + 14 * 86400000).toISOString() });
-    });
-    referral.className = 'radio-calendar-chip is-referral';
-    referral.draggable = true;
-    referral.addEventListener('dragstart', e => { drag = { referral: true }; e.dataTransfer.setData('text/plain', 'referral'); });
-    palette.append(referral, button('+ Live block', () => edit(null, null, 'live')));
+    const referralTemplates = [...new Map((data().promotionEvents || []).filter(item => item.campaign)
+      .sort((a, b) => Date.parse(b.startUtc) - Date.parse(a.startUtc))
+      .map(item => [item.title, item])).values()].slice(0, 3);
+    for (const source of [null, ...referralTemplates]) {
+      const template = source ? referralTemplateFrom(source.campaign) : null;
+      const referral = button(source ? `🤝 ${source.title}` : '🤝 Referral campaign', e => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        openReferralCampaignEditor({ startsAt: newYorkInputToUtc(`${selectedDay}T09:00`), template,
+          anchor: { x: rect.left + rect.width / 2, y: rect.bottom } });
+      });
+      referral.className = `radio-calendar-chip is-referral${source ? ' is-template' : ''}`;
+      referral.title = source ? 'Drag to run again with the same rules' : 'Drag onto a day';
+      referral.draggable = true;
+      referral.addEventListener('dragstart', e => { drag = { referral: true, template }; e.dataTransfer.setData('text/plain', 'referral'); });
+      palette.append(referral);
+    }
+    palette.append(button('+ Live block', () => edit(null, null, 'live')));
     root.append(palette, node('p', 'Drag a preset onto a time, or click any slot. Drag a show to move it; click to edit. Background time is normal rotation. Weekly cards repeat; dated cards play once.', 'radio-calendar-hint'));
     status = node('p', data().promotionEventsError
       ? `Referral campaigns unavailable: ${data().promotionEventsError}`
@@ -250,6 +259,41 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
     status.setAttribute('role', 'status');
     status.setAttribute('aria-live', 'polite');
     root.append(status);
+    const lane = node('div', undefined, 'radio-calendar-allday');
+    lane.setAttribute('aria-label', 'Referral campaigns this week');
+    const laneRows = [];
+    const lastDay = dates[dates.length - 1];
+    for (const event of (data().promotionEvents || []).filter(item => item.status === 'published')) {
+      const first = utcToNewYorkInput(event.startUtc).slice(0, 10);
+      const last = utcToNewYorkInput(new Date(Date.parse(event.endUtc) - 1).toISOString()).slice(0, 10);
+      if (last < dates[0] || first > lastDay) continue;
+      const from = first < dates[0] ? 0 : dates.indexOf(first);
+      const to = last > lastDay ? dates.length - 1 : dates.indexOf(last);
+      let laneRow = laneRows.findIndex(end => end < from);
+      if (laneRow < 0) laneRow = laneRows.push(-1) - 1;
+      laneRows[laneRow] = to;
+      const bar = button('', e => openReferralCampaignEditor({ campaign: event.campaign || {
+        id: event.id, title: event.title, startsAt: event.startUtc, endsAt: event.endUtc, remainingAwards: event.remainingAwards,
+      }, anchor: { x: e.clientX, y: e.clientY } }));
+      bar.className = 'radio-calendar-campaign-bar';
+      bar.classList.toggle('continues-before', first < dates[0]);
+      bar.classList.toggle('continues-after', last > lastDay);
+      bar.dataset.first = first;
+      bar.dataset.last = last;
+      bar.style.gridColumn = `${from + 1} / ${to + 2}`;
+      bar.style.gridRow = String(laneRow + 1);
+      bar.title = `${event.title} · ${dateLabel.format(new Date(event.startUtc))} → ${dateLabel.format(new Date(event.endUtc))}`;
+      bar.append(node('span', '🤝', 'radio-calendar-campaign-icon'), node('strong', event.title),
+        node('small', `🎯 ${event.remainingAwards ?? 0} open`));
+      lane.append(bar);
+    }
+    const syncLane = () => lane.querySelectorAll('.radio-calendar-campaign-bar').forEach(bar => {
+      const day = dates.includes(selectedDay) ? selectedDay : dates[0];
+      bar.classList.toggle('is-off-day', day < bar.dataset.first || day > bar.dataset.last);
+    });
+    syncLane();
+    lane.hidden = !lane.childElementCount;
+    root.append(lane);
     const scroll = node('div', undefined, 'radio-calendar-scroll');
     const grid = node('div', undefined, 'radio-calendar-grid');
     grid.setAttribute('aria-label', 'Weekly radio programming calendar');
@@ -260,6 +304,7 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
     dayPicker.addEventListener('change', () => {
       selectedDay = dayPicker.value;
       grid.querySelectorAll('.radio-calendar-day').forEach(column => column.classList.toggle('is-selected', column.dataset.date === selectedDay));
+      syncLane();
     });
     const occurrences = radioCalendarOccurrences(data(), {
       now: Date.parse(newYorkInputToUtc(`${dates[0]}T00:00`)), days: 6, pastDays: 1,
@@ -285,10 +330,8 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
           if (!drag || busy) return;
           try {
             if (drag.event) await move(drag.event, `${day}T${time}`);
-            else if (drag.referral) openPromotionCalendarEditor({
-              startsAt: newYorkInputToUtc(`${day}T09:00`),
-              endsAt: new Date(Date.parse(newYorkInputToUtc(`${day}T09:00`)) + 14 * 86400000).toISOString(),
-            });
+            else if (drag.referral) openReferralCampaignEditor({ startsAt: newYorkInputToUtc(`${day}T09:00`),
+              template: drag.template, anchor: { x: e.clientX, y: e.clientY } });
             else edit(null, `${day}T${time}`, drag.preset);
           } catch (error) { say(error.message, true); }
           drag = null;
@@ -322,19 +365,6 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
         card.addEventListener('dragend', () => { card.style.pointerEvents = ''; drag = null; });
         timeline.append(card);
       }
-      for (const event of (data().promotionEvents || []).filter(item => item.status === 'published' &&
-        Date.parse(item.startUtc) < dayEnd && Date.parse(item.endUtc) > dayStart)) {
-        const campaign = button('', () => openPromotionCalendarEditor({
-          startsAt: event.startUtc, endsAt: event.endUtc, campaignId: event.id,
-        }));
-        campaign.className = 'radio-calendar-event is-referral-campaign';
-        campaign.style.top = '0';
-        campaign.style.height = `${slotHeight}px`;
-        campaign.title = `${event.title} · ${event.remainingAwards || 0} slots remaining · multiday`;
-        campaign.append(node('strong', event.title),
-          node('span', `🤝 ${event.remainingAwards || 0} slots · multiday`));
-        timeline.append(campaign);
-      }
       column.append(timeline); grid.append(column);
     }
     scroll.append(grid); root.append(scroll);
@@ -344,7 +374,11 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
     const initialMinute = dates.includes(programmingNow().date) ? programmingNow().minute : 16 * 60;
     const target = scrollToNow || previousScroll === undefined ? Math.max(0, initialMinute / 30 * slotHeight - 120) : previousScroll;
     scrollToNow = false;
-    requestAnimationFrame(() => { if (version === generation) scroll.scrollTop = target; });
+    requestAnimationFrame(() => {
+      if (version !== generation) return;
+      scroll.scrollTop = target;
+      lane.style.paddingRight = `${Math.max(0, scroll.offsetWidth - scroll.clientWidth - 2) + 1}px`;
+    });
     if (data().ready !== true) {
       say('Calendar is read-only while durable storage is unavailable.', true);
       root.querySelectorAll('button,input,select').forEach(el => { el.disabled = true; });
