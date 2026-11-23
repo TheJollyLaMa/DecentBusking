@@ -6,7 +6,7 @@
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261030-ad-cutoff';
 import { formatUsdcUnits as _formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
-import { sendRadioVote as sharedRadioVote, radioListenerId, radioMediaUrl, readRadioState, readRadioMediaBlob } from './radio-client.mjs';
+import { sendRadioVote as sharedRadioVote, radioListenerId, radioMediaUrl, readRadioState, readRadioMediaBlob } from './radio-client.mjs?v=20261123-wallet-votes';
 import { createRadioAdTransition } from './radio-ad-transition.mjs?v=20261030-ad-cutoff';
 import { DEVERT_MAX_AD_SECONDS } from './devert-scheduler.mjs';
 import { createLiveAudioListener, createLiveAudioFaultSlate } from './live-audio-client.mjs';
@@ -405,8 +405,29 @@ function _initAudioControls() {
   _applyRadioVolume();
 }
 
-export async function sendRadioVote({ radioUrl, playId, voterId, vote, fetchImpl = fetch }) {
-  return sharedRadioVote({ radioUrl, playId, voterId, vote, fetchImpl });
+export async function sendRadioVote({ radioUrl, playId, voterId, vote, pass = null, fetchImpl = fetch }) {
+  return sharedRadioVote({ radioUrl, playId, voterId, vote, pass, fetchImpl });
+}
+
+// Wallet-tagged votes: one free signature per 7 days; declining keeps the vote anonymous.
+async function _walletVotePass(voterId) {
+  const wallet = globalThis.window?._wallet;
+  if (!wallet?.address || !wallet?.signer) return null;
+  try {
+    const { ensureVotePass } = await import('./vote-pass.mjs?v=20261123-wallet-votes');
+    return await ensureVotePass({ wallet: wallet.address, signer: wallet.signer, listener: voterId,
+      origin: location.origin, storage: localStorage, session: sessionStorage,
+      onSign: () => { if (_voteStatusEl) _voteStatusEl.textContent = '✍️ One free signature tags your votes for 7 days'; } });
+  } catch {
+    return null;
+  }
+}
+
+function _voteReceipt(result) {
+  if (!result.wallet) return 'Vote recorded';
+  const tally = (result.campaigns || []).find(item => Number.isFinite(item.progress));
+  const who = `🪪 ${result.wallet.slice(0, 6)}…${result.wallet.slice(-4)}`;
+  return tally ? `Vote recorded · ${who} · 🎯 ${tally.progress}/${tally.required}` : `Vote recorded · ${who}`;
 }
 
 function _anonymousListenerId() {
@@ -534,13 +555,18 @@ async function _castRadioVote(vote) {
   _votePending = true;
   _renderVoting();
   try {
-    const result = await sendRadioVote({ radioUrl: _radioUrl(), playId, voterId: _anonymousListenerId(), vote });
+    const voterId = _anonymousListenerId();
+    const pass = await _walletVotePass(voterId);
+    const result = await sendRadioVote({ radioUrl: _radioUrl(), playId, voterId, vote, pass });
     if (result.playId !== playId || (result.vote !== 1 && result.vote !== -1)) throw new Error('Invalid vote response');
+    if (result.passError && globalThis.window?._wallet?.address) {
+      void import('./vote-pass.mjs?v=20261123-wallet-votes').then(m => m.forgetVotePass(window._wallet.address, localStorage)).catch(() => {});
+    }
     _votedPlays.set(playId, result.vote);
     while (_votedPlays.size > 100) _votedPlays.delete(_votedPlays.keys().next().value);
     try { localStorage.setItem(`decentbusking:votes:v1:${_radioUrl()}`, JSON.stringify([..._votedPlays])); } catch {}
-    if (_radio?.playId === playId && _voteStatusEl) _voteStatusEl.textContent = 'Vote recorded';
-    document.dispatchEvent(new CustomEvent('dbusk-radio-vote-recorded', { detail: { playId, vote: result.vote } }));
+    if (_radio?.playId === playId && _voteStatusEl) _voteStatusEl.textContent = _voteReceipt(result);
+    document.dispatchEvent(new CustomEvent('dbusk-radio-vote-recorded', { detail: { playId, vote: result.vote, wallet: result.wallet || '' } }));
     void import('./inviter-prompt.mjs?v=20261125-inviter').then(m => m.maybePromptInviter({ source: 'vote' })).catch(() => {});
     if (_radio?.playId === playId) {
       if (_radio.isDevert) {

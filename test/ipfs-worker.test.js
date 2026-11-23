@@ -93,6 +93,28 @@ test('widget radio origins can preflight/vote without expanding authenticated AP
     });
 });
 
+test('a valid wallet pass tags the radio vote; an invalid one still records it anonymously', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const { votePassMessage } = await import('../js/vote-pass.mjs');
+  const origin = 'https://busking.example', voterId = 'listener-0000000002', listener = Wallet.createRandom();
+  const recorded = [];
+  const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: Wallet.createRandom().address,
+    onRadioVote: async body => { recorded.push(body); return { playId: body.playId, vote: body.vote, ...(body.wallet ? { wallet: body.wallet } : {}) }; } });
+  const message = votePassMessage({ wallet: listener.address, listener: voterId, origin,
+    issuedAt: new Date(Date.now() - 1000).toISOString(), expiresAt: new Date(Date.now() + 86400000).toISOString() });
+  const pass = { message, signature: await listener.signMessage(message) };
+  await withServer(handler, async base => {
+    const send = body => fetch(`${base}/api/radio/vote`, { method: 'POST',
+      headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+    const tagged = await send({ playId: 'one', voterId, vote: 1, pass });
+    assert.equal(tagged.wallet, listener.address.toLowerCase());
+    const other = await send({ playId: 'two', voterId: 'listener-0000000003', vote: -1, pass });
+    assert.match(other.passError, /another browser/);
+    assert.equal(other.wallet, undefined);
+  });
+  assert.deepEqual(recorded.map(r => r.wallet), [listener.address.toLowerCase(), undefined]);
+});
+
 test('public radio origins can send anonymous live feedback but cannot access private room routes', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const origin = 'https://dbusk.decentagency.eth.limo', submissions = [];

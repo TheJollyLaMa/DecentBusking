@@ -319,6 +319,23 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
     }
     state = latest;
   };
+  // Shared by signed promotion votes and wallet-pass radio votes so both follow identical qualification rules.
+  // Returns 'counted', 'already' (no change needed), 'stale' (an earlier anonymous vote) or 'other-wallet'.
+  function qualifyCampaignVote(next, campaign, { wallet, voterId, playId, duplicate }) {
+    const browser = id(voterId);
+    if (next.votes.some(v => v.browser === browser && v.wallet !== wallet)) return 'other-wallet';
+    const musician = isMusicianReferralCampaign(campaign);
+    const week = currentPayrollPeriod(now()).week;
+    const already = musician
+      ? next.votes.some(v => v.campaignId === campaign.id && v.wallet === wallet && v.subjectWallet === wallet && v.playId === playId)
+      : next.votes.some(v => v.campaignId === campaign.id && v.wallet === wallet && v.week === week);
+    if (already) return 'already';
+    if (duplicate) return 'stale';
+    if (next.votes.length >= 30000) throw new Error('Promotion activity capacity reached');
+    next.votes.push({ campaignId: campaign.id, wallet, browser, week, playId, at: new Date(now()).toISOString(),
+      ...(musician ? { subjectWallet: wallet } : {}) });
+    return 'counted';
+  }
   const persist = async next => {
     if (fault) throw new Error(fault);
     next.revision = state.revision + 1;
@@ -640,6 +657,30 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           notice: 'All promotion records, including drafts, evidence, referral links, activity and review notes, are public and checkpointed to IPFS. Do not submit secrets or personal information about others. Drafts are not live offers. Rewards require admin approval; budgets are earmarked, not escrowed.' });
       });
     },
+    // Counts a wallet-pass radio vote (already accepted by the radio) toward every open campaign the wallet joined.
+    async recordRadioVote({ wallet, voterId, playId, duplicate = false }) {
+      return run(async () => {
+        await refresh();
+        if (fault) throw new Error(fault);
+        const member = address(wallet);
+        if (!/^[a-zA-Z0-9_-]{16,128}$/.test(voterId || '')) throw new Error('Invalid radio listener');
+        const play = text(playId, 'Play ID', 200);
+        const next = structuredClone(state);
+        const results = next.campaigns.filter(campaign => open(campaign) &&
+          next.members.some(m => m.wallet === member && m.campaignId === campaign.id))
+          .map(campaign => ({ campaign, outcome: qualifyCampaignVote(next, campaign, { wallet: member, voterId, playId: play, duplicate }) }));
+        if (results.some(item => item.outcome === 'counted')) await persist(next);
+        return results.map(({ campaign, outcome }) => {
+          const entry = { campaignId: campaign.id, title: campaign.title, outcome };
+          if (isMusicianReferralCampaign(campaign)) {
+            entry.required = musicianReferralConfig(campaign).requiredVotes;
+            entry.progress = Math.min(entry.required, new Set(next.votes.filter(v => v.campaignId === campaign.id &&
+              v.subjectWallet === member).map(v => v.playId)).size);
+          }
+          return entry;
+        });
+      });
+    },
     async execute(body, origin) {
       return run(async () => {
         await refresh();
@@ -891,25 +932,13 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           if (subjectWallet && subjectWallet !== wallet) {
             throw new Error('A musician must sign each qualifying song vote with their own wallet');
           }
-          if (subjectWallet && !next.members.some(item => item.campaignId === campaign.id && item.wallet === subjectWallet)) {
-            throw new Error('Vote subject must be a registered musician in this pilot');
-          }
           const playId = text(command.playId, 'Play ID', 200);
-          const browser = id(command.voterId);
-          if (next.votes.some(v => v.browser === browser && v.wallet !== wallet)) throw new Error('This browser has already qualified a different wallet');
+          if (next.votes.some(v => v.browser === id(command.voterId) && v.wallet !== wallet)) throw new Error('This browser has already qualified a different wallet');
           if (!voteOnRadio) throw new Error('Radio voting is unavailable');
           const result = await voteOnRadio({ playId, voterId: command.voterId, vote: command.vote });
           if (result.playId !== playId || ![1, -1].includes(result.vote)) throw new Error('Radio did not confirm a song vote');
-          const week = currentPayrollPeriod(now()).week;
-          const alreadyQualified = isMusicianReferralCampaign(campaign)
-            ? next.votes.some(v => v.campaignId === campaign.id && v.wallet === wallet &&
-                v.subjectWallet === subjectWallet && v.playId === playId)
-            : next.votes.some(v => v.campaignId === campaign.id && v.wallet === wallet && v.week === week);
-          if (result.duplicate && !alreadyQualified) throw new Error('An earlier anonymous or other-offer vote cannot qualify this offer; vote on the next song after registration');
-          if (!alreadyQualified) {
-            next.votes.push({ campaignId: campaign.id, wallet, browser, week, playId, at: new Date(now()).toISOString(),
-              ...(isMusicianReferralCampaign(campaign) ? { subjectWallet } : {}) });
-          }
+          const outcome = qualifyCampaignVote(next, campaign, { wallet, voterId: command.voterId, playId, duplicate: result.duplicate });
+          if (outcome === 'stale') throw new Error('An earlier anonymous or other-offer vote cannot qualify this offer; vote on the next song after registration');
         } else if (command.action === 'claim') {
           if (next.claims.length >= 10000) throw new Error('Promotion claim capacity reached');
           if (!campaign || !['published', 'paused', 'closed'].includes(campaign.status) || now() > Date.parse(campaign.claimDeadline)) throw new Error('Claim window is closed');

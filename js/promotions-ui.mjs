@@ -594,7 +594,7 @@ export function mountPublicPromotion() {
       <button type="button" data-promo-join>Register for this offer</button>
       <button type="button" data-promo-correct-mine>Correct my campaign referrer</button>
       <button type="button" data-promo-invite>Copy my referral invite</button>
-      <p>Listen using the radio bar. Cast a wallet-signed vote on a current song in this offer; see its activity window above. Both directions qualify; anonymous past votes cannot be attributed retroactively. If you already voted on this play, wait for the next song.</p>
+      <p>With your wallet connected, 👍/👎 on the radio bar count automatically after one free sign-in (valid 7 days). Both directions qualify; anonymous past votes cannot be attributed retroactively. These buttons are a fallback that signs each vote.</p>
       <button type="button" data-promo-vote="1">Vote up on current song</button>
       <button type="button" data-promo-vote="-1">Vote down on current song</button>
       <form data-promo-claim>
