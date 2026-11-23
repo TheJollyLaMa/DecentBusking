@@ -35,7 +35,7 @@ test('no token approval requests an unlimited allowance', () => {
 
 test('every approval is skipped when the existing allowance already covers the payment', () => {
   for (const call of approveCalls) {
-    assert.match(call.before, /allowance\(/, `${call.file}:${call.line} must check allowance before approving`);
+    assert.match(call.before, /allowance\(|getApproved\(/, `${call.file}:${call.line} must check allowance before approving`);
   }
 });
 

@@ -24,7 +24,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261122-musician-referral" />
+  <link rel="stylesheet" href="css/styles.css?v=20261123-song-splits" />
   <link rel="stylesheet" href="css/dmtv.css?v=20261118-dmtv-escrow" />
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth" />
   <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback" />
@@ -36,7 +36,7 @@
       "./js/radio-sync.js?v=20261030-ad-cutoff":"./js/radio-sync.js?v=20261120-boundary-sync",
       "./js/live-tip-target.mjs?v=20261114-live-direction":"./js/live-tip-target.mjs?v=20261117-public-hls",
       "./js/space.js?v=20261030-ad-cutoff":"./js/space.js?v=20261122-hls-tip-match",
-      "./js/stage.js?v=20261030-ad-cutoff":"./js/stage.js?v=20261122-tip-quote",
+      "./js/stage.js?v=20261030-ad-cutoff":"./js/stage.js?v=20261123-song-splits",
       "./js/live-audio-client.mjs":"./js/live-audio-client.mjs?v=20261117-lease-recovery",
       "./js/live-audio-client.mjs?v=20261114-direction":"./js/live-audio-client.mjs?v=20261117-lease-recovery",
       "./js/live-audio-client.mjs?v=20261114-allocated-stage":"./js/live-audio-client.mjs?v=20261117-lease-recovery",
@@ -766,9 +766,20 @@
       <p id="tip-to-label">Recipient wallet not yet verified.</p>
       <p id="tip-route" class="hint"></p>
       <div id="tip-form">
-        <label for="tip-amount">Amount <span class="hint">(ETH)</span></label>
-        <input id="tip-amount" type="number" step="0.01" min="0.01" value="1.0" />
-        <p id="tip-usdc-estimate" class="tip-usdc-estimate" role="status" aria-live="polite">USDC estimate loading…</p>
+        <div id="tip-asset-picker" class="tip-asset-picker" role="radiogroup" aria-label="What to tip" hidden>
+          <button type="button" role="radio" data-tip-asset="eth" aria-checked="true" title="ETH">Ξ</button>
+          <button type="button" role="radio" data-tip-asset="usdc" aria-checked="false" title="USDC">$</button>
+          <button type="button" role="radio" data-tip-asset="nft" aria-checked="false" title="Gift NFTs">🎁</button>
+        </div>
+        <div id="tip-amount-field">
+          <label for="tip-amount">Amount <span id="tip-amount-unit" class="hint">(ETH)</span></label>
+          <input id="tip-amount" type="number" step="0.01" min="0.01" value="1.0" />
+          <p id="tip-usdc-estimate" class="tip-usdc-estimate" role="status" aria-live="polite">USDC estimate loading…</p>
+        </div>
+        <div id="tip-gift-field" class="tip-gift-field" hidden>
+          <ul id="tip-gift-list" class="tip-gift-list" aria-label="NFT gifts"></ul>
+          <button id="tip-gift-add" type="button" class="tip-gift-add" aria-label="Add another NFT" title="Add another NFT">＋ 🎁</button>
+        </div>
         <div id="tip-status" role="status" aria-live="polite"></div>
         <div class="tip-form-actions">
           <button id="tip-send-btn" disabled>💸 Send Tip</button>
@@ -1174,21 +1185,21 @@
   <script type="module" src="js/live-booking-notifications.mjs?v=20261117-booking-assets"></script>
   <script type="module" src="js/live-performance-admin.mjs?v=20261121-typed-review"></script>
   <link rel="stylesheet" href="css/promotions.css?v=20261116-promotions">
-  <script type="module" src="js/admin.js?v=20261122-referral-calendar"></script>
+  <script type="module" src="js/admin.js?v=20261123-song-splits"></script>
   <link rel="stylesheet" href="css/content-review.css?v=20261107-flags">
   <script type="module" src="js/content-review-ui.mjs?v=20261107-flags"></script>
 
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
-  <script type="module" src="js/payroll.js?v=20261118-verified-backlog"></script>
+  <script type="module" src="js/payroll.js?v=20261123-song-splits"></script>
   <script type="module" src="js/radio-history.js?v=20261029-tally-sections"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261122-musician-referral"></script>
   <link rel="stylesheet" href="css/fund-tour.css?v=20261019-fund-tour">
-  <script type="module" src="js/fund-header.mjs?v=20261030-fund-refresh"></script>
-  <script type="module" src="js/fund-tour.mjs?v=20261030-fund-refresh"></script>
-  <script type="module" src="js/top-ten-board.mjs?v=20261110-live-program"></script>
+  <script type="module" src="js/fund-header.mjs?v=20261123-song-splits"></script>
+  <script type="module" src="js/fund-tour.mjs?v=20261123-song-splits"></script>
+  <script type="module" src="js/top-ten-board.mjs?v=20261123-song-splits"></script>
   <script type="module" src="js/djuke.mjs?v=20261112-playlist-continuity"></script>
   <script type="module" src="js/devert-site.mjs?v=20261107-review"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261122-musician-referral"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261123-song-splits"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261118-artist-artwork"></script>
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/djuke-playlists-ui.mjs?v=20261025-scheduling-info"></script>
@@ -1197,7 +1208,7 @@
   <script type="module" src="js/panel-equalizers.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/top-ten-live-meter.mjs?v=20261025-seamless-handoff"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261118-verified-backlog';
+    import { initPayroll } from './js/payroll.js?v=20261123-song-splits';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
   <script type="module">
@@ -1365,7 +1376,6 @@
         <div class="creator-split-pie-panel creator-split-review" data-song-split-review-panel hidden>
           <span class="creator-split-pie-heading">Proposed split</span>
           <div data-song-split-review-chart></div>
-          <p>Current payees and admin approve before payouts change.</p>
         </div>
       </form>
       </div>
@@ -1373,6 +1383,7 @@
       <section class="creator-split-approval" data-split-approval hidden>
         <h3 data-split-proposal-title>Split approval</h3>
         <p data-split-proposal-diff></p>
+        <div class="creator-split-pie-panel" data-split-proposal-chart hidden></div>
         <p data-split-proposal-progress role="status" aria-live="polite"></p>
         <div class="creator-profile-actions">
           <button type="button" data-split-proposal-approve>Review and approve</button>

@@ -999,8 +999,9 @@ export function createWorkerRequestHandler({
         const proposal = creatorSplitUpdateQueue.getRequest(splitCompleteMatch[1]);
         if (!proposal) throw new Error('Split proposal not found');
         if (proposal.status === 'expired' || Date.parse(proposal.expiresAt) <= now()) throw new Error('Split proposal has expired');
-        if (proposal.status !== 'pending' || proposal.approvals.length !== proposal.owners.length) {
-          throw new Error('Fully approved split proposal not found');
+        if (proposal.status !== 'pending' ||
+            (proposal.kind !== 'song' && proposal.approvals.length !== proposal.owners.length)) {
+          throw new Error('Approved split proposal not found');
         }
         const [transaction, receipt] = await Promise.all([
           rpcProvider.getTransaction(body.txHash),
@@ -1230,6 +1231,7 @@ export function createWorkerRequestHandler({
         if (!getTipLedger) { sendJson(response, 503, { error: 'Tip ledger is not configured' }, '*', 'no-store'); return; }
         const result = await getTipLedger({
           wallet: requestUrl.searchParams.get('wallet') || undefined,
+          ...(requestUrl.searchParams.get('router') ? { router: requestUrl.searchParams.get('router') } : {}),
           offset: Number(requestUrl.searchParams.get('offset') || 0),
           limit: Number(requestUrl.searchParams.get('limit') || 100),
         });

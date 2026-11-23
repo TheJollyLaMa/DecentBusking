@@ -78,6 +78,8 @@ window.DecentConfig = {
   // DecentBusking tip contract on Base (source-verified; the worker ledger reads its TipSent events).
   // Empty restores explicitly labelled legacy direct tips; failures never fall back.
   tipRouterAddress: "0xAa0207731e9F836273634F7B08cE87FfAA125183",
+  // Split tip router (v0.2) for songs with several owners; empty keeps shared-song tips disabled.
+  tipSplitRouterAddress: "",
 
   // Optional — right-ankh Uniswap link
   uniswapUrl: "",                                    // TODO: add Uniswap pool URL if desired

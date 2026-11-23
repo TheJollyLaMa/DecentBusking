@@ -1093,43 +1093,76 @@ async function main() {
   setInterval(budgetPaced(comparePayments), 15_000).unref();
 
   let liveBookings;
-  let tipLedger = null, tipLedgerReady = false, tipLedgerTask = null, tipConfigurationError = '';
+  let tipLedger = null, tipLedgerReady = false, tipConfigurationError = '';
+  let tipSplitLedger = null, tipSplitLedgerReady = false;
+  const startTipLedger = ({ routerAddress, startBlock, checkpointName, label, onReady, assets = false }) => {
+    const tipProvider = getRpcRouter().provider('logs', 'native-tip-ledger');
+    const tipStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage,
+      pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl,
+      gateway: config.ipfsGateway, name: checkpointName,
+      tags: { app: 'decentbusking', kind: 'tip-ledger', schema: '1' },
+      serialize: value => value, deserialize: (value, uri) => ({ ...value, snapshotUri: uri }),
+      beforeUpload: checkpointMirror ? (bytes, options) => checkpointMirror.mirror(bytes, options) : undefined }) : null;
+    const readSongSplit = async ({ metadata, blockNumber }) => {
+      const djuke = process.env.DJUKE_CONTRACT_ADDRESS;
+      if (!djuke) return null;
+      if (!playlistReady) return undefined;
+      const cid = contentCid(metadata).split('/')[0];
+      const track = cid && getPlaybackPlaylist().find(item =>
+        String(item.ipfsCid || '').replace(/^ipfs:\/\//i, '').split('/')[0] === cid);
+      if (!track?.trackId) return null;
+      try {
+        const song = await new Contract(djuke, DJUKE_ABI, tipProvider).getSong(id(track.trackId), { blockTag: blockNumber });
+        return [...song.recipients];
+      } catch (error) {
+        console.warn(`[${label}] Song split read:`, error.shortMessage || error.message);
+        return undefined;
+      }
+    };
+    const ledger = createTipLedger({ provider: tipProvider, routerAddress, assets,
+      startBlock: /^[0-9]+$/.test(startBlock || '') ? Number(startBlock) : undefined,
+      maxWindowsPerRun: 20,
+      restore: tipStore?.restore, save: tipStore?.save,
+      resolveContext: createTipContextResolver({ provider: tipProvider, readSongSplit,
+        collections: config.nftContractAddresses || [config.nftContractAddress],
+        readLiveBooking: createHistoricalTipBookingReader({ provider: tipProvider,
+          escrowAddress: process.env.LIVE_PERFORMANCE_ESCROW_ADDRESS || '',
+          ...(process.env.LIVE_PERFORMANCE_ASSET_ESCROW_ADDRESS ? {
+            assetEscrowAddress: process.env.LIVE_PERFORMANCE_ASSET_ESCROW_ADDRESS,
+            resolveBookingIdentity: id => {
+              if (!liveBookings) throw new Error('Booking identity service is not ready');
+              return liveBookings.getBookingIdentity(id);
+            },
+          } : {}) }) }) });
+    let ready = false, task = null;
+    const compareTips = () => {
+      if (!task) task = (ready ? ledger.compare() : ledger.initialize())
+        .then(() => { ready = true; onReady(); })
+        .catch(error => console.warn(`[${label}]`, error.shortMessage || error.message))
+        .finally(() => { task = null; });
+      return task;
+    };
+    compareTips();
+    setInterval(budgetPaced(compareTips), 15000).unref();
+    return ledger;
+  };
   if (process.env.TIP_ROUTER_ADDRESS) {
     try {
-      const tipProvider = getRpcRouter().provider('logs', 'native-tip-ledger');
-      const tipStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage,
-        pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl,
-        gateway: config.ipfsGateway, name: 'decentbusking-tip-ledger.json',
-        tags: { app: 'decentbusking', kind: 'tip-ledger', schema: '1' },
-        serialize: value => value, deserialize: (value, uri) => ({ ...value, snapshotUri: uri }),
-        beforeUpload: checkpointMirror ? (bytes, options) => checkpointMirror.mirror(bytes, options) : undefined }) : null;
-      tipLedger = createTipLedger({ provider: tipProvider, routerAddress: process.env.TIP_ROUTER_ADDRESS,
-        startBlock: /^[0-9]+$/.test(process.env.TIP_START_BLOCK || '') ? Number(process.env.TIP_START_BLOCK) : undefined,
-        maxWindowsPerRun: 20,
-        restore: tipStore?.restore, save: tipStore?.save,
-        resolveContext: createTipContextResolver({ provider: tipProvider,
-          collections: config.nftContractAddresses || [config.nftContractAddress],
-          readLiveBooking: createHistoricalTipBookingReader({ provider: tipProvider,
-            escrowAddress: process.env.LIVE_PERFORMANCE_ESCROW_ADDRESS || '',
-            ...(process.env.LIVE_PERFORMANCE_ASSET_ESCROW_ADDRESS ? {
-              assetEscrowAddress: process.env.LIVE_PERFORMANCE_ASSET_ESCROW_ADDRESS,
-              resolveBookingIdentity: id => {
-                if (!liveBookings) throw new Error('Booking identity service is not ready');
-                return liveBookings.getBookingIdentity(id);
-              },
-            } : {}) }) }) });
-      const compareTips = () => {
-        if (!tipLedgerTask) tipLedgerTask = (tipLedgerReady ? tipLedger.compare() : tipLedger.initialize())
-          .then(() => { tipLedgerReady = true; })
-          .catch(error => console.warn('[tip-ledger]', error.shortMessage || error.message))
-          .finally(() => { tipLedgerTask = null; });
-        return tipLedgerTask;
-      };
-      compareTips();
-      setInterval(budgetPaced(compareTips), 15000).unref();
+      tipLedger = startTipLedger({ routerAddress: process.env.TIP_ROUTER_ADDRESS, startBlock: process.env.TIP_START_BLOCK,
+        checkpointName: 'decentbusking-tip-ledger.json', label: 'tip-ledger', onReady: () => { tipLedgerReady = true; } });
     } catch (error) {
       tipConfigurationError = 'Tip ledger configuration is invalid; contact the operator';
       console.error('[tip-ledger] Configuration:', error.message);
+    }
+  }
+  // The v0.2 router (shared-song ETH, USDC tips, NFT gifts) has its own deployment block and checkpoint.
+  if (process.env.TIP_SPLIT_ROUTER_ADDRESS) {
+    try {
+      tipSplitLedger = startTipLedger({ routerAddress: process.env.TIP_SPLIT_ROUTER_ADDRESS,
+        startBlock: process.env.TIP_SPLIT_START_BLOCK, checkpointName: 'decentbusking-tip-split-ledger.json',
+        label: 'tip-split-ledger', assets: true, onReady: () => { tipSplitLedgerReady = true; } });
+    } catch (error) {
+      console.error('[tip-split-ledger] Configuration:', error.message);
     }
   }
 
@@ -2366,7 +2399,16 @@ async function main() {
     getPaymentLedger: () => ({ ...paymentLedger.getState(), ready: paymentLedgerReady,
       payrollAnnouncements: payrollReporter.getState(),
       repositorySync: process.env.PAYROLL_GITHUB_TOKEN ? repositorySyncError || 'automatic dispatch configured' : 'manual GitHub ledger workflow; PAYROLL_GITHUB_TOKEN not configured' }),
-    getTipLedger: options => {
+    getTipLedger: ({ router, ...options } = {}) => {
+      if (router && process.env.TIP_SPLIT_ROUTER_ADDRESS &&
+          router.toLowerCase() === process.env.TIP_SPLIT_ROUTER_ADDRESS.toLowerCase()) {
+        if (!tipSplitLedger) return { configured: false, ready: false, lastError: 'Split tip attribution is not configured' };
+        const state = tipSplitLedger.getState(options);
+        return { ...state, ready: tipSplitLedgerReady && state.ready };
+      }
+      if (router && router.toLowerCase() !== String(process.env.TIP_ROUTER_ADDRESS || '').toLowerCase()) {
+        return { configured: false, ready: false, lastError: 'Unknown tip contract' };
+      }
       if (!tipLedger) return { configured: false, ready: false,
         lastError: tipConfigurationError || 'Tip contract attribution is not configured' };
       const state = tipLedger.getState(options);

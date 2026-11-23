@@ -648,10 +648,10 @@ function _setRadioScheduleStatus(message, isError = false) {
             <span class="admin-artwork-status" data-index="${index}" role="status">Pending review</span>
           ` : track.requestType === 'split-update' ? `
             <strong>${_esc(track.title)}</strong>
-            <span>Standalone DJuke split update · ${track.approvalCount}/${track.ownerCount} current owners approved</span>
+            <span>Song split update · musician request</span>
             <span>Before: ${track.currentRecipients.map((wallet, item) => `${_esc(wallet)} · ${_esc(track.currentSharesBps[item] / 100)}%`).join(' / ')}</span>
             <span>After: ${track.recipients.map((wallet, item) => `${_esc(wallet)} · ${_esc(track.sharesBps[item] / 100)}%`).join(' / ')}</span>
-            <span class="admin-artwork-status" role="status">All current recipients signed. Admin approval calls configureSong.</span>
+            <span class="admin-artwork-status" role="status">Apply split calls configureSong.</span>
           ` : `
           <img class="admin-artwork-preview" data-index="${index}" ${track.artworkCid ? `src="${_esc(_gatewayUrl(track.artworkCid))}"` : 'hidden'} alt="Artwork for ${_esc(track.title)}" />
           <strong>${_esc(track.title)}</strong>
@@ -882,10 +882,8 @@ function _setRadioScheduleStatus(message, isError = false) {
     if (request.kind !== 'song' || request.status !== 'pending' || Date.parse(request.expiresAt) <= Date.now() ||
         !Number.isFinite(Date.parse(request.expiresAt)) ||
         request.contractAddress.toLowerCase() !== cfg.djukeContractAddress.toLowerCase() ||
-        request.resourceId !== track.resourceId ||
-        !request.owners.every(owner => request.approvals.some(approval =>
-          approval.address.toLowerCase() === owner.toLowerCase()))) {
-      throw new Error('Split approval is stale or incomplete; refresh the owner queue');
+        request.resourceId !== track.resourceId) {
+      throw new Error('Split request is stale; refresh the owner queue');
     }
     const current = await contract.getSong(request.resourceId);
     if (!current.enabled || current.audioURI !== request.audioURI ||

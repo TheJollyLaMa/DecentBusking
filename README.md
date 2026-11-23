@@ -492,12 +492,11 @@ contract is required for standalone-song edits on v0.5. Album migration and
 inheritance changes below remain gated on the undeployed v0.6 candidate.
 
 Split proposals preflight `GET /api/creator/split-status` against the configured
-chain and contract before requesting a wallet signature. A current payee's
-proposal signature counts as their approval; newly added recipients do not
-approve. A sole current payee therefore produces a ready owner-queue request
-immediately. Other current payees use the public app's `?splitProposal=…` link
-and **Review and approve**, with no gas. The owner rechecks approval status,
-expiry, and the live split before applying `configureSong`; reconciliation
+chain and contract before requesting a wallet signature. Song split requests
+from the NFT creator or a current payee go straight to the owner's Admin queue;
+other payees do not sign. Album and migration proposals still need every
+current payee's gasless approval through the `?splitProposal=…` link. The owner
+rechecks expiry and the live split before applying `configureSong`; reconciliation
 requires a confirmed on-chain result. Proposals persist in a dedicated Pinata
 checkpoint and expire after seven days.
 
@@ -511,10 +510,32 @@ percentage in each row; the total must be exactly 100%, with 1–16 distinct
 nonzero wallets. Choose **Review** to resolve names and show the proposed split.
 Editing any row invalidates that review. **Confirm** requests a gasless
 signature only after checking that the matching approval service is available.
-Current payees approve through the shared link, then the admin applies the song
-change on-chain. Creating an approval request does not change payments. Credits
+The request then shows only the proposed chart and its status (⏳ with admin,
+✅ live, ✖ declined). The admin applies the song change on-chain; creating a
+request does not change payments. Once live, split shares cover DJuke playback
+purchases, weekly radio playback payroll, Top 10 song prizes and recording tips.
+Weekly payroll receipts (schema 6) freeze each song's split when the week closes,
+so a later change never rewrites a closed week. Shared-song tips use the
+`tipSplitRouterAddress` contract (DecentBuskingTipRouter v0.2), which forwards
+every owner's share in the same transaction and holds no funds; the worker
+reads it with `TIP_SPLIT_ROUTER_ADDRESS` and `TIP_SPLIT_START_BLOCK`. Until that
+address is configured, tips on shared songs stay disabled rather than paying one
+wallet. Live performance tips still pay the booked performer in ETH. Credits
 and these shares affect DJuke artist payouts, not NFT ownership or ERC-2981
 royalties.
+
+Recording tips can also be sent through v0.2 with the tip modal's asset
+picker (Ξ ETH, $ USDC, 🎁 NFT gift). USDC tips split by the same owner shares;
+the tipper approves the exact amount and the router forwards it in one
+transaction. The router owner can allow or remove ERC-20 tokens with
+`setTokenAllowed`; only Base USDC is allowed at launch, and further tokens such
+as OMMM are added once they exist on Base. NFT gifts send up to 32 ERC-721 or
+ERC-1155 tokens in one transaction, each to a chosen owner or to every owner
+(ERC-1155 only). ERC-721 gifts use a per-token approval, and ERC-1155 gifts use
+a collection approval. The worker ledger records ETH, token and NFT events from
+v0.2, and the Profile tip ledger shows USDC totals and gifts beside ETH. As a
+prototype safeguard, the router owner can recover tokens or NFTs sent to the
+contract by mistake.
 
 The v0.6 candidate treats an untouched single-payee song as using the album
 default when it joins an album, after that payee approves migration. Existing

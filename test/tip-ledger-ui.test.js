@@ -49,6 +49,17 @@ test('tip ledger browser reader rejects wrong routes, recipients, numeric amount
     { ...state, entries: [{ ...state.entries[0], amountWei: 10000000000000001 }] },
     { ...state, entries: [{ ...state.entries[0], txHash: 'javascript:alert(1)' }] },
   ]) await assert.rejects(fetchTipLedger({ ...options, fetchImpl: async () => ({ ok: true, json: async () => bad }) }), /Invalid tip ledger/);
+  const usdc = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+  const { amountWei, ...base } = state.entries[0];
+  const token = { ...base, kind: 'token', token: usdc, amountUnits: '2500000' };
+  const gift = { ...base, kind: 'nft', collection: sender, standard: 1, tokenId: '5', amount: '2', logIndex: 4 };
+  const assets = { ...state, assets: true, total: 2, entries: [token, gift],
+    tokenTotals: { [usdc]: { attributedUnits: '2500000', unattributedUnits: '0' } }, nftGifts: { attributed: 1, unattributed: 0 } };
+  assert.equal((await fetchTipLedger({ ...options, fetchImpl: async () => ({ ok: true, json: async () => assets }) })).entries.length, 2);
+  for (const bad of [
+    { ...state, entries: [token] }, { ...assets, entries: [{ ...gift, standard: 2 }] },
+    { ...assets, entries: [{ ...token, amountUnits: '0' }] }, { ...assets, tokenTotals: { [usdc]: { attributedUnits: 5 } } },
+  ]) await assert.rejects(fetchTipLedger({ ...options, fetchImpl: async () => ({ ok: true, json: async () => bad }) }), /Invalid tip ledger/);
   await assert.rejects(fetchTipLedger({ ...options, fetchImpl: async () => ({ ok: false, status: 503,
     json: async () => ({ error: 'RPC offline' }) }) }), /RPC offline/);
 });
@@ -68,4 +79,8 @@ test('native-tip Profile disclosure stays separate from USDC and does not fetch 
   renderTipLedger({ container, address: wallet, ethers, config: { tipRouterAddress: router, ipfsUploadServiceUrl: 'https://worker.test' } });
   assert.equal(container.children[0].children[0].children[0].textContent, 'Native ETH tips');
   assert.equal(typeof container.children[0].listeners.toggle, 'function');
+  assert.equal(container.children.length, 1);
+  renderTipLedger({ container, address: wallet, ethers, config: { tipRouterAddress: router,
+    tipSplitRouterAddress: `0x${'cd'.repeat(20)}`, ipfsUploadServiceUrl: 'https://worker.test' } });
+  assert.equal(container.children[1].children[0].children[0].textContent, '👥 Shared · $ USDC · 🎁 NFT tips');
 });

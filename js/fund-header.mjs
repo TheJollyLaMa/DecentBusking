@@ -3,8 +3,8 @@ import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider
 import { escapeHtml, formatUsdcUnits, renderFundPendingTable, renderFundSummary, renderFundWeeklyArchive, renderUsdcAmount, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261024-djuke-labels';
 import { normalizeKnownAddress } from './known-addresses.mjs';
 import { currentPayrollPeriod, weekNumberFromKey } from './payroll-week.mjs';
-import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs?v=20261017-wallet-forfeiture';
-import { playbackArtistKey, previewPlaybackPayroll } from './radio-payroll.mjs?v=20261019-payroll-confirmations';
+import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs?v=20261123-song-splits';
+import { playbackArtistKey, previewPlaybackPayroll } from './radio-payroll.mjs?v=20261123-song-splits';
 import { initFundContributions } from './fund-contribution.mjs?v=20261019-fund-tour';
 import { animateFundInflow, fundInflowSnapshot, planFundInflow } from './fund-inflow.mjs?v=20261030-fund-refresh';
 import { fundBudgetFor } from './fund-budget.mjs?v=20261030-fund-refresh';

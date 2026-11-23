@@ -1,12 +1,28 @@
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const HASH = /^0x[0-9a-fA-F]{64}$/;
 const WEI = /^(0|[1-9][0-9]{0,99})$/;
+const UNITS = /^[1-9][0-9]{0,77}$/;
+const TOKEN_ID = /^(0|[1-9][0-9]{0,77})$/;
 const SOURCES = ['Live performance', 'Radio recording', 'Archive recording'];
+const KNOWN_TOKENS = { '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': { symbol: 'USDC', decimals: 6 } };
+
+function validAsset(entry, assets) {
+  if (!entry.kind) return typeof entry.amountWei === 'string' && WEI.test(entry.amountWei);
+  if (!assets) return false;
+  if (entry.kind === 'token') return ADDRESS.test(entry.token || '') && UNITS.test(entry.amountUnits || '');
+  return entry.kind === 'nft' && ADDRESS.test(entry.collection || '') && [0, 1].includes(entry.standard) &&
+    TOKEN_ID.test(entry.tokenId || '') && UNITS.test(entry.amount || '');
+}
+
+function tokenAmount(ethers, token, units) {
+  const known = KNOWN_TOKENS[String(token).toLowerCase()];
+  return known ? `${ethers.formatUnits(units, known.decimals)} ${known.symbol}` : `${units} units of ${token}`;
+}
 
 export async function fetchTipLedger({ serviceUrl, routerAddress, address, offset = 0, fetchImpl = fetch }) {
   if (!serviceUrl || !ADDRESS.test(routerAddress || '') || !ADDRESS.test(address || '')) throw new Error('Tip ledger configuration is unavailable');
   const response = await fetchImpl(`${String(serviceUrl).replace(/\/$/, '')}/api/tips/ledger?${new URLSearchParams({
-    wallet: address, offset, limit: 25,
+    wallet: address, router: routerAddress, offset, limit: 25,
   })}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) });
   const state = await response.json();
   if (!response.ok || state.ready !== true) throw new Error(state.error || state.lastError || `Tip ledger unavailable (${response.status})`);
@@ -15,14 +31,18 @@ export async function fetchTipLedger({ serviceUrl, routerAddress, address, offse
       typeof state.attributedWei !== 'string' || typeof state.unattributedWei !== 'string' ||
       !WEI.test(state.attributedWei) || !WEI.test(state.unattributedWei) ||
       !Number.isSafeInteger(state.total) || state.total < state.entries.length ||
-      (state.nextOffset !== null && (!Number.isSafeInteger(state.nextOffset) || state.nextOffset <= offset))) {
+      (state.nextOffset !== null && (!Number.isSafeInteger(state.nextOffset) || state.nextOffset <= offset)) ||
+      (state.assets === true && (!state.tokenTotals || typeof state.tokenTotals !== 'object' ||
+        Object.entries(state.tokenTotals).some(([token, total]) => !ADDRESS.test(token) ||
+          !WEI.test(total?.attributedUnits || '') || !WEI.test(total?.unattributedUnits || '')) ||
+        !Number.isSafeInteger(state.nftGifts?.attributed) || !Number.isSafeInteger(state.nftGifts?.unattributed)))) {
     throw new Error('Invalid tip ledger response');
   }
   for (const entry of state.entries) {
     if (entry.chainId !== 8453 || entry.routerAddress?.toLowerCase() !== routerAddress.toLowerCase() ||
         entry.recipient?.toLowerCase() !== address.toLowerCase() || !ADDRESS.test(entry.sender || '') ||
         !HASH.test(entry.txHash || '') || !Number.isSafeInteger(entry.logIndex) || entry.logIndex < 0 ||
-        typeof entry.amountWei !== 'string' || !WEI.test(entry.amountWei) ||
+        !validAsset(entry, state.assets === true) ||
         ![0, 1, 2].includes(entry.sourceKind) || typeof entry.contextRef !== 'string' || entry.contextRef.length > 256 ||
         typeof entry.chainVerified !== 'boolean' ||
         !['verified', 'unavailable', 'mismatch'].includes(entry.sourceVerification?.status)) {
@@ -33,6 +53,16 @@ export async function fetchTipLedger({ serviceUrl, routerAddress, address, offse
 }
 
 export function renderTipLedger({ container, config, address, ethers, isCurrent = () => true }) {
+  const sections = [renderRouterLedger({ container, config, address, ethers, isCurrent,
+    routerAddress: config.tipRouterAddress, heading: 'Native ETH tips' })];
+  if (config.tipRouterAddress && ADDRESS.test(config.tipSplitRouterAddress || '')) {
+    sections.push(renderRouterLedger({ container, config, address, ethers, isCurrent,
+      routerAddress: config.tipSplitRouterAddress, heading: '👥 Shared · $ USDC · 🎁 NFT tips' }));
+  }
+  container.replaceChildren(...sections);
+}
+
+function renderRouterLedger({ container, config, address, ethers, isCurrent, routerAddress, heading }) {
   const document = container.ownerDocument;
   const details = document.createElement('details'), summary = document.createElement('summary');
   const status = document.createElement('p'), list = document.createElement('ol'), more = document.createElement('button');
@@ -41,7 +71,7 @@ export function renderTipLedger({ container, config, address, ethers, isCurrent 
   title.className = 'creator-dropdown-title';
   details.className = 'creator-dropdown';
   body.className = 'creator-dropdown-body';
-  title.textContent = 'Native ETH tips';
+  title.textContent = heading;
   summary.append(title);
   details.style.overflowWrap = 'anywhere';
   status.setAttribute('role', 'status');
@@ -50,10 +80,9 @@ export function renderTipLedger({ container, config, address, ethers, isCurrent 
   more.hidden = true;
   body.append(status, list, more);
   details.append(summary, body);
-  container.replaceChildren(details);
-  if (config.tipRouterAddress === '' || config.tipRouterAddress === undefined) {
+  if (routerAddress === '' || routerAddress === undefined) {
     status.textContent = 'Contract attribution is not enabled. Earlier direct wallet transfers are not included in this ledger.';
-    return;
+    return details;
   }
   let nextOffset = 0, loading = false, loaded = false;
   const seen = new Set();
@@ -64,9 +93,12 @@ export function renderTipLedger({ container, config, address, ethers, isCurrent 
     status.textContent = 'Reading the separate native ETH tip ledger...';
     try {
       const state = await fetchTipLedger({ serviceUrl: config.ipfsUploadServiceUrl,
-        routerAddress: config.tipRouterAddress, address, offset: nextOffset });
+        routerAddress, address, offset: nextOffset });
       if (!isCurrent()) return;
-      title.textContent = `Native ETH tips - ${ethers.formatEther(state.attributedWei)} ETH attributed`;
+      const totals = [`${ethers.formatEther(state.attributedWei)} ETH`,
+        ...Object.entries(state.tokenTotals || {}).map(([token, total]) => tokenAmount(ethers, token, total.attributedUnits)),
+        ...(state.nftGifts?.attributed ? [`${state.nftGifts.attributed} 🎁`] : [])];
+      title.textContent = `${heading} - ${totals.join(' · ')} attributed`;
       status.textContent = `${state.total} tip receipt(s). ${ethers.formatEther(state.unattributedWei)} ETH has unverified source context. ` +
         `${!state.caughtUp || state.restoringCount ? 'Index recovery is in progress; totals are incomplete. ' : ''}` +
         `Checked ${state.lastCheckedAt || 'time unavailable'}. Not combined with USDC payroll or supporter gifts.`;
@@ -80,7 +112,10 @@ export function renderTipLedger({ container, config, address, ethers, isCurrent 
           : entry.sender === entry.recipient ? 'self-transfer, not earnings'
           : entry.sourceVerification.status === 'verified' ? 'recording/booking identity verified'
           : `source unverified: ${entry.sourceVerification.error || entry.sourceVerification.status}`;
-        label.textContent = `${ethers.formatEther(entry.amountWei)} ETH - ${SOURCES[entry.sourceKind] || 'Unknown source'} - ${entry.sourceVerification.label || ''} (${verification})`;
+        const what = entry.kind === 'token' ? tokenAmount(ethers, entry.token, entry.amountUnits)
+          : entry.kind === 'nft' ? `🎁 NFT #${entry.tokenId}${entry.standard === 1 ? ` ×${entry.amount}` : ''} from ${entry.collection}`
+          : `${ethers.formatEther(entry.amountWei)} ETH`;
+        label.textContent = `${what} - ${SOURCES[entry.sourceKind] || 'Unknown source'} - ${entry.sourceVerification.label || ''} (${verification})`;
         context.textContent = entry.contextRef;
         context.style.overflowWrap = 'anywhere';
         proof.href = `https://basescan.org/tx/${entry.txHash}#eventlog`;
@@ -106,4 +141,5 @@ export function renderTipLedger({ container, config, address, ethers, isCurrent 
   };
   details.addEventListener('toggle', () => { if (details.open && !loaded) void load(); });
   more.addEventListener('click', () => { more.textContent = 'More tip receipts'; void load(); });
+  return details;
 }

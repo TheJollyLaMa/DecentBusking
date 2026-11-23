@@ -49,7 +49,7 @@ test('split application refreshes approvals and live state before any transactio
   const contractAddress = `0x${'3'.repeat(40)}`;
   const request = { kind: 'song', status: 'pending', expiresAt: new Date(Date.now() + 60000).toISOString(),
     contractAddress, resourceId: 'song', audioURI: 'ipfs://song', owners: [owner],
-    approvals: [{ address: owner }], currentRecipients: [owner], currentSharesBps: [10000],
+    approvals: [], currentRecipients: [owner], currentSharesBps: [10000],
     recipients: [owner, added], sharesBps: [5000, 5000] };
   const current = { enabled: true, audioURI: request.audioURI, recipients: [owner], sharesBps: [10000n] };
   let transactions = 0;
@@ -72,14 +72,11 @@ test('split application refreshes approvals and live state before any transactio
   const track = { requestType: 'split-update', kind: 'song', trackId: 'proposal', resourceId: 'song', title: 'Song' };
   for (const status of ['expired', 'completed', 'superseded']) {
     request.status = status;
-    await assert.rejects(context.applySplit(track), /stale or incomplete/);
+    await assert.rejects(context.applySplit(track), /stale/);
   }
   request.status = 'pending';
-  request.approvals = [];
-  await assert.rejects(context.applySplit(track), /stale or incomplete/);
-  request.approvals = [{ address: owner }];
   request.expiresAt = new Date(Date.now() - 1000).toISOString();
-  await assert.rejects(context.applySplit(track), /stale or incomplete/);
+  await assert.rejects(context.applySplit(track), /stale/);
   request.expiresAt = new Date(Date.now() + 60000).toISOString();
   current.sharesBps = [9000n];
   await assert.rejects(context.applySplit(track), /On-chain song split changed/);

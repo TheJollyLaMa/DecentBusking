@@ -75,7 +75,7 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
       for (const record of retainedAllocations) {
         validateRadioReceipt(record.allocation, { ...receiptConfig,
           report: reports.find(report => report.week === record.allocation.week) });
-        if (![3, 4, 5].includes(record.allocation.schemaVersion) || id(JSON.stringify(record.allocation)) !== record.metadataHash || !/^ipfs:\/\/[^/\s]+$/.test(record.metadataUri)) throw new Error('Scheduled allocation proof is invalid');
+        if (![3, 4, 5, 6].includes(record.allocation.schemaVersion) || id(JSON.stringify(record.allocation)) !== record.metadataHash || !/^ipfs:\/\/[^/\s]+$/.test(record.metadataUri)) throw new Error('Scheduled allocation proof is invalid');
         const key = `${record.allocation.week}:${record.allocation.category}`;
         if (keys.has(key)) throw new Error('Duplicate scheduled allocation');
         keys.add(key);
@@ -123,11 +123,11 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
         const closing = getClosingBalance ? await getClosingBalance({ report, fundSlug: slug, allocations: allocations.filter(record => record.allocation.category === category) }) : available;
         const cap = closing < available ? closing : available;
         const budget = cap * BigInt(shareBps) / 10000n;
-        const plan = category === 'playback' ? previewPlaybackPayroll({ tracks: report.tracks, budgetUnits: budget, minimumUnits })
-          : previewTopTenSongPayroll({ tracks: report.tracks, budgetUnits: budget, minimumUnits });
+        const plan = category === 'playback' ? previewPlaybackPayroll({ tracks: report.tracks, budgetUnits: budget, minimumUnits, splitSongs: true })
+          : previewTopTenSongPayroll({ tracks: report.tracks, budgetUnits: budget, minimumUnits, splitSongs: true });
         if (!plan.entries.some(entry => entry.payable)) continue;
         const allocation = finalizeRadioAllocation({ report, category, budgetUnits: budget, minimumUnits,
-          topTenScheduleVersion: 3,
+          topTenScheduleVersion: 3, splitSongs: true,
           fundSlug: slug, routerAddress: config.routerAddress, assetAddress: asset, now: now() });
         const json = JSON.stringify(allocation);
         const metadataUri = await upload(Buffer.from(json), `${allocation.week}-${category}-allocation.json`, 'application/json');
@@ -140,8 +140,8 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
       }
       const current = latestReports.find(report => report.current);
       const budget = available * BigInt(shareBps) / 10000n;
-      const preview = category === 'playback' ? previewPlaybackPayroll({ tracks: current?.tracks || [], budgetUnits: budget, minimumUnits })
-        : previewTopTenSongPayroll({ tracks: current?.tracks || [], budgetUnits: budget, minimumUnits });
+      const preview = category === 'playback' ? previewPlaybackPayroll({ tracks: current?.tracks || [], budgetUnits: budget, minimumUnits, splitSongs: true })
+        : previewTopTenSongPayroll({ tracks: current?.tracks || [], budgetUnits: budget, minimumUnits, splitSongs: true });
       const payableCount = preview.entries.filter(entry => entry.payable).length;
       const average = payableCount ? budget / BigInt(payableCount) : 0n;
       const warning = !(fund.exists ?? fund[2]) ? 'Fund has not been created' : !approved ? 'USDC not approved' : balance < reserved
@@ -152,7 +152,8 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
         recipientCount: payableCount,
         allocatedUnits: preview.allocatedUnits.toString(), remainderUnits: preview.remainderUnits.toString(),
         forfeitedUnits: preview.forfeitedUnits.toString(), warning,
-        estimatedShares: preview.entries.map(entry => ({ ...entry, amountUnits: entry.amountUnits.toString() })) };
+        estimatedShares: preview.entries.map(entry => ({ ...entry, amountUnits: entry.amountUnits.toString(),
+          ...(entry.songAmountUnits !== undefined ? { songAmountUnits: entry.songAmountUnits.toString() } : {}) })) };
     }
     lastCheckedAt = new Date(now()).toISOString();
     return getState();

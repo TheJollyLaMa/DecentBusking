@@ -2242,6 +2242,84 @@ body.recording-edit-open #recording-edit-tab { right: var(--recording-editor-wid
   font-size: 0.78rem;
 }
 
+.tip-asset-picker {
+  display: flex;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.tip-asset-picker button {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  border: 1px solid rgba(240, 192, 64, 0.25);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--gold-dim);
+  font-size: 1.35rem;
+  cursor: pointer;
+  transition: transform var(--transition), box-shadow var(--transition), color var(--transition);
+}
+
+.tip-asset-picker button:hover,
+.tip-asset-picker button:focus-visible {
+  transform: translateY(-2px);
+  color: var(--gold);
+}
+
+.tip-asset-picker button[aria-checked="true"] {
+  color: var(--gold);
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(240, 192, 64, 0.15), 0 0 18px rgba(240, 192, 64, 0.35);
+}
+
+.tip-gift-list {
+  list-style: none;
+  margin: 0 0 0.6rem;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.tip-gift-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2.4fr) minmax(0, 1fr) 4rem minmax(0, 1.4fr) 2rem;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.tip-gift-row input,
+.tip-gift-row select {
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(240, 192, 64, 0.2);
+  border-radius: 6px;
+  padding: 0.45rem 0.5rem;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.tip-gift-row button,
+.tip-gift-add {
+  border: 1px dashed rgba(240, 192, 64, 0.35);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--gold);
+  cursor: pointer;
+  font: inherit;
+}
+
+.tip-gift-add {
+  padding: 0.3rem 0.9rem;
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 560px) {
+  .tip-gift-row { grid-template-columns: 1fr 1fr; }
+  .tip-gift-row input[data-gift="collection"] { grid-column: 1 / -1; }
+}
+
 .tip-wallet-copy {
   margin-left: 0.55rem;
   padding: 0.28rem 0.5rem;

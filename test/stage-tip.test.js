@@ -39,7 +39,8 @@ function element() {
 
 function setup({ resolve = async () => null, receipt = async () => ({ status: 1 }), chainId = 8453n,
   liveTarget = async () => null, radioState = null, serviceUrl = '', routerAddress = '',
-  protocol = {}, pendingReceipt = receipt, contractCode = '0x01', ethersImpl } = {}) {
+  protocol = {}, pendingReceipt = receipt, contractCode = '0x01', ethersImpl, configExtra = {}, songSplit = null,
+  nftStandards = {}, allowance = 0n } = {}) {
   const ids = ['hat-btn', 'tip-modal', 'tip-to-label', 'tip-artist', 'tip-song', 'tip-status',
     'tip-track-position', 'tip-prev-btn', 'tip-next-btn', 'tip-send-btn', 'tip-cancel-btn', 'tip-amount', 'tip-route',
     'tip-usdc-estimate'];
@@ -56,8 +57,9 @@ function setup({ resolve = async () => null, receipt = async () => ({ status: 1 
   const copied = [];
   const context = vm.createContext({
     console, document, setTimeout, clearTimeout, ...protocol,
+    BASE_USDC_ADDRESS: `0x${'83'.repeat(20)}`, USDC_BROWSER_ABI: [], waitForAllowance: async () => {},
     navigator: { clipboard: { writeText: async value => { copied.push(value); } } },
-    window: { ethereum: {}, _currentBuskerWallet: walletB, DecentConfig: { ipfsUploadServiceUrl: serviceUrl, tipRouterAddress: routerAddress },
+    window: { ethereum: {}, _currentBuskerWallet: walletB, DecentConfig: { ipfsUploadServiceUrl: serviceUrl, tipRouterAddress: routerAddress, ...configExtra },
       _wallet: { signer: {
         getAddress: async () => walletB,
         provider: { getNetwork: async () => ({ chainId }), getCode: async () => contractCode,
@@ -76,12 +78,35 @@ function setup({ resolve = async () => null, receipt = async () => ({ status: 1 
             contractTips.push({ address, args });
             return { hash: `0x${'34'.repeat(32)}`, wait: receipt };
           };
+          this.tipSplit = async (...args) => {
+            contractTips.push({ address, split: true, args });
+            return { hash: `0x${'34'.repeat(32)}`, wait: receipt };
+          };
+          const record = (method, args) => {
+            contractTips.push({ address, method, args });
+            return { hash: `0x${'34'.repeat(32)}`, wait: method.startsWith('tip') || method === 'giftNfts' ? receipt : async () => ({ status: 1 }) };
+          };
+          for (const method of ['tipToken', 'tipTokenSplit', 'giftNfts', 'approve', 'setApprovalForAll']) {
+            this[method] = async (...args) => record(method, args);
+          }
+          this.allowedTokens = async () => true;
+          this.balanceOf = async () => 10n ** 30n;
+          this.allowance = async () => allowance;
+          this.supportsInterface = async id => nftStandards[address.toLowerCase()] === id;
+          this.ownerOf = async () => walletB;
+          this.getApproved = async () => `0x${'00'.repeat(20)}`;
+          this.isApprovedForAll = async () => false;
+          this.getSong = async songId => {
+            if (!songSplit) throw new Error('No on-chain song');
+            return { ...songSplit, songId };
+          };
         }
       } },
     announcePaymentCelebration: detail => celebrations.push(detail),
     resolveNowPlayingNFT: resolve,
     readLiveTipTarget: liveTarget,
     getRadioStateSnapshot: () => radioState,
+    getBaseReadProvider: () => ({}),
     nftArtistLabel: nft => nft.artistName || nft.artist || 'Unknown artist',
     nftIdentity: nft => {
       if (!nft?.contractAddress || !Number.isSafeInteger(nft.tokenId)) throw new Error('Invalid NFT identity');
@@ -258,10 +283,135 @@ test('recordings with multiple creator shares fail closed instead of sending a 1
   });
   play({ ...songA, source: 'radio', nft: null });
   await elements['hat-btn'].click();
-  assert.match(elements['tip-status'].textContent, /multiple designated owner shares/);
+  assert.match(elements['tip-status'].textContent, /shared between owners/);
   assert.equal(elements['tip-send-btn'].disabled, true);
   await elements['tip-send-btn'].click();
   assert.equal(transfers.length + contractTips.length, 0);
+});
+
+test('shared songs tip every owner in one contract call using the on-chain DJuke split', async () => {
+  const protocol = await import('../js/tip-protocol.mjs');
+  const ethersImpl = require('../discord-bot/node_modules/ethers');
+  const splitRouter = `0x${'cd'.repeat(20)}`, collection = `0x${'ef'.repeat(20)}`, djuke = `0x${'56'.repeat(20)}`;
+  const songId = `0x${'78'.repeat(32)}`;
+  const expected = protocol.createTipContext({ source: 'radio', nftId: `8453:${collection}:49` });
+  const iface = new ethersImpl.Interface(protocol.TIP_ABI);
+  const amount = 10000000000000001n, first = amount * 7000n / 10000n;
+  const logs = [[walletA, first], [walletB, amount - first]].map(([recipient, value], index) => ({
+    ...iface.encodeEventLog('TipSent', [walletB, recipient, ethersImpl.id(expected.contextRef), expected.sourceKind, value, expected.contextRef]),
+    address: splitRouter, index }));
+  const nft = { ...songA.nft, contractAddress: collection, tokenId: 49, djukeSongId: songId,
+    creatorSplits: [{ wallet: walletA, shareBps: 7000 }, { wallet: walletB, shareBps: 3000 }] };
+  const { elements, play, contractTips, celebrations } = setup({
+    protocol, ethersImpl, routerAddress: `0x${'9a'.repeat(20)}`,
+    configExtra: { tipSplitRouterAddress: splitRouter, djukeContractAddress: djuke },
+    songSplit: { recipients: [walletA, walletB], sharesBps: [7000n, 3000n] },
+    receipt: async () => ({ status: 1, hash: `0x${'34'.repeat(32)}`, logs }),
+  });
+  play({ ...songA, source: 'radio', nft });
+  await elements['hat-btn'].click();
+  assert.match(elements['tip-route'].textContent, /Split between 2 song owners/);
+  elements['tip-amount'].value = '0.010000000000000001';
+  await elements['tip-send-btn'].click();
+  assert.equal(contractTips.length, 1);
+  assert.equal(contractTips[0].split, true);
+  assert.equal(contractTips[0].address, splitRouter);
+  assert.deepEqual([...contractTips[0].args[0]], [walletA, walletB]);
+  assert.deepEqual([...contractTips[0].args[1]], [7000, 3000]);
+  assert.equal(contractTips[0].args[3], expected.contextRef);
+  assert.equal(contractTips[0].args[4].value, amount);
+  assert.match(elements['tip-status'].textContent, /Tip confirmed/);
+  assert.equal(celebrations.length, 1);
+
+  const stale = setup({ protocol, ethersImpl, routerAddress: `0x${'9a'.repeat(20)}`,
+    configExtra: { tipSplitRouterAddress: splitRouter, djukeContractAddress: djuke },
+    songSplit: { recipients: [walletA, walletB], sharesBps: [5000n, 5000n] } });
+  stale.play({ ...songA, source: 'radio', nft });
+  await stale.elements['hat-btn'].click();
+  assert.match(stale.elements['tip-status'].textContent, /being updated/);
+  await stale.elements['tip-send-btn'].click();
+  assert.equal(stale.contractTips.length, 0);
+});
+
+test('USDC tips approve the exact amount, then split through the v0.2 router and verify every owner', async () => {
+  const protocol = await import('../js/tip-protocol.mjs');
+  const ethersImpl = require('../discord-bot/node_modules/ethers');
+  const assetRouter = `0x${'cd'.repeat(20)}`, collection = `0x${'ef'.repeat(20)}`, djuke = `0x${'56'.repeat(20)}`;
+  const usdc = `0x${'83'.repeat(20)}`;
+  const expected = protocol.createTipContext({ source: 'radio', nftId: `8453:${collection}:49` });
+  const iface = new ethersImpl.Interface(protocol.TIP_ASSET_ABI);
+  const logs = [[walletA, 1_750_000n], [walletB, 750_001n]].map(([recipient, value], index) => ({
+    ...iface.encodeEventLog('TokenTipSent', [walletB, recipient, ethersImpl.id(expected.contextRef), usdc, expected.sourceKind, value, expected.contextRef]),
+    address: assetRouter, index }));
+  const nft = { ...songA.nft, contractAddress: collection, tokenId: 49, djukeSongId: `0x${'78'.repeat(32)}`,
+    creatorSplits: [{ wallet: walletA, shareBps: 7000 }, { wallet: walletB, shareBps: 3000 }] };
+  const { elements, play, contractTips, celebrations, context } = setup({
+    protocol, ethersImpl, configExtra: { tipSplitRouterAddress: assetRouter, djukeContractAddress: djuke },
+    songSplit: { recipients: [walletA, walletB], sharesBps: [7000n, 3000n] },
+    receipt: async () => ({ status: 1, hash: `0x${'34'.repeat(32)}`, logs }),
+  });
+  vm.runInContext("_tipAsset = 'usdc'", context);
+  play({ ...songA, source: 'radio', nft });
+  await elements['hat-btn'].click();
+  assert.match(elements['tip-route'].textContent, /Split between 2 song owners/);
+  elements['tip-amount'].value = '2.500001';
+  await elements['tip-send-btn'].click();
+  assert.deepEqual(contractTips.map(call => call.method), ['approve', 'tipTokenSplit']);
+  assert.deepEqual(contractTips[0].args.slice(0, 2), [assetRouter, 2_500_001n]);
+  const [token, recipients, shares, amount, kind, ref] = contractTips[1].args;
+  assert.equal(token, usdc);
+  assert.deepEqual([...recipients], [walletA, walletB]);
+  assert.deepEqual([...shares], [7000, 3000]);
+  assert.equal(amount, 2_500_001n);
+  assert.equal(kind, expected.sourceKind);
+  assert.equal(ref, expected.contextRef);
+  assert.match(elements['tip-status'].textContent, /Tip confirmed/);
+  assert.equal(celebrations[0].assetText, 'USDC');
+});
+
+test('NFT gifts expand "all owners", skip the sender, refuse ERC-721 to many and verify the batch', async () => {
+  const protocol = await import('../js/tip-protocol.mjs');
+  const ethersImpl = require('../discord-bot/node_modules/ethers');
+  const assetRouter = `0x${'cd'.repeat(20)}`, collection = `0x${'ef'.repeat(20)}`, djuke = `0x${'56'.repeat(20)}`;
+  const walletC = `0x${'c3'.repeat(20)}`;
+  const editions = ethersImpl.getAddress(`0x${'e1'.repeat(20)}`), art = ethersImpl.getAddress(`0x${'e7'.repeat(20)}`);
+  const expected = protocol.createTipContext({ source: 'archive', nftId: `8453:${collection}:49` });
+  const iface = new ethersImpl.Interface(protocol.TIP_ASSET_ABI);
+  const sent = [[walletA, editions, 1, 5n, 2n], [walletC, editions, 1, 5n, 2n], [walletC, art, 0, 9n, 1n]];
+  const logs = sent.map(([recipient, nftCollection, standard, tokenId, amount], index) => ({
+    ...iface.encodeEventLog('NftGiftSent', [walletB, recipient, ethersImpl.id(expected.contextRef), nftCollection, standard, tokenId, amount, expected.sourceKind, expected.contextRef]),
+    address: assetRouter, index }));
+  const nft = { ...songA.nft, contractAddress: collection, tokenId: 49, djukeSongId: `0x${'78'.repeat(32)}`,
+    creatorSplits: [{ wallet: walletA, shareBps: 4000 }, { wallet: walletB, shareBps: 3000 }, { wallet: walletC, shareBps: 3000 }] };
+  const options = { protocol, ethersImpl, configExtra: { tipSplitRouterAddress: assetRouter, djukeContractAddress: djuke },
+    songSplit: { recipients: [walletA, walletB, walletC], sharesBps: [4000n, 3000n, 3000n] },
+    nftStandards: { [editions.toLowerCase()]: '0xd9b67a26', [art.toLowerCase()]: '0x80ac58cd' },
+    receipt: async () => ({ status: 1, hash: `0x${'34'.repeat(32)}`, logs }) };
+
+  const refused = setup(options);
+  vm.runInContext(`_tipAsset = 'nft'; _tipGifts = [{ collection: '${art}', tokenId: '9', amount: '1', recipient: 'all' }]`, refused.context);
+  refused.play({ ...songA, nft });
+  await refused.elements['hat-btn'].click();
+  await refused.elements['tip-send-btn'].click();
+  assert.match(refused.elements['tip-status'].textContent, /ERC-721 NFT can go to one owner only/);
+  assert.equal(refused.contractTips.length, 0);
+
+  const { elements, play, contractTips, celebrations, context } = setup(options);
+  vm.runInContext(`_tipAsset = 'nft'; _tipGifts = [
+    { collection: '${editions}', tokenId: '5', amount: '2', recipient: 'all' },
+    { collection: '${art}', tokenId: '9', amount: '1', recipient: '${walletC}' }]`, context);
+  play({ ...songA, nft });
+  await elements['hat-btn'].click();
+  assert.match(elements['tip-send-btn'].textContent, /Send Gifts/);
+  await elements['tip-send-btn'].click();
+  assert.deepEqual(contractTips.map(call => call.method), ['approve', 'setApprovalForAll', 'giftNfts']);
+  assert.deepEqual(contractTips[0].args.slice(0, 2), [assetRouter, '9']);
+  assert.deepEqual(contractTips[1].args.slice(0, 2), [assetRouter, true]);
+  assert.equal(JSON.stringify(contractTips[2].args[0].map(gift => [gift[4], gift[0], gift[1], gift[2], gift[3]])), JSON.stringify([
+    [walletA, editions, 1, '5', '2'], [walletC, editions, 1, '5', '2'], [walletC, art, 0, '9', '1']]));
+  assert.equal(contractTips[2].args[2], expected.contextRef);
+  assert.match(elements['tip-status'].textContent, /🎁 confirmed/);
+  assert.equal(celebrations[0].assetText, 'NFT gifts');
 });
 
 test('all cached stage importers resolve to the live-tip controller', () => {
@@ -272,7 +422,7 @@ test('all cached stage importers resolve to the live-tip controller', () => {
     const references = [...importer.matchAll(/['"](\.\/stage\.js[^'"]*)['"]/g)];
     assert.ok(references.length);
     for (const [, reference] of references) {
-      assert.equal(imports[reference.replace('./', './js/')], './js/stage.js?v=20261122-tip-quote');
+      assert.equal(imports[reference.replace('./', './js/')], './js/stage.js?v=20261123-song-splits');
     }
   }
   assert.equal(imports['./js/space.js?v=20261030-ad-cutoff'], './js/space.js?v=20261122-hls-tip-match');
@@ -531,7 +681,7 @@ test('strict catalog lookup rejects title-only matches and propagates service fa
     { requireMediaMatch: true }), /Catalog offline/);
 });
 
-test('the reused wallet icon exists and tip form describes native ETH only', () => {
+test('the reused wallet icon exists and the tip form offers ETH, USDC and NFT gifts', () => {
   assert.ok(fs.statSync(path.join(__dirname, '../img/Ens_Eth_Breathe.png')).size > 0);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /id="tip-prev-btn"/);
@@ -539,5 +689,7 @@ test('the reused wallet icon exists and tip form describes native ETH only', () 
   assert.match(html, /id="tip-track-position"/);
   assert.match(html, /id="tip-artist"/);
   assert.match(html, /id="tip-song"/);
-  assert.match(html, /Amount <span class="hint">\(ETH\)/);
+  assert.match(html, /Amount <span id="tip-amount-unit" class="hint">\(ETH\)/);
+  assert.match(html, /data-tip-asset="usdc"/);
+  assert.match(html, /data-tip-asset="nft"/);
 });

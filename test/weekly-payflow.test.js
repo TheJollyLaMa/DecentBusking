@@ -65,7 +65,7 @@ test('song prizes grow with funding, move with votes, and freeze at New York Mon
   reports.push({ week: 'NY-2026-10-19', startAt: '2026-10-19T04:00:00.000Z', current: true, tracks: [] });
   await scheduler.tick();
   const frozen = scheduler.getState().allocations.find(record => record.allocation.category === 'top10');
-  assert.equal(frozen.allocation.schemaVersion, 5);
+  assert.equal(frozen.allocation.schemaVersion, 6);
   assert.deepEqual(frozen.allocation.entries.map(entry => [entry.trackId, entry.amountUnits]), [['second', '12250000'], ['first', '6125000'], ['third', '6125000']]);
   const receipt = JSON.stringify(frozen);
   balance = 49000000n;

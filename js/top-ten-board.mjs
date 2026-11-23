@@ -1,7 +1,7 @@
 import { getCreatorWatchlistState } from './watchlist.mjs?v=20261030-ad-cutoff';
 import { renderUsdcAmount } from './fund-display.mjs?v=20261024-djuke-labels';
 import { weekNumberFromKey } from './payroll-week.mjs';
-import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs?v=20261017-wallet-forfeiture';
+import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs?v=20261123-song-splits';
 import { saveChartSongToWatchlist } from './top-ten-playlist.mjs?v=20261030-ad-cutoff';
 import { mountTopTenFestival } from './top-ten-festival.mjs?v=20261110-live-program';
 import { fundBudgetFor } from './fund-budget.mjs?v=20261030-fund-refresh';

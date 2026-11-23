@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const ownerA = `0x${'1'.repeat(40)}`;
 const ownerB = `0x${'2'.repeat(40)}`;
 
-test('split update queue becomes ready only after every current owner approves', async () => {
+test('album split update queue becomes ready only after every current owner approves', async () => {
   const { createCreatorSplitUpdateQueue } = await import('../discord-bot/creator-split-updates.js');
   let saved = [];
   const queue = createCreatorSplitUpdateQueue({
@@ -14,7 +14,7 @@ test('split update queue becomes ready only after every current owner approves',
   });
   await queue.initialize();
   const request = await queue.queueRequest({
-    kind: 'song',
+    kind: 'album',
     resourceId: `0x${'a'.repeat(64)}`,
     owners: [ownerA, ownerB],
     approvals: [{ address: ownerA, signature: 'first' }],
@@ -29,6 +29,21 @@ test('split update queue becomes ready only after every current owner approves',
   assert.equal(ready.approvals.length, 2);
   assert.equal(queue.getReadyRequests().length, 1);
   assert.equal(saved[0].approvals.length, 2);
+});
+
+test('song split requests go straight to the admin queue without payee approvals', async () => {
+  const { createCreatorSplitUpdateQueue } = await import('../discord-bot/creator-split-updates.js');
+  const queue = createCreatorSplitUpdateQueue({ now: () => Date.parse('2026-01-01T00:00:00.000Z') });
+  await queue.initialize();
+  await queue.queueRequest({
+    kind: 'song',
+    resourceId: `0x${'c'.repeat(64)}`,
+    owners: [ownerA, ownerB],
+    approvals: [],
+    requestedAt: '2026-01-01T00:00:00.000Z',
+    expiresAt: '2026-01-08T00:00:00.000Z',
+  });
+  assert.equal(queue.getReadyRequests().length, 1);
 });
 
 test('superseded and expired split proposals cannot be approved or completed', async () => {
