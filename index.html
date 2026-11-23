@@ -144,11 +144,6 @@
       </button>
     </div>
     <p id="dmtv-receipt" class="dmtv-receipt" role="status" aria-live="polite"></p>
-    <form id="dmtv-refund" hidden>
-      <label>Refund queue <select name="lane"><option value="0">DMTv</option><option value="1">Main radio</option></select></label>
-      <label>Request # <input name="requestId" inputmode="numeric" pattern="[0-9]+" required></label>
-      <button type="submit">Claim refund</button>
-    </form>
     <section class="dmtv-television" aria-label="DMTv television">
       <span class="dmtv-antenna" aria-hidden="true"></span>
       <div class="dmtv-screen-bezel">
@@ -1190,7 +1185,7 @@
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261123-dmtv-splits"></script>
+  <script type="module" src="js/main.js?v=20261123-dmtv-no-refund-form"></script>
 
   <!-- Admin role-grant panel -->
   <link rel="stylesheet" href="css/live-performance.css?v=20261121-action-status">

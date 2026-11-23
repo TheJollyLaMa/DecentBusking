@@ -50,6 +50,10 @@ export async function verifyRadioPlayback(job, serviceUrl) {
     };
     frameCallback = video.requestVideoFrameCallback(frameReady);
     return await new Promise(resolve => {
+      const finish = reason => {
+        console.info(`[dmtv-proof] ${reason}; synced ${Math.round(syncedMs)} of ${job.expectedMs} ms`);
+        resolve(syncedMs);
+      };
       async function poll() {
         controller = new AbortController();
         try {
@@ -85,11 +89,14 @@ export async function verifyRadioPlayback(job, serviceUrl) {
       void poll();
       stateTimer = setInterval(() => { if (!controller) void poll(); }, 2000);
       sampleTimer = setInterval(() => {
-        if (Date.now() >= job.deadline || audio.error || video.error) { resolve(syncedMs); return; }
+        if (Date.now() >= job.deadline || audio.error || video.error) {
+          finish(Date.now() >= job.deadline ? 'deadline' : audio.error ? `audio error ${audio.error.code}` : `video error ${video.error.code}`);
+          return;
+        }
         const audible = getAudibleBroadcast();
         const program = audible?.program;
         if (program?.playId !== job.playId || program.ipfsCid !== job.ipfsCid || program.mediaType !== 'video/mp4') {
-          if (seen && program && program.playId !== job.playId) resolve(syncedMs);
+          if (seen && program && program.playId !== job.playId) finish(`program changed to ${program.playId}`);
           measure(null);
           return;
         }
@@ -104,7 +111,7 @@ export async function verifyRadioPlayback(job, serviceUrl) {
           return;
         }
         syncedMs = measure({ position, audioTime: audio.currentTime * 1000, frameTime: frame.time, time });
-        if (syncedMs >= job.expectedMs / 2) resolve(syncedMs);
+        if (syncedMs >= job.expectedMs / 2) finish('verified');
       }, 200);
     });
   } finally {

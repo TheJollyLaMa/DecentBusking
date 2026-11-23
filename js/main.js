@@ -5,7 +5,7 @@ import { initWallet } from './wallet.js';
 import { initStage } from './stage.js?v=20261030-ad-cutoff';
 import { initSpace } from './space.js?v=20261118-artist-artwork';
 import { initTutorial } from './tutorial.js?v=20261123-split-admin-pies';
-import { initDmtv } from './dmtv.mjs?v=20261123-dmtv-splits';
+import { initDmtv } from './dmtv.mjs?v=20261123-dmtv-no-refund-form';
 import { initDBusker } from './dbusker.mjs?v=20261116-studio-polish';
 import './recording-edit-panel.mjs?v=20261119-studio-entry';
 import './right-side-panels.mjs?v=20261119-dhearse-retry';
