@@ -40,6 +40,7 @@ export async function verifyRadioPlayback(job, serviceUrl) {
   document.body.append(audio, video);
   const measure = createSyncedPlaybackMeter(job.expectedMs);
   let frame, frameCallback, stateTimer, sampleTimer, controller, transport, syncedMs = 0, seen = false, running = true;
+  let videoReloads = 0, reloadAt = 0;
   const player = createPublicRadioVideo({ video, mediaUrl: cid => `${serviceUrl}/api/radio/media?cid=${encodeURIComponent(cid)}`,
     onActive() {}, onError() { measure(null); } });
   const listener = createPublicBroadcastListener({ audio, serviceUrl, telemetry: null });
@@ -88,8 +89,19 @@ export async function verifyRadioPlayback(job, serviceUrl) {
       void poll();
       stateTimer = setInterval(() => { if (!controller) void poll(); }, 2000);
       sampleTimer = setInterval(() => {
-        if (Date.now() >= job.deadline || audio.error || video.error) {
-          finish(Date.now() >= job.deadline ? 'deadline' : audio.error ? `audio error ${audio.error.code}` : `video error ${video.error.code}`);
+        if (Date.now() >= job.deadline || audio.error) {
+          finish(audio.error ? `audio error ${audio.error.code}` : 'deadline');
+          return;
+        }
+        if (video.error) {
+          // A dropped media proxy response is transient; reload and keep counting only synced samples.
+          if (videoReloads >= 5) { finish(`video error ${video.error.code}`); return; }
+          if (Date.now() < reloadAt) return;
+          videoReloads++;
+          reloadAt = Date.now() + 2000;
+          console.info(`[dmtv-proof] video error ${video.error.code}; reloading (${videoReloads}/5)`);
+          player.stop();
+          measure(null);
           return;
         }
         const audible = getAudibleBroadcast();
