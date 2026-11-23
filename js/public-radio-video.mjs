@@ -31,6 +31,8 @@ export function createPublicRadioVideo({ video, mediaUrl, onActive, onError }) {
       playId = program.playId;
       previousMuted = video.muted;
       video.muted = true;
+      // CORS mode: Chrome's ORB blocks no-cors mid-file range responses labelled application/octet-stream.
+      video.crossOrigin = 'anonymous';
       video.src = mediaUrl(program.ipfsCid);
     }
     if (video.error && !failed) {
