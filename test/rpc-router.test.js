@@ -232,6 +232,69 @@ test('an Alchemy spending-cap refusal switches to public-only until the probe wi
   assert.deepEqual(await router.request('critical', 'eth_sendRawTransaction', ['0x05']), { result: '0xpaid' });
 });
 
+test('the local cap limits critical paid fallbacks to one probe per cooldown window', async () => {
+  const { createRpcRouter, BUDGET_MODES } = await import(moduleUrl);
+  let time = Date.UTC(2026, 9, 27);
+  const { fetchImpl, calls } = mockFetch({
+    [PUBLIC]: () => ({ status: 503 }),
+    [PAID]: () => ({ result: '0xpaid' }),
+  });
+  const router = createRpcRouter({
+    publicUrls: [PUBLIC], paidUrls: [PAID], fetchImpl, now: () => time,
+    monthlyCuBudget: 100, initialUsage: { month: '2026-10', monthCu: 100 },
+    exhaustedProbeMs: 30 * 60_000,
+  });
+  assert.equal(router.mode(), BUDGET_MODES.exhausted);
+  await router.request('critical', 'eth_call', [{ to: '0x1' }, 'latest']);
+  assert.deepEqual(calls.map(call => call.url), [PUBLIC, PAID]);
+
+  calls.length = 0;
+  await assert.rejects(router.request('critical', 'eth_call', [{ to: '0x2' }, 'latest']), /HTTP 503/);
+  assert.deepEqual(calls.map(call => call.url), [PUBLIC], 'requests share the already-claimed probe window');
+
+  time += 30 * 60_000;
+  calls.length = 0;
+  await router.request('critical', 'eth_call', [{ to: '0x3' }, 'latest']);
+  assert.deepEqual(calls.map(call => call.url), [PUBLIC, PAID], 'a new probe is allowed after cooldown');
+});
+
+test('successful public calls do not consume the exhausted paid probe', async () => {
+  const { createRpcRouter } = await import(moduleUrl);
+  let publicUp = true;
+  const { fetchImpl, calls } = mockFetch({
+    [PUBLIC]: () => publicUp ? { result: '0xpublic' } : { status: 503 },
+    [PAID]: () => ({ result: '0xpaid' }),
+  });
+  const router = createRpcRouter({
+    publicUrls: [PUBLIC], paidUrls: [PAID], fetchImpl, now: () => Date.UTC(2026, 9, 27),
+    monthlyCuBudget: 100, initialUsage: { month: '2026-10', monthCu: 100 },
+  });
+  await router.request('critical', 'eth_sendRawTransaction', ['0x01']);
+  publicUp = false;
+  assert.deepEqual(await router.request('critical', 'eth_sendRawTransaction', ['0x02']), { result: '0xpaid' });
+  assert.deepEqual(calls.map(call => call.url), [PUBLIC, PUBLIC, PAID]);
+});
+
+test('concurrent exhausted requests share one actual paid attempt, including across paid endpoints', async () => {
+  const { createRpcRouter } = await import(moduleUrl);
+  const otherPaid = 'https://other.example/rpc';
+  const { fetchImpl, calls } = mockFetch({
+    [PUBLIC]: () => ({ status: 503 }),
+    [PAID]: () => ({ status: 503 }),
+    [otherPaid]: () => ({ result: '0xpaid' }),
+  });
+  const router = createRpcRouter({
+    publicUrls: [PUBLIC], paidUrls: [PAID, otherPaid], fetchImpl, now: () => Date.UTC(2026, 9, 27),
+    monthlyCuBudget: 100, initialUsage: { month: '2026-10', monthCu: 100 },
+  });
+  const outcomes = await Promise.allSettled([
+    router.request('critical', 'eth_sendRawTransaction', ['0x01']),
+    router.request('critical', 'eth_sendRawTransaction', ['0x02']),
+  ]);
+  assert.ok(outcomes.every(outcome => outcome.status === 'rejected'));
+  assert.equal(calls.filter(call => call.url === PAID || call.url === otherPaid).length, 1);
+});
+
 test('free-tier "archive" refusals skip the endpoint without tripping its breaker', async () => {
   const { createRpcRouter } = await import(moduleUrl);
   const OTHER = 'https://base.gateway.tenderly.co';
@@ -333,11 +396,40 @@ test('paid attempts attribute consumers and expose restored but unitemized daily
   await router.provider('read', 'screen-a').send('eth_getBalance', ['0x1', 'latest']);
   await router.provider('read', 'screen-b').send('eth_getBalance', ['0x2', 'latest']);
   const { budget, computeUnits } = router.health();
-  assert.equal(budget.monthCu, 938);
-  assert.equal(computeUnits.today, 438);
-  assert.deepEqual(computeUnits.todayByMethod, { eth_getBalance: 38 });
-  assert.deepEqual(computeUnits.todayByConsumer, { 'screen-a': 19, 'screen-b': 19 });
+  assert.equal(budget.monthCu, 940);
+  assert.equal(computeUnits.today, 440);
+  assert.deepEqual(computeUnits.todayByMethod, { eth_getBalance: 40 });
+  assert.deepEqual(computeUnits.todayByConsumer, { 'screen-a': 20, 'screen-b': 20 });
   assert.equal(computeUnits.todayUnattributed, 400);
+});
+
+test('paid CU accounting matches Alchemy-published EVM method costs', async () => {
+  const { createRpcRouter } = await import(moduleUrl);
+  const { fetchImpl } = mockFetch({ [PAID]: () => ({ result: '0x1' }) });
+  const router = createRpcRouter({ paidUrls: [PAID], fetchImpl, now: () => Date.UTC(2026, 9, 20, 6) });
+  for (const [method, params] of [
+    ['eth_getLogs', [{ fromBlock: '0x1', toBlock: '0x2' }]],
+    ['eth_getBalance', ['0x1', 'latest']],
+    ['eth_getBlockByNumber', ['latest', false]],
+    ['eth_getTransactionReceipt', ['0x1']],
+    ['eth_getTransactionCount', ['0x1', 'latest']],
+    ['eth_estimateGas', [{ to: '0x1' }]],
+    ['eth_sendRawTransaction', ['0x01']],
+    ['eth_gasPrice', []],
+    ['eth_getCode', ['0x1', 'latest']],
+  ]) await router.request('critical', method, params, 'cost-check');
+  assert.deepEqual(router.health().computeUnits.todayByMethod, {
+    eth_getLogs: 60,
+    eth_getBalance: 20,
+    eth_getBlockByNumber: 20,
+    eth_getTransactionReceipt: 20,
+    eth_getTransactionCount: 20,
+    eth_estimateGas: 20,
+    eth_sendRawTransaction: 40,
+    eth_gasPrice: 20,
+    eth_getCode: 20,
+  });
+  assert.equal(router.health().computeUnits.todayByConsumer['cost-check'], 240);
 });
 
 test('cached calls retain wallet and block distinctions while critical reads bypass them', async () => {

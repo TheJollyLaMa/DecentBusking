@@ -24,7 +24,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261123-song-splits" />
+  <link rel="stylesheet" href="css/styles.css?v=20261123-split-admin-pies" />
   <link rel="stylesheet" href="css/dmtv.css?v=20261118-dmtv-escrow" />
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth" />
   <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback" />
@@ -1157,7 +1157,7 @@
   </div>
 
   <!-- Override about-modal BEFORE CDN header so DecentBusking listings are shown -->
-  <script type="module" src="js/components/about-override.js?v=20261116-promotions"></script>
+  <script type="module" src="js/components/about-override.js?v=20261123-split-admin-pies"></script>
 
   <!-- Override right-ankh BEFORE CDN header so the OMMM token code never runs -->
   <script type="module" src="js/components/header-right-ankh-override.js?v=20261025-header-compat"></script>
@@ -1178,14 +1178,14 @@
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261119-dhearse-retry"></script>
+  <script type="module" src="js/main.js?v=20261123-split-admin-pies"></script>
 
   <!-- Admin role-grant panel -->
   <link rel="stylesheet" href="css/live-performance.css?v=20261121-action-status">
   <script type="module" src="js/live-booking-notifications.mjs?v=20261117-booking-assets"></script>
   <script type="module" src="js/live-performance-admin.mjs?v=20261121-typed-review"></script>
   <link rel="stylesheet" href="css/promotions.css?v=20261116-promotions">
-  <script type="module" src="js/admin.js?v=20261123-song-splits"></script>
+  <script type="module" src="js/admin.js?v=20261123-split-admin-pies"></script>
   <link rel="stylesheet" href="css/content-review.css?v=20261107-flags">
   <script type="module" src="js/content-review-ui.mjs?v=20261107-flags"></script>
 
@@ -1199,7 +1199,7 @@
   <script type="module" src="js/top-ten-board.mjs?v=20261123-song-splits"></script>
   <script type="module" src="js/djuke.mjs?v=20261112-playlist-continuity"></script>
   <script type="module" src="js/devert-site.mjs?v=20261107-review"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261123-song-splits"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261123-split-admin-pies"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261118-artist-artwork"></script>
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/djuke-playlists-ui.mjs?v=20261025-scheduling-info"></script>
@@ -1310,16 +1310,16 @@
       <p class="creator-profile-edit-status" data-profile-edit-status role="status" aria-live="polite"></p>
     </dialog>
     <details class="creator-dropdown" data-my-nfts-section hidden>
-      <summary><span class="creator-dropdown-title">🎵 My NFTs</span><span class="creator-dropdown-count" data-my-nfts-count></span></summary>
+      <summary><span class="creator-dropdown-title">🎵 My songs</span><span class="creator-dropdown-count" data-my-nfts-count></span></summary>
       <div class="creator-dropdown-body">
-        <label class="creator-dropdown-search"><span class="sr-only">Search your NFTs</span><input data-my-nfts-search type="search" placeholder="Search title or token ID…" /></label>
+        <label class="creator-dropdown-search"><span class="sr-only">Search your songs</span><input data-my-nfts-search type="search" placeholder="Search title or token ID…" /></label>
         <section data-album-song-selection hidden>
           <p><span data-album-song-selection-count>0 selected</span> for the loaded album.</p>
           <button type="button" data-album-song-propose-selected>Propose selected songs</button>
           <p data-album-song-selection-status role="status" aria-live="polite"></p>
           <ul data-album-song-selection-links></ul>
         </section>
-        <p class="creator-dropdown-status" data-my-nfts-status role="status" aria-live="polite">Connect your wallet to search your NFTs.</p>
+        <p class="creator-dropdown-status" data-my-nfts-status role="status" aria-live="polite">Connect your wallet to search your songs.</p>
         <ol data-my-nfts-items class="creator-nft-list"></ol>
       </div>
     </details>

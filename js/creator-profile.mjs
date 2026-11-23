@@ -7,10 +7,11 @@ import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-snif
 import { canEditArtwork } from './artwork-update.mjs?v=20261118-artist-artwork';
 import { approveCreatorSplitProposal, createCreatorSplitProposal, fetchCreatorSplitProposal,
   completeCreatorSplitProposal, reconcileRemovedAlbumTrack } from './creator-split-proposal.mjs?v=20261025-song-splits';
-import { buildAlbumSplitTypedData, buildSongAlbumMigrationTypedData, buildSongSplitTypedData, resolveNftSongId } from './creator-splits.mjs?v=20261025-song-splits';
+import { buildAlbumSplitTypedData, buildSongAlbumMigrationTypedData, buildSongSplitTypedData, resolveNftSongId,
+  validateCreatorSplitRows } from './creator-splits.mjs?v=20261025-song-splits';
 import { audioCid, isMusicNft } from './nft-loader.js?v=20261025-song-identity';
 import { createSplitEditor } from './creator-split-editor.mjs?v=20261025-song-splits';
-import { renderCreatorSplitPie } from './creator-split-pie.mjs?v=20261122-split-pies';
+import { renderCreatorSplitPie } from './creator-split-pie.mjs?v=20261123-split-admin-pies';
 import { PENCIL_ICON } from './artwork-edit-badge.mjs';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs?v=20261030-ad-cutoff';
@@ -20,14 +21,6 @@ import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readC
 import { renderTipLedger } from './tip-ledger-ui.mjs?v=20261123-song-splits';
 
 import { renderWallet } from './wallet-label.mjs';
-
-const SONG_PROPOSAL_STATUS = {
-  pending: '⏳ With admin',
-  completed: '✅ Live',
-  rejected: '✖ Declined',
-  expired: '⌛ Expired',
-  superseded: '↺ Replaced',
-};
 
 export function renderMusicianCareSummary(container, profile) {
   const status = container.querySelector('[data-profile-care-status]');
@@ -115,9 +108,24 @@ const sameAddresses = (left, right) => Array.isArray(left) && Array.isArray(righ
   left.length === right.length && left.every((value, index) =>
     String(value).toLowerCase() === String(right[index]).toLowerCase());
 
+export async function readSongSplitForList(nft, { config, ethers, provider, resolveSongId = resolveNftSongId }) {
+  if (!provider) throw new Error('Base RPC unavailable');
+  const songId = await resolveSongId(nft, { config });
+  const contract = new ethers.Contract(config.djukeContractAddress, [
+    'function getSong(bytes32) view returns ((string audioURI,bool enabled,address[] recipients,uint16[] sharesBps))',
+  ], provider);
+  const song = await contract.getSong(songId);
+  if (!song.audioURI || song.enabled === false) throw new Error('Song is not registered or enabled in DJuke');
+  const expectedCid = audioCid(nft.videoUrl || nft.audioUrl || nft.animation_url);
+  if (expectedCid && audioCid(song.audioURI) !== expectedCid) throw new Error('DJuke recording does not match this song');
+  return validateCreatorSplitRows([...song.recipients].map((wallet, index) => ({
+    wallet, shareBps: Number(song.sharesBps[index]),
+  })));
+}
+
 export function buildNftListItem({
   index = 0, title, subtitle = '', meta = '', artwork = '', fallback = '🎵',
-  onOpen, onEdit = null, onSplits = null, onAlbumToggle = null, albumSelected = false, onRemove = null,
+  onOpen, onEdit = null, onSplits = null, splitRows = [], splitError = '', onAlbumToggle = null, albumSelected = false, onRemove = null,
 }) {
   const li = document.createElement('li');
   li.className = 'creator-nft-item';
@@ -162,13 +170,29 @@ export function buildNftListItem({
   details.textContent = meta;
   copy.append(heading, artist, details);
   if (onSplits) {
+    const splitTools = document.createElement('div');
+    splitTools.className = 'creator-nft-split-tools';
+    const chart = document.createElement('div');
+    chart.className = 'creator-nft-split-mini';
+    if (splitRows.length) {
+      renderCreatorSplitPie(chart, splitRows, { label: `Current payout split for ${title}`, size: 'compact' });
+    } else if (splitError) {
+      chart.classList.add('creator-nft-split-unavailable');
+      chart.textContent = '?';
+      chart.title = `Payout split unavailable: ${splitError}`;
+      chart.setAttribute('role', 'img');
+      chart.setAttribute('aria-label', chart.title);
+    }
     const button = document.createElement('button');
     button.type = 'button';
+    button.className = 'creator-nft-icon creator-nft-split-edit';
     button.dataset.songSplitSelect = '';
-    button.textContent = 'Collaborators & payments';
-    button.setAttribute('aria-label', `Collaborators and payments for ${title}`);
+    button.title = 'Edit collaborators and payments';
+    button.setAttribute('aria-label', `Edit collaborators and payments for ${title}`);
+    button.innerHTML = PENCIL_ICON;
     button.addEventListener('click', () => onSplits());
-    copy.append(button);
+    splitTools.append(chart, button);
+    copy.append(splitTools);
   }
   if (onAlbumToggle) {
     const label = document.createElement('label');
@@ -535,6 +559,26 @@ export function initCreatorProfile() {
       if (splitApprovalSection) splitApprovalSection.hidden = true;
       return;
     }
+    const songProposal = request.kind === 'song';
+    if (songProposal) {
+      splitApprovalSection.hidden = true;
+      splitProposalDiff.hidden = true;
+      if (splitProposalChart) splitProposalChart.hidden = true;
+      if (splitProposalRefresh) splitProposalRefresh.hidden = true;
+      if (splitProposalApprove) splitProposalApprove.hidden = true;
+      if (songMigrationApply) songMigrationApply.hidden = true;
+      if (splitProposalLink) splitProposalLink.hidden = true;
+      if (splitProposalStatus) splitProposalStatus.textContent = '';
+      const requestStatus = request.status === 'pending'
+        ? 'Requested change waiting for admin approval.'
+        : `Split change request ${request.status}.`;
+      message(requestStatus);
+      if (activeSong?.songId?.toLowerCase() === request.resourceId?.toLowerCase()) {
+        songSplitNotice.textContent = requestStatus;
+        songSplitNotice.hidden = false;
+      }
+      return;
+    }
     const owners = Array.isArray(request.owners) ? request.owners : [];
     const approvals = Array.isArray(request.approvals) ? request.approvals : [];
     const before = (request.currentRecipients || []).map((wallet, index) =>
@@ -542,24 +586,9 @@ export function initCreatorProfile() {
     const after = (request.recipients || []).map((wallet, index) =>
       `${wallet} · ${Number(request.sharesBps?.[index] || 0) / 100}%${request.positions?.[index] ? ` · ${request.positions[index]}` : ''}`);
     splitApprovalSection.hidden = false;
-    const songProposal = request.kind === 'song';
-    splitProposalDiff.hidden = songProposal;
-    if (splitProposalChart) splitProposalChart.hidden = !songProposal;
-    if (splitProposalRefresh) splitProposalRefresh.hidden = songProposal;
-    if (songProposal) {
-      splitProposalTitle.textContent = `⚸ ${request.title}`;
-      if (splitProposalChart) {
-        renderCreatorSplitPie(splitProposalChart, (request.recipients || []).map((wallet, index) => ({
-          wallet, shareBps: Number(request.sharesBps?.[index]), position: request.positions?.[index] || '',
-        })), { label: 'Proposed payout split' });
-      }
-      splitProposalProgress.textContent = SONG_PROPOSAL_STATUS[request.status] || SONG_PROPOSAL_STATUS.pending;
-      splitProposalApprove.hidden = true;
-      if (songMigrationApply) songMigrationApply.hidden = true;
-      splitProposalLink.hidden = true;
-      if (splitProposalStatus) splitProposalStatus.textContent = '';
-      return;
-    }
+    splitProposalDiff.hidden = false;
+    if (splitProposalChart) splitProposalChart.hidden = true;
+    if (splitProposalRefresh) splitProposalRefresh.hidden = false;
     splitProposalTitle.textContent = request.kind === 'album'
       ? `Album split approval · ${request.title}`
       : request.kind === 'migration'
@@ -602,6 +631,7 @@ export function initCreatorProfile() {
       songEditor.setRows(request.recipients.map((wallet, index) => ({
         wallet, shareBps: Number(request.sharesBps[index]), position: request.positions[index],
       })));
+      renderSplitProposal(request);
     }
     return request;
   };
@@ -666,13 +696,14 @@ export function initCreatorProfile() {
     if (!myNftsSection || !myNftsStatus || !myNftsItems || !editable()) return;
     if (myNftsAbort) myNftsAbort.abort();
     myNftsAbort = new AbortController();
+    const signal = myNftsAbort.signal;
     const query = myNftsSearch?.value?.trim() || '';
     myNftsSection.hidden = false;
-    myNftsStatus.textContent = 'Loading your NFTs…';
+    myNftsStatus.textContent = 'Loading your songs…';
     myNftsItems.replaceChildren();
     try {
       const params = new URLSearchParams({ wallet: address, limit: '25', query });
-      const response = await fetch(`${service()}/api/nfts?${params}`, { signal: myNftsAbort.signal });
+      const response = await fetch(`${service()}/api/nfts?${params}`, { signal });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || `NFTs unavailable (${response.status})`);
       const nfts = Array.isArray(result.nfts) ? result.nfts : [];
@@ -683,15 +714,16 @@ export function initCreatorProfile() {
       }
       myNftsItems.replaceChildren();
       if (!nfts.length) {
-        myNftsStatus.textContent = query ? 'No matching NFTs found.' : 'No NFTs credit this wallet yet.';
+        myNftsStatus.textContent = query ? 'No matching songs found.' : 'No songs credit this wallet yet.';
         if (myNftsCount && !query) myNftsCount.textContent = '0';
         return;
       }
-      myNftsStatus.textContent = query ? `${nfts.length} match${nfts.length === 1 ? '' : 'es'}` : 'Choose Collaborators & payments to edit a song. Tap artwork to open its card.';
+      myNftsStatus.textContent = query ? `${nfts.length} match${nfts.length === 1 ? '' : 'es'}` : 'Tap a song pie to view its split or the edit icon to change it.';
       if (myNftsCount && !query) myNftsCount.textContent = String(nfts.length);
       nfts.forEach((nft, index) => {
         const title = nft.name || nft.title || `Track #${nft.tokenId}`;
         const minted = Date.parse(nft.mintedAt || '');
+        const isSong = isMusicNft(nft);
         const li = buildNftListItem({
           index,
           title,
@@ -703,7 +735,8 @@ export function initCreatorProfile() {
           onEdit: canEditArtwork(nft, address)
             ? () => document.dispatchEvent(new CustomEvent('open-artwork-editor', { detail: { nft } }))
             : null,
-          onSplits: isMusicNft(nft) ? () => run(() => loadSongSplitEditor(nft)) : null,
+          onSplits: isSong ? () => run(() => loadSongSplitEditor(nft)) : null,
+          splitError: isSong ? 'Reading on-chain split' : '',
           onAlbumToggle: config().djukeContractVersion === '0.6' && album && nft.djukeSongId &&
             ![...album.songIds].some(songId => songId.toLowerCase() === nft.djukeSongId.toLowerCase())
             ? checked => {
@@ -715,6 +748,24 @@ export function initCreatorProfile() {
           albumSelected: !!nft.djukeSongId && selectedAlbumSongs.has(nft.djukeSongId.toLowerCase()),
         });
         myNftsItems.append(li);
+        if (isSong) {
+          const chart = li.querySelector('.creator-nft-split-mini');
+          const deployment = config();
+          void Promise.resolve().then(() => readSongSplitForList(nft, {
+            config: deployment, ethers, provider: getBaseReadProvider({ ethers, config: deployment }),
+          })).then(rows => {
+            if (signal.aborted) return;
+            chart.classList.remove('creator-nft-split-unavailable');
+            chart.removeAttribute('title');
+            chart.removeAttribute('role');
+            chart.removeAttribute('aria-label');
+            renderCreatorSplitPie(chart, rows, { label: `Current payout split for ${title}`, size: 'compact' });
+          }).catch(error => {
+            if (signal.aborted) return;
+            chart.title = `Payout split unavailable: ${error.message}`;
+            chart.setAttribute('aria-label', chart.title);
+          });
+        }
       });
       renderAlbumTracks();
       setControls();
@@ -1497,7 +1548,7 @@ export function initCreatorProfile() {
   };
   songSplitForm.addEventListener('submit', event => event.preventDefault());
   songSplitForm.querySelector('[data-song-split-review]').addEventListener('click', () => run(async () => {
-    if (!activeSong) throw new Error('Select a registered song in My NFTs first');
+    if (!activeSong) throw new Error('Select a registered song in My songs first');
     const rows = await songEditor.resolve();
     renderCreatorSplitPie(songSplitReviewChart, rows, { label: 'Proposed payout split' });
     reviewedSongRows = rows;
@@ -1537,7 +1588,7 @@ export function initCreatorProfile() {
     renderSplitProposal(response.request);
     reviewedSongRows = null;
     songSplitConfirm.hidden = true;
-    message('⏳ Sent to admin');
+    message('Requested change waiting for admin approval.');
   }));
   dialog.querySelector('[data-album-sign]').addEventListener('click', () => run(async () => {
     const proposed = await proposal();

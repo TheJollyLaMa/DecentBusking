@@ -20,6 +20,7 @@ import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?
 import { renderAdminRadioAnnouncements, requestRadioAnnouncement } from './admin-radio-announcements.mjs';
 import { removeDevertCampaign } from './devert-campaigns.mjs';
 import { renderWallet } from './wallet-label.mjs';
+import { renderCreatorSplitPie } from './creator-split-pie.mjs?v=20261123-split-admin-pies';
 import { mountAdminPromotions, mountPublicPromotion } from './promotions-ui.mjs?v=20261122-musician-referral';
 
 const ROLE_GRANT_ABI = [
@@ -647,11 +648,14 @@ function _setRadioScheduleStatus(message, isError = false) {
             <span>Current → new artwork</span>
             <span class="admin-artwork-status" data-index="${index}" role="status">Pending review</span>
           ` : track.requestType === 'split-update' ? `
+            <div class="admin-split-compare" aria-label="Current to proposed song split">
+              <div class="admin-split-state"><span>Current</span><div data-admin-split-before="${index}"></div></div>
+              <span class="admin-split-arrow" aria-hidden="true">→</span>
+              <div class="admin-split-state"><span>Proposed</span><div data-admin-split-after="${index}"></div></div>
+            </div>
             <strong>${_esc(track.title)}</strong>
-            <span>Song split update · musician request</span>
-            <span>Before: ${track.currentRecipients.map((wallet, item) => `${_esc(wallet)} · ${_esc(track.currentSharesBps[item] / 100)}%`).join(' / ')}</span>
-            <span>After: ${track.recipients.map((wallet, item) => `${_esc(wallet)} · ${_esc(track.sharesBps[item] / 100)}%`).join(' / ')}</span>
-            <span class="admin-artwork-status" role="status">Apply split calls configureSong.</span>
+            <span>Song split change · by ${_esc(track.uploader || 'musician')}</span>
+            <span class="admin-artwork-status" role="status">Requested change waiting for admin approval.</span>
           ` : `
           <img class="admin-artwork-preview" data-index="${index}" ${track.artworkCid ? `src="${_esc(_gatewayUrl(track.artworkCid))}"` : 'hidden'} alt="Artwork for ${_esc(track.title)}" />
           <strong>${_esc(track.title)}</strong>
@@ -678,6 +682,23 @@ function _setRadioScheduleStatus(message, isError = false) {
           : `<button class="admin-btn admin-btn-secondary admin-mint-one" type="button" data-index="${index}">Mint</button>`}
       </div>
     `).join('');
+    for (const [index, track] of _mintQueue.entries()) {
+      if (track.requestType !== 'split-update') continue;
+      renderCreatorSplitPie(
+        _mintQueueEl.querySelector(`[data-admin-split-before="${index}"]`),
+        track.currentRecipients.map((wallet, item) => ({
+          wallet, shareBps: Number(track.currentSharesBps[item]),
+        })),
+        { label: `Current payout split for ${track.title}`, size: 'compact' },
+      );
+      renderCreatorSplitPie(
+        _mintQueueEl.querySelector(`[data-admin-split-after="${index}"]`),
+        track.recipients.map((wallet, item) => ({
+          wallet, shareBps: Number(track.sharesBps[item]),
+        })),
+        { label: `Proposed payout split for ${track.title}`, size: 'compact' },
+      );
+    }
     if (_mintSelectedBtn) _mintSelectedBtn.disabled = false;
   }
 

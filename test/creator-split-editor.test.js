@@ -45,6 +45,26 @@ test('song editor and album default controls are separate and have no freeform s
   assert.ok(html.indexOf('data-song-split-form') < html.indexOf('data-album-section'));
 });
 
+test('song list split uses verified DJuke state, not stale or missing catalog credits', async () => {
+  const { readSongSplitForList } = await import('../js/creator-profile.mjs');
+  const first = `0x${'1'.repeat(40)}`;
+  const second = `0x${'2'.repeat(40)}`;
+  const stale = `0x${'3'.repeat(40)}`;
+  let song = { audioURI: 'ipfs://recording', enabled: true, recipients: [first, second], sharesBps: [5000n, 5000n] };
+  const ethers = { Contract: class { async getSong() { return song; } } };
+  const options = { config: { djukeContractAddress: first }, ethers, provider: {}, resolveSongId: async () => 'song-id' };
+  const nft = { audioUrl: 'ipfs://recording', creatorSplits: [{ wallet: stale, shareBps: 10000 }] };
+  assert.deepEqual(await readSongSplitForList(nft, options), [
+    { wallet: first, shareBps: 5000, position: '' },
+    { wallet: second, shareBps: 5000, position: '' },
+  ]);
+  song = { ...song, audioURI: 'ipfs://different' };
+  await assert.rejects(readSongSplitForList(nft, options), /does not match/);
+  song = { ...song, enabled: false };
+  await assert.rejects(readSongSplitForList(nft, options), /not registered or enabled/);
+  await assert.rejects(readSongSplitForList(nft, { ...options, provider: null }), /RPC unavailable/);
+});
+
 function installChartDocument(t) {
   const previous = global.document;
   class Element extends EventTarget {
@@ -85,9 +105,10 @@ test('split pie shows exact shares and clickable ENS or wallet labels on hover a
   renderCreatorSplitPie(root, [
     { wallet: first, shareBps: 7500 },
     { wallet: second, shareBps: 2500 },
-  ], { lookupName: async wallet => wallet === second ? 'producer.eth' : null });
+  ], { size: 'compact', lookupName: async wallet => wallet === second ? 'producer.eth' : null });
   await new Promise(resolve => setImmediate(resolve));
   const [chart] = root.children;
+  assert.match(chart.className, /creator-split-pie--compact/);
   const [svg, tooltip] = chart.children;
   const [firstSlice, secondSlice] = svg.children;
   assert.match(firstSlice.children[0].attributes.d, /A 94 94 0 1 1/);

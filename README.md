@@ -452,21 +452,28 @@ requires owner review instead of silently returning the old settings.
 ### Editing collaborators on an existing song
 
 Open a song card and choose **Add collaborator / split payments**, or open
-**Profile → My NFTs**, search for a song, and choose **Collaborators & payments**
+**Profile → My songs**, search for a song, and choose the pie-chart edit icon
 beside its title. Both paths open the same editor, labeled with the song title,
 NFT token (when available), and DJuke song ID. The song editor is separate from
 album creation; no album is needed to add a collaborator.
 
+Each registered song row reads its current DJuke split on Base and shows a compact,
+interactive pie; unavailable or mismatched chain data is not guessed. The pencil
+opens the editor. Review adds a proposed-split pie beneath the collaborator
+fields. Confirm signs the request and sends it to the admin queue without asking
+other payees to approve. The queue compares current and proposed splits with
+compact pies and BaseScan/ENS details on hover.
+
 Total earnings, Song collaborators & payments, and Albums & default payments
-use the same compact profile dropdowns as My NFTs, with padded content when
+use the same compact profile dropdowns as My songs, with padded content when
 expanded. Selecting a song opens its collaborator dropdown automatically.
 
 The poster links directly to `?tutorial=splits`, a seven-card white-rabbit
 walkthrough of standalone-song collaborator edits. It opens the actual Profile
-modal, My NFTs dropdown, song editor, approvals section and Admin NFT Requests
+modal, My songs dropdown, song editor, request status and Admin NFT Requests
 panel, with the bunny and spotlight beside each subject. Loaded song settings
 are preserved; when no song or request is loaded, disabled, labeled examples
-use the existing editor and approval markup in place. Panel controls are inert
+use the existing editor and request markup in place. Panel controls are inert
 during the walkthrough; no wallet connection, signature, proposal, purchase or
 payment change is triggered. Leaving restores panel visibility, dropdown state,
 scroll and interactivity, and removes all examples. Its progress and completion are
@@ -640,7 +647,7 @@ Browsers read Base from free public RPCs and only fall back to the worker's read
 
 `GET /health` reports `rpc.budget` (UTC month, estimated month-to-date CU, monthly budget, pace and mode) and `rpc.computeUnits`. `overBudget` means `exhausted`, including a provider spending-cap refusal, not merely `conserve` or `critical-only`. Conserve starts above the existing pace line and ends at or below `paceRecoveryTarget`, a quarter-day of spendable-budget headroom below that line; reserve and exhaustion thresholds still apply immediately. A restart resets the in-memory hysteresis state.
 
-CU values are approximate costs charged per paid attempt, including failures and split log scans, not provider billing. The checkpoint persists only day/month totals: after a restart `todayByMethod` and `todayByConsumer` cover this process's paid attempts, while `todayUnattributed` is the restored daily total without those breakdowns. Thus the Nov 14 total-versus-method gap is consistent with restored totals, but its exact historical callers cannot be reconstructed from that checkpoint. Consumer figures attribute a coalesced paid request to its initiating caller; cache hits and public requests cost no estimated paid CU. Counts can also lag or miss unsaved usage after a crash.
+CU values mirror Alchemy's published EVM method costs (for example, `eth_getLogs` 60 CU, `eth_estimateGas` 20 CU and `eth_sendRawTransaction` 40 CU) and are approximate costs charged per paid attempt, including failures and split log scans—not provider billing. The 60M monthly setting is a local routing limit, not an Alchemy account spending cap; at the published $0.52/M PAYG rate, $33 is about 63.5M CU, so the default leaves a margin. Verify actual usage and billing in Alchemy's dashboard. The checkpoint persists only day/month totals: after a restart `todayByMethod` and `todayByConsumer` cover this process's paid attempts, while `todayUnattributed` is the restored daily total without those breakdowns. Thus the Nov 14 total-versus-method gap is consistent with restored totals, but its exact historical callers cannot be reconstructed from that checkpoint. Consumer figures attribute a coalesced paid request to its initiating caller; cache hits and public requests cost no estimated paid CU. Counts can also lag or miss unsaved usage after a crash.
 
 The shared router coalesces identical in-flight noncritical reads and retains its existing short `eth_call`/block-number caches. The browser proxy additionally caches successful finalized code for 10 seconds and finalized block headers for 2 seconds, keyed by method and complete parameters within the chain-specific router. Latest code and headers, critical-tier reads, errors and null results are not newly cached. These limited finalized reads do not imply savings for every screen workload. Reproduce the offline before/after comparison with `node scripts/rpc-cache-measure.mjs`: it compares the issue base commit with the working router on identical mocked requests and virtual time, not live provider CU or a staging soak. Actual staging stability and matched production traffic measurements remain deployment prerequisites for closing #360.
 

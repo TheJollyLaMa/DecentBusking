@@ -1,5 +1,6 @@
 import { createSplitEditor } from './creator-split-editor.mjs?v=20261025-song-splits';
-import { renderCreatorSplitPie } from './creator-split-pie.mjs?v=20261122-split-pies';
+import { renderCreatorSplitPie } from './creator-split-pie.mjs?v=20261123-split-admin-pies';
+import { PENCIL_ICON } from './artwork-edit-badge.mjs';
 
 export function createSplitTutorialSurfaces({ overlay, document: doc = document }) {
   const profile = doc.getElementById('creator-profile');
@@ -71,7 +72,7 @@ export function createSplitTutorialSurfaces({ overlay, document: doc = document 
     remember(nfts, 'hidden', false);
     remember(nfts, 'open', true);
     if (!nfts.querySelector('[data-my-nfts-items]').children.length) {
-      const help = note('No songs loaded. In normal use, connect your wallet, search My NFTs, then select Collaborators & payments beside your song. The next card shows a labeled example in the actual editor.');
+      const help = note('No songs loaded. In normal use, connect your wallet, search My songs, then choose the pie-chart edit icon. The next card shows a labeled example in the actual editor.');
       nfts.querySelector('.creator-dropdown-body').append(help);
       examples.push(help);
       const item = doc.createElement('li');
@@ -89,31 +90,30 @@ export function createSplitTutorialSurfaces({ overlay, document: doc = document 
       copy.className = 'creator-nft-copy';
       const title = doc.createElement('strong');
       title.textContent = 'Tutorial example song — not your NFT';
+      const tools = doc.createElement('div');
+      tools.className = 'creator-nft-split-tools';
+      const chart = doc.createElement('div');
+      chart.className = 'creator-nft-split-mini';
+      renderCreatorSplitPie(chart, [
+        { wallet: '0x1111111111111111111111111111111111111111', shareBps: 10000 },
+      ], { label: 'Tutorial example payout split', size: 'compact', lookupName: async () => null, document: doc });
       const button = doc.createElement('button');
       button.type = 'button';
+      button.className = 'creator-nft-icon creator-nft-split-edit';
       button.disabled = true;
-      button.textContent = 'Collaborators & payments';
-      copy.append(title, button);
+      button.title = 'Edit collaborators and payments';
+      button.setAttribute('aria-label', 'Edit collaborators and payments for tutorial example');
+      button.innerHTML = PENCIL_ICON;
+      tools.append(chart, button);
+      copy.append(title, tools);
       item.append(art, copy);
       nfts.querySelector('[data-my-nfts-items]').append(item);
       examples.push(item);
     }
     remember(profile.querySelector('[data-song-section]'), 'open', true);
     song = exampleSong();
-    approval = profile.querySelector('[data-split-approval]');
-    if (approval.hidden) {
-      const example = approval.cloneNode(true);
-      example.hidden = false;
-      example.dataset.tutorialExample = '';
-      example.prepend(note('Tutorial approval example — no request has been created.'));
-      example.querySelector('[data-split-proposal-title]').textContent = 'Example: current-payee approval';
-      example.querySelector('[data-split-proposal-diff]').textContent = 'Creator 100% → Audio 50% / Video 50%';
-      example.querySelector('[data-split-proposal-progress]').textContent = 'All current payees must approve; the proposer’s signature counts if they are a current payee.';
-      example.querySelectorAll('button').forEach(node => { node.disabled = true; });
-      approval.after(example);
-      examples.push(example);
-      approval = example;
-    }
+    approval = profile.querySelector('[data-profile-status]');
+    remember(approval, 'textContent', 'Requested change waiting for admin approval.');
     const mint = doc.getElementById('admin-mint-section');
     const mintHidden = mint.classList.contains('hidden');
     restore.push(() => mint.classList.toggle('hidden', mintHidden));
@@ -126,7 +126,7 @@ export function createSplitTutorialSurfaces({ overlay, document: doc = document 
     const button = doc.createElement('button');
     button.type = 'button';
     button.disabled = true;
-    button.textContent = 'Apply approved song split (owner only)';
+    button.textContent = 'Apply requested song split (admin only)';
     example.append(button);
     queue.prepend(example);
     examples.push(example);

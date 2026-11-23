@@ -56,6 +56,7 @@ function fixture() {
   profile.selectors = new Map([
     ['[data-my-nfts-section]', nfts], ['[data-song-section]', section],
     ['[data-song-split-form]', form], ['[data-split-approval]', approval],
+    ['[data-profile-status]', approval],
   ]);
   profile.groups = new Map([[':scope > :not(dialog)', [nfts, section, approval, other]]]);
   admin.groups = new Map([['#admin-modal-inner > *', [mint]]]);
