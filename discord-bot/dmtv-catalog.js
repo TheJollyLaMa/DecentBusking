@@ -16,15 +16,23 @@ function videoCid(uri) {
   try { return CID.parse(root).toV1().toString(); } catch { return ''; }
 }
 
-export function dmtvCatalogEntries({ nfts, playlist, campaigns = [], blockedMedia = [] }) {
+export function dmtvCatalogEntries({ nfts, playlist, campaigns = [], blockedMedia = [], splitPayee = null }) {
   const allowedTracks = new Map(playlist.filter(isEligibleRadioMusic).map(track => [track.ipfsCid, track]));
+  const tracksByCid = new Map(playlist.filter(track => track.trackId)
+    .map(track => [videoCid(`ipfs://${String(track.ipfsCid || '').replace(/^ipfs:\/\//i, '').split('/')[0]}`), track])
+    .filter(([cid]) => cid));
   const blocked = new Set([
     ...blockedMedia.map(videoCid),
     ...playlist.filter(track => !radioContentAllowed(track)).map(track => track.ipfsCid),
   ]);
-  const minted = nfts.map(nft => ({ ...nft, nftId: nftIdentity(nft) }));
+  const minted = nfts.map(nft => {
+    const track = tracksByCid.get(videoCid(nft.videoUrl));
+    // Payout splits live on the playlist track (as in the public catalog), not on the raw minted record.
+    return { ...nft, nftId: nftIdentity(nft), ...(track ? { djukeSongId: id(track.trackId) } : {}),
+      ...(track?.creatorSplits ? { creatorSplits: track.creatorSplits } : {}) };
+  });
   const records = new Map(minted.map(nft => [nft.nftId, nft]));
-  return dmtvArchiveItems(minted, campaigns).flatMap(item => {
+  return dmtvArchiveItems(minted, campaigns, { splitPayee }).flatMap(item => {
     const ipfsCid = videoCid(item.videoUrl);
     if (!ipfsCid || blocked.has(ipfsCid)) return [];
     const nft = records.get(item.nftId);
@@ -54,8 +62,8 @@ export async function probeDmtvVideo(url) {
     video: !firstVideo.includes('(attached pic)') };
 }
 
-export function createDmtvCatalogRegistrar({ contract, getEntries, getCreator, resolveMediaUrl, probe = probeDmtvVideo,
-  batchSize = 4, now = Date.now, log = console }) {
+export function createDmtvCatalogRegistrar({ contract, getEntries, getCreator, preparePayee = async () => {},
+  resolveMediaUrl, probe = probeDmtvVideo, batchSize = 4, now = Date.now, log = console }) {
   const deferred = new Map();
   const confirmed = new Map();
   let cursor = 0;
@@ -79,26 +87,30 @@ export function createDmtvCatalogRegistrar({ contract, getEntries, getCreator, r
           const current = await contract.videos(videoId);
           const lanes = Number(current.lanes);
           const exists = current.creator !== ZeroAddress;
-          if (exists && (current.creator.toLowerCase() !== creator.toLowerCase() || current.mediaHash !== mediaHash)) {
-            throw new Error('Existing media or creator differs; admin review required');
-          }
+          if (exists && current.mediaHash !== mediaHash) throw new Error('Existing media differs; admin review required');
+          const moved = exists && current.creator.toLowerCase() !== creator.toLowerCase();
           // A configured but disabled entry may have been intentionally disabled by an admin.
-          if ((exists && !lanes) || (lanes & maxLanes) === maxLanes) {
+          if ((exists && !lanes) || (!moved && (lanes & maxLanes) === maxLanes)) {
             confirmed.set(key, now() + 300_000);
             continue;
           }
+          // Payees are re-verified on-chain (NFT creator or DJuke song split) before any write, including a move.
           if ((await getCreator(entry.nft)).toLowerCase() !== creator.toLowerCase()) {
-            throw new Error('Archive wallet does not match the NFT creator');
+            throw new Error('Archive wallet does not match the NFT payee');
           }
-          const url = await resolveMediaUrl(entry.ipfsCid);
-          if (!url) throw new Error('IPFS media not available');
-          const media = await probe(url);
-          if (!media.video) throw new Error('No playable video stream');
-          const next = lanes | (media.radio ? maxLanes : 1);
-          if (next !== lanes) {
+          let next = lanes;
+          if ((lanes & maxLanes) !== maxLanes) {
+            const url = await resolveMediaUrl(entry.ipfsCid);
+            if (!url) throw new Error('IPFS media not available');
+            const media = await probe(url);
+            if (!media.video) throw new Error('No playable video stream');
+            next = lanes | (media.radio ? maxLanes : 1);
+          }
+          if (next !== lanes || moved) {
+            await preparePayee(entry.nft, creator);
             const tx = await contract.configureVideo(videoId, mediaHash, creator, next);
             if ((await tx.wait(2))?.status !== 1) throw new Error('Catalog registration not confirmed');
-            log.log(`[dmtv-catalog] Registered ${entry.nftId}, lanes ${next}: ${tx.hash}`);
+            log.log(`[dmtv-catalog] ${moved ? `Moved payout to ${creator} for` : 'Registered'} ${entry.nftId}, lanes ${next}: ${tx.hash}`);
             registered++;
           }
           confirmed.set(key, now() + 300_000);

@@ -6,6 +6,7 @@ import { renderWalletAddress, resolveWalletLabel } from './fund-display.mjs';
 import { workerEnsProvider } from './ens-client.mjs';
 import { dmtvRadioAuthorization } from './dmtv-radio.mjs';
 import { DMTV_ESCROW_ABI, reserveDmtvVideo } from './dmtv-escrow.mjs';
+import { songSplitOwners, songSplitPayeeResolver } from './song-split-wallet.mjs';
 
 export const DMTV_PRICE_UNITS = 2000000n;
 export const DMTV_CREATOR_UNITS = 1000000n;
@@ -53,7 +54,7 @@ export function dmtvExperienceVideo(nft) {
   return uri;
 }
 
-export function dmtvArchiveItems(nfts, campaigns = []) {
+export function dmtvArchiveItems(nfts, campaigns = [], { splitPayee = null } = {}) {
   const adMedia = new Set(campaigns.map(ad => mediaKey(ad.videoUrl || ad.audioURI)).filter(Boolean));
   const seen = new Set();
   return nfts.flatMap(nft => {
@@ -64,9 +65,12 @@ export function dmtvArchiveItems(nfts, campaigns = []) {
         ['music-only', 'all-radio'].includes(nft.contentReview?.scope) ||
         /(?:subvertisement|advertisement)|^DecentAdvert(?:\b|[0-9_-])/i.test(title)) return [];
     seen.add(nftId);
-    const creator = [nft.creator, nft.artist, nft.recipient, nft.tipWallet].find(value => ADDRESS.test(value || '')) || '';
+    const owners = songSplitOwners(nft);
+    // Shared songs pay their split wallet; without one they stay unpaid rather than paying a single owner.
+    const creator = owners ? (splitPayee?.(owners) || '') :
+      [nft.creator, nft.artist, nft.recipient, nft.tipWallet].find(value => ADDRESS.test(value || '')) || '';
     const artist = [nft.ensName, nft.discordName, nft.artistName, nft.artist].find(value => typeof value === 'string' && value.trim() && !ADDRESS.test(value)) || '';
-    return [{ nftId, creator, artist, videoUrl, title: title || `Video #${nft.tokenId}` }];
+    return [{ nftId, creator, artist, videoUrl, title: title || `Video #${nft.tokenId}`, ...(owners ? { owners } : {}) }];
   });
 }
 
@@ -282,6 +286,8 @@ export function initDmtv() {
   const unsettledReservations = new Set();
   const escrowAddress = () => cfg.dmtvEscrowAddress || '';
   const isEscrow = () => ADDRESS.test(escrowAddress());
+  const splitPayee = songSplitPayeeResolver({ factory: cfg.songSplitWalletFactory,
+    implementation: cfg.songSplitWalletImplementation }, window.ethers);
   let selected = null;
   let current = null;
   let archive = [];
@@ -429,7 +435,14 @@ export function initDmtv() {
       });
       const artist = document.createElement('small');
       const label = item.artist || names.get(item.creator);
-      if (label && !label.includes('…') && !ADDRESS.test(label)) artist.textContent = label;
+      if (item.owners) {
+        artist.className = 'dmtv-split-owners';
+        artist.setAttribute('aria-label', `Shared by ${item.owners.length} owners`);
+        void import('./creator-split-pie.mjs?v=20261123-split-admin-pies')
+          .then(({ renderCreatorSplitPie }) => renderCreatorSplitPie(artist, item.owners,
+            { label: `${item.title} payout split`, size: 'compact' }))
+          .catch(() => { artist.textContent = `Shared by ${item.owners.length} owners`; });
+      } else if (label && !label.includes('…') && !ADDRESS.test(label)) artist.textContent = label;
       else if (item.creator) artist.innerHTML = renderWalletAddress(item.creator);
       else artist.textContent = 'Artist unavailable';
       row.append(tag, button, artist);
@@ -467,7 +480,8 @@ export function initDmtv() {
       const campaigns = advertState?.campaigns || [];
       const blocked = new Set((advertState?.contentBlockedMedia || []).map(mediaKey));
       catalog = records;
-      const next = dmtvArchiveItems(records, campaigns).filter(item => !blocked.has(mediaKey(item.videoUrl)));
+      const next = dmtvArchiveItems(records, campaigns, { splitPayee })
+        .filter(item => !blocked.has(mediaKey(item.videoUrl)));
       const changed = initial || JSON.stringify(archive) !== JSON.stringify(next);
       archive = next;
       ads = advertState?.paused ? [] : dmtvVideoAds(campaigns, records).filter(ad => !blocked.has(mediaKey(ad.videoUrl)));
@@ -478,7 +492,7 @@ export function initDmtv() {
         updateButtons();
       }
       if (changed) renderArchive();
-      const addresses = [...new Set(archive.filter(item => !item.artist && item.creator && !names.has(item.creator)).map(item => item.creator))];
+      const addresses = [...new Set(archive.filter(item => !item.artist && !item.owners && item.creator && !names.has(item.creator)).map(item => item.creator))];
       for (let i = 0; i < addresses.length; i += 5) {
         await Promise.all(addresses.slice(i, i + 5).map(async address => {
           try {
@@ -659,9 +673,10 @@ export function initDmtv() {
           return true;
         },
       });
+      const payee = experience.owners ? `$1 split to ${experience.owners.length} owners` : '$1 creator';
       receipt.textContent = radio
-        ? `Queued on the main radio: ${experience.title} · $1 creator + $2 weekly Playback fund.`
-        : `Queued on this device: ${experience.title} · $1 creator + $1 weekly Playback fund.`;
+        ? `Queued on the main radio: ${experience.title} · ${payee} + $2 weekly Playback fund.`
+        : `Queued on this device: ${experience.title} · ${payee} + $1 weekly Playback fund.`;
       if (!radio && !started && opened) {
         started = true;
         advance();
