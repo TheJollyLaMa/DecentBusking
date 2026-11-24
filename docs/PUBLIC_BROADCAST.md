@@ -65,6 +65,10 @@ Consult current [Workers pricing](https://developers.cloudflare.com/workers/plat
 - R2 stays private. Only the authenticated Worker accepts backend uploads.
   Public objects expire within 120 seconds even after an encoder crash; cache
   lifetimes cannot extend their expiry. A cleanup cron removes expired objects.
+  Upload expiry allows up to 30 seconds of publisher-ahead clock skew, but the
+  edge clamps stored expiry to 120 seconds from receipt. Expired, malformed or
+  further-ahead deadlines still fail with HTTP 400 and `INVALID_UPLOAD_EXPIRY`.
+  This avoids rejecting fast playlist uploads at the exact two-minute boundary.
 - The player labels the programme from actual media programme time. Tips bind to
   that audible booking and its exact performer, not the next studio performer.
   Reactions pause when the delayed audible act differs from the current studio act.
