@@ -134,11 +134,11 @@ test('known contracts render as explorer badges instead of raw addresses', async
   const { resolveWalletLabel, renderWalletButton } = await import(url);
   const wallet = await resolveWalletLabel('0x135Cbc573F87637158eb3186C87c584fb0B34CD9', null, {});
   const html = renderWalletButton(wallet, { role: 'advert' });
-  assert.match(html, /📜 DeVert v0\.1/);
+  assert.match(html, /☿📜 🔊 DeVert v0\.1/);
   assert.match(html, /basescan\.org\/address\/0x135Cbc573F87637158eb3186C87c584fb0B34CD9#code/);
   const queue = await resolveWalletLabel('0xe54609f022a8d760417e7cc0eea6360b6e1d11bb', null, {});
   const queueHtml = renderWalletButton(queue, { role: 'advert' });
-  assert.match(queueHtml, /📜 DVert paid queue v0\.2/);
+  assert.match(queueHtml, /☿📜 🔊 DVert paid queue v0\.2/);
   assert.match(queueHtml, /basescan\.org\/address\/0xe54609f022A8D760417E7cc0Eea6360b6E1D11Bb#code/);
   assert.doesNotMatch(queueHtml, /data-creator/);
   const noEns = { lookupAddress() { throw new Error('Known contracts must not need ENS'); } };
@@ -149,7 +149,7 @@ test('known contracts render as explorer badges instead of raw addresses', async
   ]) {
     for (const input of [address, address.toLowerCase(), address.toUpperCase()]) {
       const known = await resolveWalletLabel(input, noEns);
-      assert.equal(known.label, `📜 DJuke v${version}`);
+      assert.equal(known.label, `🜡🎰 🎶 DJuke v${version}`);
       assert.equal(known.kind, 'contract');
       const rendered = renderWalletButton(known, { role: 'djuke' });
       assert.ok(rendered.includes(`https://basescan.org/address/${address}#code`));

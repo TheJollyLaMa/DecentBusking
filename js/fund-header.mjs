@@ -1,7 +1,7 @@
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
-import { escapeHtml, formatUsdcUnits, renderFundPendingTable, renderFundSummary, renderFundWeeklyArchive, renderUsdcAmount, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261024-djuke-labels';
-import { normalizeKnownAddress } from './known-addresses.mjs';
+import { escapeHtml, formatUsdcUnits, renderFundPendingTable, renderFundSummary, renderFundWeeklyArchive, renderUsdcAmount, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261124-contract-sigils';
+import { isDmtvEscrow, normalizeKnownAddress } from './known-addresses.mjs?v=20261124-contract-sigils';
 import { currentPayrollPeriod, weekNumberFromKey } from './payroll-week.mjs';
 import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs?v=20261123-song-splits';
 import { playbackArtistKey, previewPlaybackPayroll } from './radio-payroll.mjs?v=20261123-song-splits';
@@ -112,6 +112,7 @@ function sourceKindLabel(kind) {
   return {
     advert: 'Advert purchase',
     djuke: 'DJuke purchase',
+    dmtv: 'DMTv purchase',
     sponsor: 'Sponsor deposit',
     payout: 'Payroll payout',
   }[kind] || 'Sponsor deposit';
@@ -123,7 +124,8 @@ async function inflowRow(source, { ensProvider, sponsorAliases, cache }) {
   const config = globalThis.window?.DecentConfig || {};
   const devertContract = normalizeKnownAddress(config.devertContractAddress || '0x135Cbc573F87637158eb3186C87c584fb0B34CD9');
   const djukeContract = normalizeKnownAddress(config.djukeContractAddress || '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9');
-  const kind = source.kind || (funder === devertContract ? 'advert' : funder === djukeContract ? 'djuke' : 'sponsor');
+  // The worker ledger labels DMTv escrow settlements as generic sponsor deposits.
+  const kind = isDmtvEscrow(funder) ? 'dmtv' : source.kind || (funder === devertContract ? 'advert' : funder === djukeContract ? 'djuke' : 'sponsor');
   const advertiser = source.advertiser ? await resolveWallet(source.advertiser, ensProvider, sponsorAliases, cache) : null;
   const extra = kind === 'advert'
     ? [source.campaignId ? `Campaign #${source.campaignId}` : '', source.title || '']
