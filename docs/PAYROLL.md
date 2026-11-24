@@ -62,8 +62,11 @@ USDC quick fills are 1, 2, 3, 5, 8, 13, 21, 108 and 1234.
 
 The icon-only bunny walks through every displayed fund, spotlighting its chart
 row with purpose and participation guidance. Back/Next/Finish, Escape, keyboard
-focus containment and reduced-motion support are included. The guide temporarily
-shows USDC so every fund is represented, then restores the prior currency. It
+focus containment and reduced-motion support are included. The guide
+owns keyboard input ahead of the page-wide tutorial while its native modal is
+on top, so Escape/Tab cannot be intercepted by the older tour. Versioned module
+aliases keep cached header/About/tutorial entry points on one contribution UI.
+It temporarily shows USDC so every fund is represented, then restores the prior currency. It
 does not connect a wallet, fill contribution amounts or request transactions.
 Only Playback/Top10 describe weekly artist allocations; work/booking/campaign
 funds follow their own approvals, and public pinner rewards remain inactive.

@@ -5,7 +5,7 @@ import { isDmtvEscrow, labelKnownAddress, normalizeKnownAddress } from './known-
 import { currentPayrollPeriod, payrollPeriods, weekNumberFromKey } from './payroll-week.mjs';
 import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs?v=20261123-song-splits';
 import { playbackArtistKey, previewPlaybackPayroll } from './radio-payroll.mjs?v=20261123-song-splits';
-import { initFundContributions } from './fund-contribution.mjs?v=20261124-fund-bunny';
+import { initFundContributions } from './fund-contribution.mjs?v=20261124-fund-bunny-keys';
 import { animateFundInflow, fundInflowSnapshot, planFundInflow } from './fund-inflow.mjs?v=20261124-lazy-funds';
 import { fundBudgetFor } from './fund-budget.mjs?v=20261030-fund-refresh';
 

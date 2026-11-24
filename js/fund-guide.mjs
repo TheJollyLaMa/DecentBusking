@@ -127,16 +127,18 @@ export function initFundGuide({ dialog, getFunds, onStart = () => {}, onStop = (
   back.addEventListener('click', () => { if (index > 0) { index--; render(); } });
   next.addEventListener('click', () => { if (index === getFunds().length - 1) stop(); else { index++; render(); } });
   root.querySelector('[data-guide-close]').addEventListener('click', stop);
-  dialog.addEventListener('keydown', event => {
+  // The top-layer guide takes precedence over the page tutorial's document capture.
+  window.addEventListener('keydown', event => {
     if (!active) return;
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); stop(); }
+    event.stopPropagation();
+    if (event.key === 'Escape') { event.preventDefault(); stop(); }
     if (event.key === 'Tab') {
       const buttons = [...card.querySelectorAll('button:not(:disabled)')];
       const current = buttons.indexOf(document.activeElement);
       event.preventDefault();
       buttons[(current + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length].focus({ preventScroll: true });
     }
-  });
+  }, true);
   dialog.addEventListener('close', stop);
   dialog.addEventListener('scroll', () => paint(), true);
   window.addEventListener('resize', () => render());

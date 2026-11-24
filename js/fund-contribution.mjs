@@ -5,7 +5,7 @@ import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { REFERRALS_FUND, CAMPAIGN_ASSETS } from './promotions.mjs?v=20261126-eth-gifts';
 import { renderFundBalanceChart } from './fund-visual.mjs?v=20261124-fund-bunny';
 import { discoverAdditionalFunds } from './fund-discovery.mjs?v=20261124-fund-bunny';
-import { initFundGuide } from './fund-guide.mjs?v=20261124-fund-bunny';
+import { initFundGuide } from './fund-guide.mjs?v=20261124-fund-bunny-keys';
 
 const DEFAULT_FUNDS = { radioFunds: { playback: 'dbusk-playback', topTen: 'dbusk-top10' },
   fundSlug: 'dbusk-repo-dev', pinnerFundSlug: 'dbusk-pinners',
