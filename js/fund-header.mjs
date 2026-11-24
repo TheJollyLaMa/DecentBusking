@@ -1,6 +1,6 @@
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
-import { escapeHtml, formatUsdcUnits, renderFundPendingTable, renderFundSummary, renderFundWeeklyArchive, renderUsdcAmount, renderWalletButton, resolveWalletLabel, shortAddress } from './fund-display.mjs?v=20261124-lazy-funds';
+import { escapeHtml, formatUsdcUnits, renderFundPendingTable, renderFundSummary, renderFundWeeklyArchive, renderUsdcAmount, renderWalletButton, resolveWalletLabel, shortAddress } from './fund-display.mjs?v=20261124-visible-payments';
 import { isDmtvEscrow, labelKnownAddress, normalizeKnownAddress } from './known-addresses.mjs?v=20261124-lazy-funds';
 import { currentPayrollPeriod, payrollPeriods, weekNumberFromKey } from './payroll-week.mjs';
 import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs?v=20261123-song-splits';
@@ -277,11 +277,23 @@ export function renderFundActivity(rows, empty = 'No confirmed transactions in t
       </tr>`).join('') : `<tr><td colspan="6" class="fund-breakdown-empty">${escapeHtml(empty)}</td></tr>`}</tbody></table>`;
 }
 
+export function visibleFundActivity(rows) {
+  const payoutWeeks = new Map();
+  for (const row of rows) {
+    if (row.direction !== 'out' || !Number.isFinite(row.timestamp) || row.timestamp <= 0) continue;
+    const week = currentPayrollPeriod(row.timestamp * 1000).week;
+    payoutWeeks.set(week, Math.min(payoutWeeks.get(week) ?? Infinity, row.timestamp));
+  }
+  const weeks = [...payoutWeeks.keys()].sort().reverse();
+  if (weeks.length < 2) return rows;
+  const cutoff = payoutWeeks.get(weeks[1]);
+  return rows.filter(row => row.timestamp >= cutoff);
+}
+
 function renderBreakdown(details, fund, fundState) {
   const { body, summary, note, title } = dialogElements();
   if (!body || !summary || !note || !title) return;
   const archive = body.querySelector('.fund-weekly-section');
-  const expandedPending = body.querySelector('details[open][data-fund-pending]')?.dataset.fundPending;
   const scrollLeft = body.scrollLeft;
   title.textContent = fundTitle(fund);
   const summaryHtml = renderFundSummary(details, { indexing: !details.historyAvailable || fundState?.ready === false });
@@ -305,14 +317,12 @@ function renderBreakdown(details, fund, fundState) {
     ${renderFundPendingTable(details.currentWeek === currentPayrollPeriod().week ? details.pendingRows : null, { fundSlug: fund.slug, week: currentPayrollPeriod().week })}
     <section class="fund-confirmed-section" aria-labelledby="fund-confirmed-title">
     <h4 id="fund-confirmed-title">Confirmed additions & payouts</h4>
-    <p class="fund-weekly-meta">This week and the previous two completed New York weeks.</p>
-    ${renderFundActivity(details.rows, details.historyAvailable ? 'No confirmed transactions in these weeks.' : 'Confirmed activity is still indexing.')}
+    <p class="fund-weekly-meta">Latest two weekly payout runs and newer additions. Earlier activity is in the weekly archives.</p>
+    ${renderFundActivity(visibleFundActivity(details.rows), details.historyAvailable ? 'No confirmed transactions in these weeks.' : 'Confirmed activity is still indexing.')}
     </section>
   `;
   if (archive) body.append(archive);
   else body.insertAdjacentHTML('beforeend', `<section class="fund-weekly-section"><details data-fund-archives><summary>🗂 Weekly archives · income & payouts</summary><div data-fund-archive-list><button type="button" data-load-fund-archives>Load archived weeks</button></div></details></section>`);
-  const pendingDetails = body.querySelector('details[data-fund-pending]');
-  if (pendingDetails) pendingDetails.open = pendingDetails.dataset.fundPending === expandedPending;
   body.scrollLeft = scrollLeft;
 }
 

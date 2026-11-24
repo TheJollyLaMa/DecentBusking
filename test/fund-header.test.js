@@ -7,6 +7,28 @@ const ethers = require('../discord-bot/node_modules/ethers');
 const url = pathToFileURL(path.join(__dirname, '../js/fund-header.mjs')).href;
 const top10 = 'dbusk-top10';
 
+test('visible activity retains two weekly payout runs, including batched logs, and archives earlier additions', async () => {
+  const { visibleFundActivity } = await import(url);
+  const row = (id, direction, time) => ({ id, direction, timestamp: Date.parse(time) / 1000 });
+  const rows = [
+    row('new-deposit', 'in', '2026-11-24T05:00:00Z'),
+    row('latest-payee-1', 'out', '2026-11-23T14:44:08Z'),
+    row('latest-payee-2', 'out', '2026-11-23T14:43:48Z'),
+    row('between-deposit', 'in', '2026-11-20T12:00:00Z'),
+    row('prior-payee', 'out', '2026-11-16T14:33:24Z'),
+    row('prior-batched-log', 'out', '2026-11-16T14:33:13Z'),
+    row('jose', 'out', '2026-11-16T14:33:13Z'),
+    row('earlier-deposit', 'in', '2026-11-16T14:33:12Z'),
+    row('older-run', 'out', '2026-11-09T14:08:46Z'),
+  ];
+  assert.deepEqual(visibleFundActivity(rows).map(entry => entry.id), rows.slice(0, 7).map(entry => entry.id));
+  assert.equal(visibleFundActivity(rows).at(-1).id, 'jose');
+  assert.equal(rows.length, 9, 'archive input remains unchanged');
+  assert.deepEqual(visibleFundActivity(rows.slice(0, 3)), rows.slice(0, 3));
+  const deposits = rows.filter(entry => entry.direction === 'in');
+  assert.deepEqual(visibleFundActivity(deposits), deposits);
+});
+
 test('explicitly unavailable balances stay unknown instead of falling back to cached or weekly money', async () => {
   const { fundStateFor, loadFundBreakdown, fundButtonHtml } = await import(url);
   const state = { ready: true, funds: { [top10]: { balanceUnits: null, balanceAvailable: false, sources: [], payouts: [] } },
