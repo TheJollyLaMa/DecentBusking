@@ -1,6 +1,6 @@
 import { liveBookingRows } from './live-bookings.mjs?v=20261108-live-audio-pilot';
 import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261030-ad-cutoff';
-import { isDmtvEscrow, labelKnownAddress, normalizeKnownAddress } from './known-addresses.mjs?v=20261124-contract-sigils';
+import { isDmtvEscrow, labelKnownAddress, normalizeKnownAddress } from './known-addresses.mjs?v=20261124-lazy-funds';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 export { formatUsdcUnits };
 const USDC_ICON = '<img class="usdc-icon" src="img/usdc.svg" alt="USDC" width="16" height="16">';

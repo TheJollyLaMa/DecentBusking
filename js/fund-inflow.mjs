@@ -10,6 +10,7 @@ export function fundInflowSnapshot(fund, week) {
     mode: fund.budgetUnits == null ? 'balance' : 'budget',
     week,
     sources: fund.sourcesAvailable === false || !Array.isArray(fund.sources) ? null : fund.sources,
+    largeSponsorDepositCount: fund.sourcesAvailable === false ? null : fund.largeSponsorDepositCount ?? null,
   };
 }
 
@@ -19,7 +20,9 @@ export function planFundInflow(previous, next) {
     previous.week !== next.week || next.balance <= previous.balance || next.amount <= previous.amount) return null;
   const delta = next.balance - previous.balance;
   const known = new Set((previous.sources || []).map(sourceKey).filter(Boolean));
-  const sponsor = previous.sources && next.sources?.some(source =>
+  const sponsor = previous.largeSponsorDepositCount != null && next.largeSponsorDepositCount != null
+    ? next.largeSponsorDepositCount > previous.largeSponsorDepositCount
+    : previous.sources && next.sources?.some(source =>
     source.kind === 'sponsor' && sourceKey(source) && !known.has(sourceKey(source)) &&
     (units(source.amountUnits) ?? 0n) >= 100_000_000n);
   const kind = sponsor && delta >= 100_000_000n ? 'bag' : delta < 1_000_000n ? 'coin' : 'dollar';

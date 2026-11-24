@@ -45,7 +45,7 @@
 .fund-tour-copy { line-height: 1.5; font-size: .95rem; }
 .fund-tour-status { color: #ffdc9c; }
 .fund-tour-actions, .fund-contribution-presets { display: flex; flex-wrap: wrap; gap: 8px; }
-.fund-tour-actions button, #fund-contribution button, #fund-tour-replay {
+.fund-tour-actions button, #fund-contribution button {
   border: 1px solid #91ddd366;
   border-radius: 12px;
   padding: 9px 12px;
@@ -89,6 +89,64 @@
 }
 #fund-contribution-status { overflow-wrap: anywhere; }
 #fund-contribution-status a { color: #91ddd3; text-decoration: underline; }
+#fund-tour-replay {
+  border: 0;
+  background: transparent;
+  padding: 4px;
+  font-size: 2rem;
+  cursor: pointer;
+  filter: drop-shadow(0 0 9px #91ddd355);
+}
+#fund-tour-replay:focus-visible, #fund-us-button:focus-visible { outline: 2px solid #91ddd3; outline-offset: 4px; }
+#fund-us-button {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 18px;
+  border: 1px solid #e7d28b77;
+  border-radius: 999px;
+  background: linear-gradient(120deg, #24463d, #30243d);
+  color: #fff4d0;
+  box-shadow: 0 0 24px #91ddd322;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  animation: fund-us-wiggle 18s ease-in-out infinite;
+}
+.fund-breakdown-heading:has(#fund-us-button) { padding-bottom: 56px; }
+#fund-us-button { top: 40px; }
+@keyframes fund-us-wiggle {
+  0%, 88%, 100% { transform: translateX(-50%) rotate(0); }
+  90%, 94% { transform: translateX(-50%) rotate(-4deg); }
+  92%, 96% { transform: translateX(-50%) rotate(4deg); }
+}
+#fund-contribution-dialog {
+  box-sizing: border-box;
+  width: min(580px, calc(100vw - 24px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid #91ddd366;
+  border-radius: 24px;
+  color: #f4f1ff;
+  background: radial-gradient(ellipse at top, #34534388, transparent 60%), linear-gradient(135deg, #101b27, #291e38);
+  box-shadow: 0 22px 90px #000b, 0 0 50px #91ddd318;
+}
+#fund-contribution-dialog::backdrop { background: #03050bd9; backdrop-filter: blur(5px); }
+#fund-contribution-close { position: sticky; top: 0; z-index: 2; float: right; border: 0; background: #17202c; border-radius: 50%; color: #f4f1ff; font-size: 1.8rem; cursor: pointer; }
+#fund-contribution-dialog #fund-contribution { border: 0; background: transparent; padding: 0; margin: 0; }
+.fund-contribution-sky { padding: 18px 0; text-align: center; font-size: 2rem; filter: drop-shadow(0 0 18px #e7d28b55); }
+#fund-contribution-heading { text-align: center; color: #ffe3a9; font-size: 1.45rem; margin: 12px 0 24px; }
+#fund-contribution-splits { margin: 18px 0; padding: 12px; border: 1px solid #91ddd344; border-radius: 14px; }
+#fund-contribution-splits label { display: flex; align-items: center; justify-content: space-between; gap: 14px; font-size: .85rem; }
+#fund-contribution-splits label > span { display: flex; align-items: center; gap: 6px; }
+#fund-contribution-splits input { width: 85px; }
+#fund-contribution-splits[hidden] { display: none; }
+#fund-contribution-preview { color: #ffe3a9; font-size: .85rem; }
+#fund-contribution-progress { padding-left: 22px; font-size: .85rem; line-height: 1.8; }
+#fund-contribution-progress a { color: #91ddd3; }
+[data-fund-archives] > summary, [data-fund-archive-list] > details > summary { cursor: pointer; padding: 14px 0; color: #e7d28b; }
+[data-fund-week-body] { padding-bottom: 20px; }
 .fund-tour-link-error { padding: 12px; color: #ffdc9c; }
 .fund-tour-active #fund-breakdown-dialog {
   padding-bottom: 45dvh;
@@ -102,4 +160,5 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .fund-tour-bunny { transition: none; animation: none !important; }
+  #fund-us-button { animation: none; }
 }
