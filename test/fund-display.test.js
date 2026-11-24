@@ -275,8 +275,9 @@ test('fund details stay in the fund modals rather than the Top10 song panel', ()
   assert.match(indexHtml, /id="dbusk-top10-button"/);
   assert.match(indexHtml, /id="dbusk-playback-button"/);
   assert.match(indexHtml, /id="fund-breakdown-dialog"/);
-  assert.match(aboutSource, /community-funds-section/);
-  assert.match(aboutSource, /Fund balances unavailable right now/);
+  assert.match(aboutSource, /id="about-fund-us"/);
+  assert.match(aboutSource, /openFundContributions\(\)/);
+  assert.doesNotMatch(aboutSource, /\/api\/funds|_loadCommunityFunds|renderFundsSection|Fund balances unavailable right now/);
   assert.doesNotMatch(topTenSource, /renderFundSourcesTable|renderFundWeeklyArchive|Funding ▾|fundsSummary/);
   assert.match(topTenSource, /fundBudgetFor\(\{ \.\.\.lastFunds, weekly \}, 'dbusk-top10'\)/);
   assert.match(topTenSource, /\/api\/payroll\/weekly/);

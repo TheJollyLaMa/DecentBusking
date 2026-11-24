@@ -412,33 +412,78 @@
     <button id="fund-contribution-close" type="button" aria-label="Close Fund Us">×</button>
       <section id="fund-contribution" aria-labelledby="fund-contribution-heading">
         <div class="fund-contribution-sky" aria-hidden="true">⚸ &nbsp; 🎸 &nbsp; ✨ &nbsp; 🎧 &nbsp; 🏆</div>
-        <h4 id="fund-contribution-heading">Grow the weekly artist pot</h4>
-        <p>Add $5, $10, $1,000 or your own amount in Base USDC. Invite a sponsor to do the same, or purchase an advertising campaign in DVert to support weekly payouts.</p>
+        <h4 id="fund-contribution-heading">Grow the weekly artist pot
+          <button id="fund-contribution-info-button" type="button" aria-label="Where funding comes from and how to follow it" aria-expanded="false" aria-controls="fund-contribution-info">ⓘ</button>
+        </h4>
+        <section id="fund-contribution-info" hidden>
+          <p>Our weekly drives receive direct community contributions and allocations from paid DVert ads, DJuke requests and DMTv purchases under each product's funding rules. A deposit adds to its named fund; it does not guarantee a particular artist's payout.</p>
+          <p>Top10 and Playback accept USDC only. Other active funds accept USDC, ETH, or both. Each currency has its own total and balance: the chart never treats ETH as dollars. Percentage mode splits each total; amount mode must add up exactly to that currency's total. No currency is automatically exchanged: ETH stays in its named fund and does not increase USDC payroll budgets.</p>
+          <p>Follow the trail: open the Top10 or Playback fund pill for current pending allocations and confirmed additions/payouts. Open a week's archive for its income and payment proofs. Each transaction links to Basescan: check the sender, settlement-router address, asset, amount and FundFunded or PayrollPaid event. An approval alone is not a contribution.</p>
+          <p><a href="https://basescan.org/address/0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5#events" target="_blank" rel="noopener">Inspect the shared settlement router on Basescan ↗</a>. Funds remain owner-managed and recoverable, not contributor-withdrawable escrow.</p>
+        </section>
+        <section class="fund-visual" aria-label="Current fund balances">
+          <div class="fund-visual-controls">
+            <div role="group" aria-label="Balance chart currency">
+              <button type="button" data-fund-chart-asset="usdc" aria-pressed="true">USDC</button>
+              <button type="button" data-fund-chart-asset="eth" aria-pressed="false">Ξ ETH</button>
+            </div>
+            <button id="fund-chart-toggle" type="button" aria-label="Show pie chart">◉ Pie view</button>
+            <button id="fund-receipts-open" type="button">🧾 Receipts</button>
+          </div>
+          <div id="fund-balance-chart" aria-live="polite"></div>
+        </section>
         <form id="fund-contribution-form">
           <label>Choose the fund
             <select id="fund-contribution-slug">
-              <option value="dbusk-playback">Playback artist payments</option>
-              <option value="dbusk-top10">Top 10 song prizes</option>
+              <option value="">Open Fund Us to check available funds</option>
+            </select>
+          </label>
+          <p id="fund-contribution-balances" role="status" aria-live="polite"></p>
+          <button id="fund-contribution-retry" type="button" hidden>Retry fund balances</button>
+          <label hidden>Split by
+            <select id="fund-contribution-mode">
+              <option value="percent">Percentage of each currency total</option>
+              <option value="amount">Exact amounts matching each currency total</option>
             </select>
           </label>
           <fieldset id="fund-contribution-splits" hidden aria-label="Custom fund split percentages"></fieldset>
-          <div class="fund-contribution-presets" aria-label="Suggested contribution amounts">
+          <div class="fund-contribution-presets" aria-label="Quick-fill USDC totals">
+            <button type="button" data-contribution-amount="1">$1</button>
+            <button type="button" data-contribution-amount="2">$2</button>
+            <button type="button" data-contribution-amount="3">$3</button>
             <button type="button" data-contribution-amount="5">$5</button>
-            <button type="button" data-contribution-amount="10">$10</button>
-            <button type="button" data-contribution-amount="1000">$1,000</button>
+            <button type="button" data-contribution-amount="8">$8</button>
+            <button type="button" data-contribution-amount="13">$13</button>
+            <button type="button" data-contribution-amount="21">$21</button>
+            <button type="button" data-contribution-amount="108">$108</button>
+            <button type="button" data-contribution-amount="1234">$1234</button>
           </div>
-          <label>Amount (USDC)
+          <label>Total to contribute / split (USDC)
             <input id="fund-contribution-amount" type="text" inputmode="decimal" value="5" required autocomplete="off">
           </label>
+          <label id="fund-contribution-eth-label" hidden>Total to contribute / split (ETH)
+            <input id="fund-contribution-eth" type="text" inputmode="decimal" value="0" required autocomplete="off">
+          </label>
           <p id="fund-contribution-preview" aria-live="polite"></p>
-          <button type="submit">✨ Contribute USDC</button>
-          <button id="fund-contribution-check" type="button">Check unresolved contribution</button>
-          <button id="fund-contribution-resume" type="button">Resume unfinished split</button>
-          <button id="fund-contribution-stop" type="button">Stop unsent split legs</button>
-          <ol id="fund-contribution-progress"></ol>
-          <p id="fund-contribution-status" role="status" aria-live="polite"></p>
+          <button type="submit">✨ Review contribution</button>
         </form>
       </section>
+      <aside id="fund-contribution-receipt" aria-labelledby="fund-receipt-heading" tabindex="-1" hidden>
+        <button id="fund-receipts-close" type="button" aria-label="Close contribution confirmation">×</button>
+        <h4 id="fund-receipt-heading">🧾 Your contribution</h4>
+        <ol id="fund-contribution-progress"></ol>
+        <p>Base network · keep ETH for gas. At most one exact USDC approval, then one transaction per fund/currency. Confirmed contributions stay sent if you stop later.</p>
+        <button id="fund-contribution-confirm" type="button" hidden>Confirm &amp; open wallet</button>
+        <button id="fund-recovery-connect" type="button" hidden>Connect wallet for saved receipts</button>
+        <div id="fund-contribution-recovery" hidden>
+          <p>Resume checks saved receipts first and never resends confirmed legs. Stopping affects only unsent transactions.</p>
+          <button id="fund-contribution-check" type="button" hidden>Verify USDC receipt</button>
+          <button id="fund-contribution-check-eth" type="button" hidden>Verify ETH receipt</button>
+          <button id="fund-contribution-resume" type="button" hidden>Continue remaining transactions</button>
+          <button id="fund-contribution-stop" type="button" hidden>Stop unsent remainder</button>
+        </div>
+        <p id="fund-contribution-status" role="status" aria-live="polite"></p>
+      </aside>
   </dialog>
 
   <!-- MAIN STAGE -->
@@ -1178,7 +1223,7 @@
   </div>
 
   <!-- Override about-modal BEFORE CDN header so DecentBusking listings are shown -->
-  <script type="module" src="js/components/about-override.js?v=20261123-split-admin-pies"></script>
+  <script type="module" src="js/components/about-override.js?v=20261124-verified-funds"></script>
 
   <!-- Override right-ankh BEFORE CDN header so the OMMM token code never runs -->
   <script type="module" src="js/components/header-right-ankh-override.js?v=20261025-header-compat"></script>
@@ -1214,8 +1259,8 @@
   <script type="module" src="js/payroll.js?v=20261123-supporter-queue"></script>
   <script type="module" src="js/radio-history.js?v=20261029-tally-sections"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261122-musician-referral"></script>
-  <link rel="stylesheet" href="css/fund-tour.css?v=20261124-lazy-funds">
-  <script type="module" src="js/fund-header.mjs?v=20261124-visible-payments"></script>
+  <link rel="stylesheet" href="css/fund-tour.css?v=20261124-verified-funds">
+  <script type="module" src="js/fund-header.mjs?v=20261124-verified-funds"></script>
   <script type="module" src="js/fund-tour.mjs?v=20261124-visible-payments"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261123-song-splits"></script>
   <script type="module" src="js/djuke.mjs?v=20261112-playlist-continuity"></script>

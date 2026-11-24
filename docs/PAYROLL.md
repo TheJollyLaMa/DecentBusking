@@ -34,23 +34,43 @@ opened, then each selected week's income, actual payouts and frozen allocation
 receipts on demand. Funding-only weeks are included. BaseScan links remain
 available for both income and payouts; an allocation is not proof of payment.
 
-The centered **Fund Us** button opens a separate contribution modal. It offers
-all six configured settlement allocations and an exact-percentage custom split.
-Splits use one deposit transaction per fund, not an atomic batch. Amounts are
-calculated in micro-USDC with any rounding remainder assigned to the last
-selected fund; percentages must total 100%. Confirmed legs retain their
-transaction links if a later leg fails or is cancelled. **Resume unfinished
-split** checks uncertain receipts and sends only remaining legs. As with single
+The centered **Fund Us** button and About's matching button open the same
+contribution modal. Opening About no longer fetches the complete ledger or
+resolves its wallets. Fund Us lazily reads the Base router through the shared
+public-first read provider: only configured candidate funds (including
+`dbusk-referrals`) that actually exist and are active appear. Results are shared
+for 15 seconds and refreshed after contributions. Failed reads show an explicit
+retry state and disable new contributions, never invent zero balances.
+
+The switchable 3D-style bar/pie visual shows current total balances, not weekly
+spendable budgets or fundraising targets. ETH and USDC have separate views and
+exact amount labels. Top10 and Playback accept USDC only in this UI; other
+active funds offer both USDC and native ETH. ETH is not converted into USDC and
+does not increase USDC payroll budgets. The information button explains funding
+sources and how to inspect weekly income/payout proofs and router events.
+USDC quick fills are 1, 2, 3, 5, 8, 13, 21, 108 and 1234.
+
+Each currency has a separate total. Custom splits use either percentages that
+total 100% per currency, or exact amounts that sum to that currency's total.
+Integer micro-USDC/wei arithmetic preserves every unit; percentage rounding
+remainders go to the last selected fund. Review opens a confirmation sidepanel
+before any wallet request. It groups USDC into at most one exact remaining-total
+approval, then uses one deposit per fund/currency, the minimum supported by the
+existing router without a new contract or custody hop. This is not atomic.
+Confirmed legs retain their transaction links if a later leg fails or is
+cancelled. Contextual receipt/recovery controls live only in that sidepanel.
+Continuing checks uncertain receipts and sends only remaining legs. As with single
 deposits, this protection is browser-local; clearing storage or changing devices
 loses the journal. Never retry an uncertain payment without checking its receipt.
-**Stop unsent split legs** abandons only the unsent remainder; it refuses to
+**Stop unsent remainder** abandons only the unsent remainder; it refuses to
 unlock an uncertain transaction and never refunds confirmed contributions.
 
 Reuse: this adapts `configuredSettlementFunds` and `depositSettlementUsdc` in
 [settlement-funds.mjs](../js/settlement-funds.mjs), the existing contribution
-journal, and [fund-archive.mjs](../js/fund-archive.mjs). No new contract or fund
-is created. The current router has no atomic multi-fund deposit, so split
-completion is explicit and resumable rather than all-or-nothing.
+journal, [fund-archive.mjs](../js/fund-archive.mjs), and ArtFi's existing
+`ArtFiSettlementRouter.fundNative` path already used by the referral editor.
+No new contract or fund is created. The renderer uses CSS depth and conic
+gradients, not a new chart dependency.
 
 Select an existing active fund in Settlements Router, enter the deposit amount, and confirm the deposit action. The app verifies native Base USDC, six decimals, asset approval, wallet balance, and Base network. It requests an ERC-20 approval only if the current allowance is insufficient, for the exact intended amount rather than an unlimited allowance; then it requests the `fundToken` transaction. Approval is not a deposit. Depositing into a fund is not an artist payout.
 
@@ -144,7 +164,7 @@ No new Render environment variable is required: the destination uses the existin
 
 ### Public Sponsorship And Fund Contributions
 
-Both public fund panels include **Grow the weekly artist pot**. Anyone can choose Playback (`dbusk-playback`) or Top 10 (`dbusk-top10`) and select $5, $10, $1,000 or a custom native Base USDC amount. The button requests the connected wallet's confirmation with the configured settlement router, token, selected fund ID and amount prefilled. It reuses the deposit preflight checks: Base network, deployed/unpaused router, active existing fund, approved native USDC, sufficient wallet balance, exact-amount approval only if needed, then a static-preflighted `fundToken` call. Wallet approval and contribution are separate transactions; the page never requests either merely because a visitor opens or advances the tutorial. ETH on Base is needed for gas.
+Both public fund panels and About offer **Fund Us**. Anyone can review a contribution to an existing active fund using the currency controls described above. Contributions reuse Base-network, deployed/unpaused router, active-fund and asset-approval checks, with exact-amount approval only if needed and a static-preflighted `fundToken` or `fundNative` call. Wallet approval and contribution are separate transactions; opening the popup, viewing a chart, choosing a preset or advancing a tutorial never requests either. Additional Base ETH is needed for gas.
 
 This is a direct fund contribution, not an ad purchase, an artist payout, a refundable deposit, or an automatic equal split between the funds. Contributions remain owner-managed; future artist payouts still require owner settlement. Contributions made after a weekly close cannot enlarge the closed week's frozen payouts. DVert is offered separately for advertiser campaigns that support the weekly funds under the campaign's own pricing, distribution rules, and terms. Share `?tutorial=payroll` with prospective sponsors for the current-pot walkthrough without selecting an archived week.
 
