@@ -1,6 +1,6 @@
 import { liveBookingRows } from './live-bookings.mjs?v=20261108-live-audio-pilot';
 import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261030-ad-cutoff';
-import { labelKnownAddress, normalizeKnownAddress } from './known-addresses.mjs?v=20261024-djuke-labels';
+import { isDmtvEscrow, labelKnownAddress, normalizeKnownAddress } from './known-addresses.mjs?v=20261124-contract-sigils';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 export { formatUsdcUnits };
 const USDC_ICON = '<img class="usdc-icon" src="img/usdc.svg" alt="USDC" width="16" height="16">';
@@ -146,12 +146,14 @@ function sourceKindLabel(kind) {
   return {
     advert: 'Advert purchase',
     djuke: 'DJuke purchase',
+    dmtv: 'DMTv purchase',
     sponsor: 'Sponsor deposit',
     payout: 'Payroll payout',
   }[kind] || 'Sponsor deposit';
 }
 
-function renderSourceRow(source) {
+function renderSourceRow(rawSource) {
+  const source = isDmtvEscrow(rawSource.funder) ? { ...rawSource, kind: 'dmtv' } : rawSource;
   const label = source.displayLabel || shortAddress(source.funder || source.advertiser || source.payer || '');
   const wallet = source.walletHtml || escapeHtml(label);
   const amount = renderUsdcAmount(source.amountUnits, { className: source.kind === 'advert' ? 'usdc-amount--artist' : 'usdc-amount--sponsor' });

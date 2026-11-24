@@ -49,6 +49,7 @@ test('loadFundBreakdown groups inflows, payouts, and reconciles the balance', as
       { txHash: '0x' + '1'.repeat(64), logIndex: 0, blockNumber: 10, timestamp: 1_700_000_010, amountUnits: '2250000', funder: '0x135Cbc573F87637158eb3186C87c584fb0B34CD9', kind: 'advert', campaignId: '7', title: 'Weekend shoutout', advertiser: '0x807061DF657A7697c04045dA7d16D941861cAABc' },
       { txHash: '0x' + '2'.repeat(64), logIndex: 0, blockNumber: 11, timestamp: 1_700_000_011, amountUnits: '1020000', funder: '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9', kind: 'djuke', requestId: '42', payer: '0x4444444444444444444444444444444444444444' },
       { txHash: '0x' + '3'.repeat(64), logIndex: 0, blockNumber: 12, timestamp: 1_700_000_012, amountUnits: '11980000', funder: '0x807061DF657A7697c04045dA7d16D941861cAABc', kind: 'sponsor' },
+      { txHash: '0x' + '5'.repeat(64), logIndex: 0, blockNumber: 12, timestamp: 1_700_000_012, amountUnits: '0', funder: '0x82a21D2039C239d141a26Fa82999bFC2b295aba6', kind: 'sponsor' },
     ],
     payouts: [
       { txHash: '0x' + '4'.repeat(64), logIndex: 0, blockNumber: 13, timestamp: 1_700_000_013, amountUnits: '3000000', recipient: '0x4444444444444444444444444444444444444444', slug: top10 },
@@ -76,7 +77,7 @@ test('loadFundBreakdown groups inflows, payouts, and reconciles the balance', as
   const advert = result.rows.find(row => row.kind === 'advert');
   assert.ok(advert);
   assert.equal(advert.direction, 'in');
-  assert.match(advert.sourceHtml, /📜 DeVert v0\.1/);
+  assert.match(advert.sourceHtml, /☿📜 🔊 DeVert v0\.1/);
   assert.match(advert.sourceHtml, /Purchased by[\s\S]*thejollylama\.eth/);
   assert.match(advert.sourceHtml, /data-fund-role="advertiser"/);
   assert.match(advert.extra, /Campaign #7/);
@@ -84,7 +85,7 @@ test('loadFundBreakdown groups inflows, payouts, and reconciles the balance', as
 
   const djuke = result.rows.find(row => row.kind === 'djuke');
   assert.ok(djuke);
-  assert.match(djuke.sourceHtml, /📜 DJuke v0\.3/);
+  assert.match(djuke.sourceHtml, /🜡🎰 🎶 DJuke v0\.3/);
   assert.match(djuke.extra, /DJuke request #42/);
 
   const sponsor = result.rows.find(row => row.kind === 'sponsor');
@@ -92,6 +93,11 @@ test('loadFundBreakdown groups inflows, payouts, and reconciles the balance', as
   assert.match(sponsor.sourceHtml, /thejollylama\.eth/);
   assert.match(sponsor.sourceHtml, /decentcanopy\.eth/);
   assert.match(sponsor.typeLabel, /Sponsor deposit/);
+
+  const dmtv = result.rows.find(row => row.kind === 'dmtv');
+  assert.ok(dmtv, 'DMTv escrow inflows are not sponsor deposits');
+  assert.equal(dmtv.typeLabel, 'DMTv purchase');
+  assert.match(dmtv.sourceHtml, /⚸ 📺DMTv 0\.1✨/);
 
   const payout = result.rows.find(row => row.direction === 'out');
   assert.ok(payout);
@@ -121,7 +127,7 @@ test('fund reports name current and historical DJuke inflows without requiring E
   });
   assert.equal(result.reconciles, true);
   for (const version of ['0.5', '0.4']) {
-    const row = result.rows.find(row => row.sourceLabel === `📜 DJuke v${version}`);
+    const row = result.rows.find(row => row.sourceLabel === `🜡🎰 🎶 DJuke v${version}`);
     assert.ok(row, `DJuke v${version} must be named in the fund report`);
     assert.equal(row.typeLabel, 'DJuke purchase');
     assert.match(row.sourceHtml, /fund-contract-link/);
