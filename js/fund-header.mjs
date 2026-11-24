@@ -5,7 +5,7 @@ import { isDmtvEscrow, labelKnownAddress, normalizeKnownAddress } from './known-
 import { currentPayrollPeriod, payrollPeriods, weekNumberFromKey } from './payroll-week.mjs';
 import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs?v=20261123-song-splits';
 import { playbackArtistKey, previewPlaybackPayroll } from './radio-payroll.mjs?v=20261123-song-splits';
-import { initFundContributions } from './fund-contribution.mjs?v=20261124-lazy-funds';
+import { initFundContributions } from './fund-contribution.mjs?v=20261124-verified-funds';
 import { animateFundInflow, fundInflowSnapshot, planFundInflow } from './fund-inflow.mjs?v=20261124-lazy-funds';
 import { fundBudgetFor } from './fund-budget.mjs?v=20261030-fund-refresh';
 
@@ -462,7 +462,11 @@ async function initializeFundHeader() {
     else renderBreakdown({ rows: [], pendingRows: null, balanceUnits: balanceCache.get(slug) ?? null,
       budgetUnits: fundStateFor(state, slug).budgetUnits, historyAvailable: false }, fund, { ready: false });
     const selection = document.getElementById('fund-contribution-slug');
-    if (selection) { selection.value = slug; selection.dispatchEvent(new Event('change')); }
+    if (selection) {
+      selection.dataset.preferredFund = slug;
+      selection.value = slug;
+      selection.dispatchEvent(new Event('change'));
+    }
     if (!dialog.open) dialog.showModal();
     if (Date.now() - updatedAt > 15_000 || state?.historyScope !== 'recent') {
       const wasSummary = Boolean(pending) && state?.historyScope !== 'recent';

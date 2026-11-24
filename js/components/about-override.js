@@ -7,8 +7,7 @@ import { formatUsdcUnits } from '../usdc-format.mjs?v=20261017-mercury-release';
 // replaces it with a DecentBusking-specific version.
 //
 import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261123-split-admin-pies';
-import { workerEnsProvider } from '../ens-client.mjs?v=20261016-ens-worker';
-import { renderFundsSection, resolveWalletLabel, renderWalletButton } from '../fund-display.mjs?v=20261024-djuke-labels';
+import { openFundContributions } from '../fund-contribution.mjs?v=20261124-verified-funds';
 
 // The CDN AboutModal lists generic escrow listings. This override pins the
 // purchase card to the reviewed DecentBusking v1.0.0 Base listing in config.
@@ -70,59 +69,6 @@ class DecentBuskingAboutModal extends HTMLElement {
 
   connectedCallback() {
     this.render();
-  }
-
-  async _prepareFund(fund, sponsorAliases, provider, aliasCache) {
-    const sources = [];
-    for (const source of fund.sources || []) {
-      const address = source.funder || source.advertiser || source.payer || '';
-      const wallet = address && provider ? await resolveWalletLabel(address, provider, sponsorAliases, aliasCache)
-        : { address, label: address || '', aliases: [] };
-      const walletHtml = renderWalletButton(wallet, { role: source.kind });
-      const advertiser = source.kind === 'advert' && source.advertiser
-        ? await resolveWalletLabel(source.advertiser, provider, sponsorAliases, aliasCache) : null;
-      sources.push({
-        ...source,
-        displayLabel: wallet.label,
-        walletHtml,
-        advertiserHtml: advertiser ? renderWalletButton(advertiser, { role: 'advertiser' }) : '',
-        advertiserLabel: advertiser?.label || '',
-        payerHtml: source.kind === 'djuke' ? walletHtml : '',
-        payerLabel: source.kind === 'djuke' ? wallet.label : '',
-      });
-    }
-    const bookings = [];
-    for (const booking of fund.bookings || []) {
-      const walletDisplay = await resolveWalletLabel(booking.wallet, provider, sponsorAliases, aliasCache);
-      bookings.push({ ...booking, walletDisplay });
-    }
-    return { ...fund, sources, bookings };
-  }
-
-  async _loadCommunityFunds() {
-    const container = this.shadowRoot.getElementById('community-funds');
-    if (!container) return;
-    const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
-    if (!service) {
-      container.innerHTML = '<p class="community-funds-unavailable">Fund balances unavailable right now</p>';
-      return;
-    }
-    try {
-      const response = await fetch(`${service}/api/funds`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
-      const state = await response.json().catch(() => null);
-      if (!response.ok || !state?.ready || state.lastError) throw new Error(state?.lastError || `Fund balances unavailable (${response.status})`);
-      const provider = workerEnsProvider;
-      const aliasCache = new Map();
-      const funds = [];
-      for (const slug of ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners', 'dbusk-live-performers']) {
-        const fund = state.funds?.[slug];
-        if (!fund) continue;
-        funds.push(await this._prepareFund(fund, state.sponsorAliases || {}, provider, aliasCache));
-      }
-      container.innerHTML = renderFundsSection(funds, 'Community Funds');
-    } catch (error) {
-      container.innerHTML = '<p class="community-funds-unavailable">Fund balances unavailable right now</p>';
-    }
   }
 
   open() {
@@ -684,26 +630,12 @@ class DecentBuskingAboutModal extends HTMLElement {
         .about-section { margin: 21px 0; color: #e2e2ec; line-height: 1.58; }
         .about-section h3 { margin: 0 0 9px; color: #d8c9ff; font-size: 1.05rem; }
         .about-section p { color: #c7c9d7; }
-        .community-funds-section {
-          margin: 18px 0 22px;
-          padding: 14px 15px;
-          border: 1px solid rgba(171,163,225,.22);
-          border-radius: 12px;
-          background: rgba(10,14,28,.72);
-        }
-        .community-funds-section h3 { margin: 0 0 10px; color: #91ddd3; font-size: 1rem; }
-        .fund-disclosure { margin: 0 0 10px; padding: 10px 12px; border: 1px solid rgba(171,163,225,.16); border-radius: 10px; background: rgba(20,23,42,.78); }
-        .fund-disclosure summary { cursor: pointer; color: #f7eef7; list-style: none; }
-        .fund-disclosure summary::-webkit-details-marker { display: none; }
-        .fund-disclosure-body { margin-top: 10px; }
-        .fund-description { margin: 0 0 10px; color: #c8cad7; }
-        .fund-wallet-link { border: 0; background: transparent; color: #91ddd3; font: inherit; cursor: pointer; padding: 0; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
-        .fund-wallet-aliases { margin-left: 6px; color: #a8a8bd; font-size: .82rem; }
-        .fund-source-table { margin-top: 8px; width: 100%; }
-        .fund-source-table th, .fund-source-table td { padding: 7px 8px; vertical-align: top; }
-        .fund-source-table td { color: #d8dbe8; }
-        .fund-source-table a { color: #98ded6; }
-        .fund-source-empty, .community-funds-unavailable { margin: 0; color: #b8bac9; }
+        .about-funding { margin: 24px 0; text-align: center; }
+        #about-fund-us { border: 1px solid #e7c56d; border-radius: 999px; padding: 12px 24px; color: #fff0c7; background: linear-gradient(120deg,#30233e,#253b3c); font: inherit; font-weight: 700; cursor: pointer; box-shadow: 0 0 22px #e7c56d22; animation: about-fund-wiggle 9s ease-in-out infinite; }
+        #about-fund-us:hover { box-shadow: 0 0 28px #e7c56d55; }
+        #about-fund-us:focus-visible { outline: 2px solid #91ddd3; outline-offset: 4px; }
+        @keyframes about-fund-wiggle { 0%,88%,100% { transform: rotate(0); } 91% { transform: rotate(-3deg); } 94% { transform: rotate(3deg); } 97% { transform: rotate(-1deg); } }
+        @media (prefers-reduced-motion: reduce) { #about-fund-us { animation: none; } }
         .about-roadmap { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 10px 0 18px; }
         .about-roadmap section { padding: 14px 15px; background: rgba(10,14,28,.68); border: 1px solid rgba(171,163,225,.2); border-radius: 10px; }
         .about-roadmap h3 { margin: 0 0 9px; font-size: .92rem; }
@@ -877,7 +809,10 @@ class DecentBuskingAboutModal extends HTMLElement {
               </div>
             </header>
 
-            <div id="community-funds"></div>
+            <div class="about-funding">
+              <button id="about-fund-us" type="button"><span aria-hidden="true">⚸ ✨</span> Fund Us <span aria-hidden="true">✨ ⚸</span></button>
+              <p id="about-funding-status" role="status"></p>
+            </div>
 
             <div class="about-section">
               <h3>🎧 Make the loop</h3>
@@ -968,7 +903,15 @@ class DecentBuskingAboutModal extends HTMLElement {
       this.close();
       startTutorial({ card: 'splits' });
     });
-    this._loadCommunityFunds();
+    this.shadowRoot.getElementById('about-fund-us').addEventListener('click', () => {
+      try {
+        openFundContributions();
+        this.shadowRoot.getElementById('about-funding-status').textContent = '';
+      } catch (error) {
+        console.warn('[about-override] Fund Us failed:', error);
+        this.shadowRoot.getElementById('about-funding-status').textContent = error.message;
+      }
+    });
     this._loadDecentBuskingListings();
     this.shadowRoot.getElementById('paypal-btn-container')?.addEventListener('click', (e) => {
       if (e.target.id === 'paypal-launch-btn') this._handlePayPalLaunch();

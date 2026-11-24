@@ -26,9 +26,13 @@ async function fixture() {
     getTransactionReceipt: async () => receipt,
   } };
   const calls = [];
+  let allowance = 0n;
   const approve = async (spender, amount) => {
     calls.push(['approve', spender, amount]);
-    return { hash: `0x${'4'.repeat(64)}`, wait: async () => ({ status: 1 }) };
+    allowance = amount;
+    return { hash: `0x${'4'.repeat(64)}`, wait: async () => ({ status: 1, logs: [
+      log('Approval', [address, spender, amount], BASE_USDC_ADDRESS),
+    ] }) };
   };
   const fundToken = async (...args) => {
     calls.push(['fundToken', ...args]);
@@ -38,7 +42,7 @@ async function fixture() {
   const router = { target: module.SETTLEMENT_ROUTER_ADDRESS, paused: async () => false,
     funds: async () => ({ exists: true, active: true }), approvedAssets: async () => true, fundToken };
   const token = { target: BASE_USDC_ADDRESS, decimals: async () => 6, balanceOf: async () => 2000000000n,
-    allowance: async () => 0n, approve };
+    allowance: async () => allowance, approve };
   const options = { signer, router, token, slug, amount: '5' };
   const controller = module.createContributionController({ storage, ethers });
   return { ...module, BASE_USDC_ADDRESS, address, slug, hash, log, storage, signer, router, token, options,
@@ -58,7 +62,7 @@ test('public contribution parses suggested and precise amounts without floating 
 
 test('custom percentages allocate every micro-USDC and reject invalid or dust splits', async () => {
   const { contributionPlan, contributionAmount, contributionFunds } = await fixture();
-  assert.equal(contributionFunds().length, 6);
+  assert.equal(contributionFunds().length, 7);
   const plan = contributionPlan('1.000001', [
     { slug: 'dbusk-playback', percent: '33.33' },
     { slug: 'dbusk-top10', percent: '33.33' },
@@ -223,42 +227,104 @@ test('receipt recovery verifies a confirmed deposit and refuses pending or wrong
   assert.equal(value.storage.getItem(value.key), null);
 });
 
-test('contribution UI never opens a wallet on load or preset selection and confirms the exact custom amount', async context => {
+test('only created active funds are offered, including empty funds, with balances read from the router', async () => {
+  const { loadContributionFunds, BASE_USDC_ADDRESS } = await fixture();
+  const balances = new Map([
+    [ethers.id('dbusk-playback'), 1234567n], [ethers.id('dbusk-referrals'), 0n],
+  ]);
+  const reads = [];
+  const router = {
+    funds: async id => ({ exists: balances.has(id) || id === ethers.id('dbusk-top10'), active: balances.has(id) }),
+    fundBalances: async (id, asset) => { reads.push(id); return asset === BASE_USDC_ADDRESS ? balances.get(id) : 1n; },
+  };
+  assert.deepEqual((await loadContributionFunds({ ethers, router })).map(fund => [fund.slug, fund.balanceUnits]),
+    [['dbusk-playback', '1234567'], ['dbusk-referrals', '0']]);
+  assert.equal(reads.length, 3);
+  router.funds = async () => { throw new Error('RPC offline'); };
+  await assert.rejects(loadContributionFunds({ ethers, router }), /RPC offline/);
+});
+
+test('ETH uses exact wei, amount splits match independent totals, and radio funds cannot receive ETH', async () => {
+  const { contributionPlan, contributionUnits, contributionAmount, contributionJournalKey, address } = await fixture();
+  assert.equal(contributionUnits('0.000000000000000001', 'eth'), 1n);
+  assert.equal(contributionAmount(1000000000000001n, 'eth'), '0.001000000000000001');
+  const shares = [{ slug: 'dbusk-repo-dev', amount: '0.001' }, { slug: 'dbusk-pinners', amount: '0.002' }];
+  const plan = contributionPlan('0.003', shares, { asset: 'eth', mode: 'amount' });
+  assert.deepEqual(plan.map(leg => leg.amountUnits), ['1000000000000000', '2000000000000000']);
+  assert.ok(plan.every(leg => leg.asset === 'eth'));
+  assert.throws(() => contributionPlan('0.004', shares, { asset: 'eth', mode: 'amount' }), /match its total/);
+  for (const slug of ['dbusk-top10', 'dbusk-playback']) {
+    assert.throws(() => contributionPlan('0.01', [{ slug, percent: '100' }], { asset: 'eth' }), /USDC only/);
+    assert.throws(() => contributionJournalKey(address, slug, 'eth'), /USDC only/);
+  }
+  assert.notEqual(contributionJournalKey(address, 'dbusk-repo-dev'), contributionJournalKey(address, 'dbusk-repo-dev', 'eth'));
+  assert.throws(() => contributionUnits('0.0000000000000000001', 'eth'), /18/);
+});
+
+test('native contribution proof requires the exact native FundFunded event, not an unrelated USDC receipt', async () => {
   const value = await fixture();
-  const { initFundContributions } = await import('../js/fund-contribution.mjs');
-  const node = () => ({ dataset: {}, value: '', textContent: '', disabled: false, listeners: {},
-    addEventListener(type, callback) { this.listeners[type] = callback; }, focus() {}, append() {} });
-  const form = node();
-  const amount = node();
-  const slug = node();
-  slug.value = 'dbusk-top10';
-  const preset = node();
-  preset.dataset.contributionAmount = '1000';
-  const check = node();
-  const status = node();
-  const controls = [amount, slug, preset, check];
-  form.querySelectorAll = selector => selector === '[data-contribution-amount]' ? [preset] : controls;
-  const nodes = { 'fund-contribution-form': form, 'fund-contribution-status': status,
-    'fund-contribution-slug': slug, 'fund-contribution-amount': amount, 'fund-contribution-check': check };
-  const previousWindow = global.window;
-  const previousDocument = global.document;
-  context.after(() => { global.window = previousWindow; global.document = previousDocument; });
-  const confirmations = [];
-  let walletRequests = 0;
-  global.window = { ethers, localStorage: value.storage, confirm: message => { confirmations.push(message); return false; },
-    _wallet: { connect: async () => { walletRequests++; } } };
-  global.document = { getElementById: id => nodes[id] };
-  initFundContributions();
-  assert.equal(walletRequests, 0);
-  preset.listeners.click();
-  assert.equal(amount.value, '1000');
-  assert.equal(walletRequests, 0);
-  amount.value = '2.123456';
-  form.listeners.submit({ preventDefault() {} });
-  await new Promise(setImmediate);
-  assert.match(confirmations[0], /Add 2\.123456 USDC to dbusk-top10 on Base/);
-  assert.equal(walletRequests, 0);
-  assert.equal(value.calls.length, 0);
+  const operation = { address: value.address, slug: 'dbusk-repo-dev', asset: 'eth', amountUnits: '1000000000000000', stage: 'deposit' };
+  const receipt = { status: 1, logs: [value.log('FundFunded',
+    [ethers.id(operation.slug), ethers.ZeroAddress, value.address, BigInt(operation.amountUnits)], value.SETTLEMENT_ROUTER_ADDRESS)] };
+  assert.equal(value.verifyContributionReceipt({ receipt, operation, ethers }), 'deposit');
+  assert.throws(() => value.verifyContributionReceipt({ receipt: value.receipt(), operation, ethers }), /does not prove/);
+  assert.throws(() => value.verifyContributionReceipt({ receipt, operation: { ...operation, amountUnits: '2' }, ethers }), /does not prove/);
+});
+
+test('a mixed-currency series approves the USDC total once and resumes only its unconfirmed ETH leg', async () => {
+  const value = await fixture();
+  const sent = [];
+  let rejectEth = true;
+  const fundedReceipt = (id, asset, units) => ({ status: 1, logs: [
+    value.log('FundFunded', [id, asset, value.address, units], value.SETTLEMENT_ROUTER_ADDRESS),
+    ...(asset === ethers.ZeroAddress ? [] : [value.log('Transfer',
+      [value.address, value.SETTLEMENT_ROUTER_ADDRESS, units], value.BASE_USDC_ADDRESS)]),
+  ] });
+  const fundToken = async (id, asset, units) => {
+    sent.push(['usdc', id, units]);
+    value.setReceipt(fundedReceipt(id, asset, units));
+    return { hash: value.hash, wait: async () => value.receipt() };
+  };
+  fundToken.staticCall = async () => {};
+  value.router.fundToken = fundToken;
+  const fundNative = async (id, { value: units }) => {
+    if (rejectEth) throw Object.assign(new Error('ETH rejected'), { code: 4001 });
+    sent.push(['eth', id, units]);
+    value.setReceipt(fundedReceipt(id, ethers.ZeroAddress, units));
+    return { hash: value.hash, wait: async () => value.receipt() };
+  };
+  fundNative.staticCall = async () => {};
+  value.router.fundNative = fundNative;
+  value.signer.provider.getBalance = async () => 10n ** 18n;
+  const plan = [
+    ...value.contributionPlan('3', [{ slug: 'dbusk-repo-dev', amount: '1' }, { slug: 'dbusk-pinners', amount: '2' }], { mode: 'amount' }),
+    ...value.contributionPlan('0.001', [{ slug: 'dbusk-repo-dev', percent: '100' }], { asset: 'eth' }),
+  ];
+  await assert.rejects(value.controller.contributeSplit({ ...value.options, plan }), /ETH rejected/);
+  assert.equal(value.calls.filter(call => call[0] === 'approve').length, 1);
+  assert.equal(value.calls[0][2], 3000000n);
+  const saved = value.controller.recovery(value.address);
+  assert.deepEqual(saved.split.legs.map(leg => leg.status), ['confirmed', 'confirmed', 'pending']);
+  assert.equal(saved.operations.length, 0);
+  rejectEth = false;
+  const results = await value.controller.contributeSplit({ ...value.options, resume: true });
+  assert.deepEqual(sent.map(row => row[0]), ['usdc', 'usdc', 'eth']);
+  assert.equal(sent[2][2], 1000000000000000n);
+  assert.equal(value.calls.filter(call => call[0] === 'approve').length, 1);
+  assert.ok(results.every(leg => leg.status === 'confirmed'));
   assert.equal(value.data.size, 0);
-  assert.ok(controls.every(control => !control.disabled));
+});
+
+test('fund charts retain exact labels, escape text, distinguish zero balances and use the selected shape', async () => {
+  const { renderFundBalanceChart } = await import('../js/fund-visual.mjs');
+  const rows = [{ label: 'A <fund>', units: '1', amountText: '0.000001 USDC' },
+    { label: 'B', units: '3', amountText: '0.000003 USDC' }];
+  const bars = renderFundBalanceChart(rows);
+  assert.match(bars, /A &lt;fund&gt;/);
+  assert.match(bars, /0\.000001 USDC/);
+  assert.match(bars, /--fund-width:33\.33%/);
+  const pie = renderFundBalanceChart(rows, 'pie');
+  assert.match(pie, /conic-gradient\(#91ddd3 0% 25%,#ddbc7b 25% 100%\)/);
+  assert.doesNotMatch(pie, /fund-chart-track/);
+  assert.match(renderFundBalanceChart([{ label: 'Empty', units: '0', amountText: '0 ETH' }], 'pie'), /No balance in this currency/);
 });
