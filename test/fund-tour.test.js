@@ -37,3 +37,52 @@ test('payroll deep link suppresses the unrelated first-visit tutorial without ma
   vm.runInContext(`${source}\n_autoLaunch();`, context);
   assert.equal(timers.length, 0);
 });
+
+test('the top-layer fund guide owns Escape and Tab before a capturing background tutorial', () => {
+  const nodes = new Map(), windowListeners = [];
+  const document = { createElement: () => node('overlay'), getElementById: id => node(id), activeElement: null };
+  function node(key) {
+    if (nodes.has(key)) return nodes.get(key);
+    const element = { dataset: {}, style: {}, listeners: new Map(), disabled: false,
+      addEventListener: (type, handler) => element.listeners.set(type, handler),
+      append() {}, setAttribute() {}, scrollIntoView() {}, scrollBy() {},
+      querySelector: node,
+      querySelectorAll: selector => selector === '[data-fund-chart-slug]' ? [node('row')] :
+        ['[data-guide-close]', '[data-guide-back]', '[data-guide-next]'].map(node).filter(button => !button.disabled),
+      getBoundingClientRect: () => ({ top: key === '.fund-guide-card' ? 500 : 200,
+        bottom: key === '.fund-guide-card' ? 800 : 240, left: 200, right: 600, width: 400, height: 40 }),
+      focus: () => { document.activeElement = element; } };
+    nodes.set(key, element);
+    return element;
+  }
+  const dialog = node('dialog');
+  dialog.open = true;
+  node('row').dataset.fundChartSlug = 'dbusk-playback';
+  document.activeElement = node('fund-guide-launch');
+  let backgroundKeys = 0;
+  const context = vm.createContext({ document, innerWidth: 1000, matchMedia: () => ({ matches: true }),
+    MutationObserver: class { observe() {} },
+    window: { addEventListener: (type, handler, capture) => windowListeners.push({ type, handler, capture }) },
+    dialog, getFunds: () => [{ slug: 'dbusk-playback', label: 'Playback' }] });
+  const source = fs.readFileSync('js/fund-guide.mjs', 'utf8').replace(/^export /gm, '');
+  vm.runInContext(`${source}\ninitFundGuide({dialog, getFunds});`, context);
+  node('fund-guide-launch').listeners.get('click')();
+  const dispatch = key => {
+    const event = { key, prevented: false, stopped: false, preventDefault() { this.prevented = true; },
+      stopPropagation() { this.stopped = true; } };
+    for (const listener of windowListeners.filter(listener => listener.type === 'keydown' && listener.capture)) listener.handler(event);
+    if (!event.stopped) {
+      backgroundKeys++;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    return event;
+  };
+  assert.equal(dispatch('Tab').prevented, true);
+  assert.equal(document.activeElement, node('[data-guide-close]'));
+  assert.equal(dispatch('Escape').prevented, true);
+  assert.equal(backgroundKeys, 0);
+  assert.equal(node('overlay').hidden, true);
+  assert.equal(dialog.open, true);
+  assert.equal(document.activeElement, node('fund-guide-launch'));
+});
