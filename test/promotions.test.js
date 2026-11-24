@@ -894,3 +894,72 @@ test('wallet-pass radio votes count toward joined musician campaigns with the si
   assert.equal((await f.service.recordRadioVote({ wallet: carol.address, voterId, playId: 'song-2' }))[0].outcome, 'other-wallet');
   assert.deepEqual(f.stored().votes.map(v => [v.wallet, v.subjectWallet, v.playId]), [[musician.address.toLowerCase(), musician.address.toLowerCase(), 'song-1']]);
 });
+
+test('ETH campaigns fund, reserve gifts and reconcile native gift payouts separately from USDC', async () => {
+  const musician = Wallet.createRandom();
+  const playlist = [{ trackId: 'eth-track', title: 'Minted', mintStatus: 'minted', tokenId: '9', mintRecipient: musician.address }];
+  const balances = { usdc: 0n, eth: 0n };
+  const assets = [];
+  const f = await fixture({ readPlaylist: () => playlist,
+    readFunding: async (slug, asset) => { assets.push(asset); return balances[asset]; } });
+  const wei = '1000000000000000';
+  const legAmounts = { referrer: wei, musician: wei, 'dbusk-top10': '0', 'dbusk-playback': '0' };
+  const gifts = [{ trigger: 'participation', amountUnits: wei, supporter: false },
+    { trigger: 'top', amountUnits: '3000000000000000', supporter: true }];
+  const pilot = input({ template: 'musician-referral', title: 'Ether', asset: 'eth', legAmounts, requiredVotes: 1,
+    rewardUnits: '2000000000000000', budgetUnits: '4000000000000000', maxAwards: 2, gifts,
+    curatedReferrers: [alice.address, bob.address] });
+  await assert.rejects(f.exec({ action: 'run', campaign: { ...pilot, asset: 'doge' } }), /USDC or ETH/);
+  await assert.rejects(f.exec({ action: 'run', campaign: { ...pilot, gifts: [...gifts, gifts[0]] } }), /one entry per trigger/);
+  // Budget 0.004 + participation 2 × 0.001 + top 0.003 = 0.009 ETH; USDC balance never counts.
+  balances.usdc = 10n ** 30n; balances.eth = 8999999999999999n;
+  await assert.rejects(f.exec({ action: 'run', campaign: pilot }), /cannot cover campaign budgets and gifts/);
+  assert.equal(assets.at(-1), 'eth');
+  balances.eth = 9000000000000000n;
+  const [campaign] = (await f.exec({ action: 'run', campaign: pilot })).campaigns;
+  assert.equal(campaign.asset, 'eth');
+  assert.equal(campaign.giftReserveUnits, '5000000000000000');
+  await f.join(campaign, alice);
+  await f.exec({ action: 'join', campaignId: campaign.id, referrer: alice.address, trackId: 'eth-track',
+    acceptTerms: true, termsVersion: campaign.version }, musician);
+  await f.exec({ action: 'vote', campaignId: campaign.id, playId: 'eth-song', subjectWallet: musician.address,
+    voterId: 'browser-eth-000000000', vote: 1 }, musician);
+  const conversion = (await f.exec({ action: 'claim', campaignId: campaign.id, musicianWallet: musician.address,
+    evidence: 'Minted playlist evidence' }, alice)).claims[0];
+  await f.exec({ action: 'review', claimId: conversion.id, decision: 'approved', reason: 'Verified' });
+  await assert.rejects(f.exec({ action: 'award-gifts', campaignId: campaign.id }), /fills or its claim window closes/);
+  f.setTime(Date.parse(campaign.claimDeadline) + 1);
+  const awarded = (await f.exec({ action: 'award-gifts', campaignId: campaign.id })).campaigns[0];
+  assert.deepEqual(awarded.giftAwards.map(a => [a.id, a.wallet, a.amountUnits, a.status]), [
+    ['gift-participation', alice.address.toLowerCase(), wei, 'approved'],
+    ['gift-top', alice.address.toLowerCase(), '3000000000000000', 'approved']]);
+  assert.equal(awarded.giftReserveUnits, '4000000000000000');
+  assert.ok(awarded.supporterToken.eligibleWallets.includes(alice.address.toLowerCase()));
+  await assert.rejects(f.exec({ action: 'award-gifts', campaignId: campaign.id }), /already awarded/);
+  const pendingCommand = { campaignId: campaign.id, giftId: 'gift-participation', wallet: alice.address };
+  await f.exec({ action: 'prepare-gift', ...pendingCommand });
+  await assert.rejects(f.exec({ action: 'release-gift-preparation', ...pendingCommand,
+    confirmNoBroadcast: true }), /Wallet-history review reason/);
+  const released = (await f.exec({ action: 'release-gift-preparation', ...pendingCommand,
+    confirmNoBroadcast: true, reason: 'Wallet history confirms no broadcast' })).campaigns[0];
+  assert.equal(released.giftAwards.find(a => a.id === 'gift-participation').status, 'approved');
+  assert.equal(released.giftAwards.find(a => a.id === 'gift-participation').paymentHistory[0].reason,
+    'Wallet history confirms no broadcast');
+  const giftCommand = { campaignId: campaign.id, giftId: 'gift-top', wallet: alice.address };
+  await f.exec({ action: 'prepare-gift', ...giftCommand });
+  const iface = new Interface(['event PayrollPaid(bytes32 indexed fundId,address indexed asset,address indexed recipient,uint256 amount,bytes32 workReference,bytes32 repositoryIdHash,bytes32 contributorIdHash,string metadataUri,bytes32 metadataHash)']);
+  const reference = id(f.shared.promotionWorkReference({ campaignId: campaign.id, wallet: alice.address }, 'gift-top'));
+  const usdcPayout = iface.encodeEventLog('PayrollPaid', [id(f.shared.REFERRALS_FUND), f.shared.PROMOTIONS_USDC,
+    alice.address, 3000000000000000n, reference, id('repo'), id('alice'), '', ZeroHash]);
+  f.setReceipt({ status: 1, to: routerAddress, blockNumber: 99, logs: [{ ...usdcPayout, address: routerAddress }] });
+  await assert.rejects(f.exec({ action: 'reconcile-gift', ...giftCommand, txHash }), /ETH transfer proofs/);
+  const ethPayout = iface.encodeEventLog('PayrollPaid', [id(f.shared.REFERRALS_FUND), f.shared.PROMOTIONS_ETH,
+    alice.address, 3000000000000000n, reference, id('repo'), id('alice'), '', ZeroHash]);
+  f.setReceipt({ status: 1, to: routerAddress, blockNumber: 99, logs: [{ ...ethPayout, address: routerAddress }] });
+  const paid = (await f.exec({ action: 'reconcile-gift', ...giftCommand, txHash })).campaigns[0];
+  assert.equal(paid.giftAwards.find(a => a.id === 'gift-top').status, 'paid');
+  assert.equal(paid.giftPaidUnits, '3000000000000000');
+  const profile = (await f.service.publicState()).participantProfiles.find(p => p.wallet === alice.address.toLowerCase());
+  assert.equal(profile.asset, 'eth');
+  assert.equal(profile.giftAwards.length, 2);
+});

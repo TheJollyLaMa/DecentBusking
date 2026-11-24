@@ -1,5 +1,5 @@
 import { PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS, MUSICIAN_REFERRAL_PILOT, MUSICIAN_REFERRAL_TERMS, PROMOTIONS_FUND, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, isPromotionsFund,
-  promotionAuthorization, promotionWorkReference, promotionMoney, promotionUnits, promotionLink } from './promotions.mjs';
+  promotionAuthorization, promotionWorkReference, promotionMoney, promotionUnits, promotionLink, campaignAsset } from './promotions.mjs?v=20261126-eth-gifts';
 import { newYorkInputToUtc, utcToNewYorkInput } from './radio-calendar.mjs';
 import { radioListenerId } from './radio-client.mjs';
 import { getAudibleBroadcast } from './public-broadcast-client.mjs?v=20261120-boundary-sync';
@@ -77,7 +77,7 @@ export async function activeMusicianReferralCampaign() {
     campaign.template === 'musician-referral' && campaign.status === 'published' &&
     Date.parse(campaign.startsAt) <= Date.now() && Date.now() < Date.parse(campaign.endsAt));
 }
-const money = value => promotionMoney(value || '0');
+const money = (value, asset) => promotionMoney(value || '0', asset);
 const date = value => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) + ' New York';
 async function resolvedWallet(value, provider) {
   const input = String(value || '').trim();
@@ -99,7 +99,7 @@ const field = (name, label, type = 'text', value = '') =>
   `<label>${label}<input name="${name}" type="${type}" value="${escape(value)}" required></label>`;
 const termsNotice = 'All promotion records are public, including drafts, wallet/referrer links, submitted evidence, activity, review notes and payment receipts. Records are stored on public IPFS; do not submit secrets or personal information about others. Public copies may persist permanently. Rewards require evidence and admin approval. Promotionals is earmarked, not escrowed. Wallets/browsers are not proof of unique humans. Activity means a signed song vote in the stated window, not a positive vote or verified listening time.';
 function campaignCard(c) {
-  return `<h3>${escape(c.title)}</h3><p><strong>${money(c.rewardUnits)}</strong> per approved award · ${escape(c.status)} · ${c.remainingAwards} awards available</p>
+  return `<h3>${escape(c.title)}</h3><p><strong>${money(c.rewardUnits, campaignAsset(c))}</strong> per approved award · ${escape(c.status)} · ${c.remainingAwards} awards available</p>
     <p>${c.template === 'sponsor-match' ? `Match destination: ${escape(c.matchTargetFund || '')}; draft only.` : 'Reward recipient: claimant wallet.'}
     Funding: ${escape(c.fund)}; one award per wallet.</p>
     ${c.template === 'album' ? `<p>Minimum original tracks: ${c.minOriginalTracks}</p>` : ''}
@@ -133,29 +133,27 @@ export function publicPromotionRecords(state, campaignId) {
       <pre class="promotion-terms">${escape(JSON.stringify({ claims, members, votes }, null, 2))}</pre>
     </details></section>`;
 }
-export async function payPromotion({ claim, snapshot, command, status, storage = localStorage, sponsorReviewConfirmed = false, leg = null }) {
-  const w = await wallet();
-  if (!isAdminWallet(w.address)) throw new Error('Connect the admin wallet');
-  const recipientWallet = leg?.recipient || claim.wallet;
-  const amountUnits = leg?.amountUnits || claim.amountUnits;
-  const key = `decentbusking:promotion-payment:${claim.id}${leg ? `:${leg.id}` : ''}`;
+async function routerPayout({ w, routerAddress, fund, asset, recipientWallet, amountUnits, reference, key, storage, status,
+  prepare, reconcile, isPaid }) {
   if (storage.getItem(key)) throw new Error('A payment is unresolved. Reconcile its wallet transaction before retrying; do not clear browser storage.');
-  const router = new w.ethers.Contract(snapshot.routerAddress, PROMOTIONS_ROUTER_ABI, w.signer);
-  const ref = w.ethers.id(promotionWorkReference(claim, leg?.id));
+  const router = new w.ethers.Contract(routerAddress, PROMOTIONS_ROUTER_ABI, w.signer);
+  const ref = w.ethers.id(reference);
   if (await router.completedWorkReferences(ref)) throw new Error('Reward is already paid on-chain; reconcile its transaction instead');
   if (!await router.hasRole(await router.PAYROLL_ROLE(), w.address) || await router.paused()) throw new Error('Payment requires the unpaused router payroll role');
-  if (!await router.approvedAssets(PROMOTIONS_USDC)) throw new Error('Native Base USDC is not enabled on the router');
+  if (!await router.approvedAssets(asset.address)) throw new Error(`${asset.symbol} is not enabled on the router`);
   const recipient = await router.contributors(recipientWallet);
   if (!(recipient.approved ?? recipient[1])) throw new Error('Enable this reward recipient on the shared router before paying');
-  if (!isPromotionsFund(claim.fund)) throw new Error('Reward has no valid dedicated promotional fund');
-  const fundId = w.ethers.id(claim.fund);
-  const fund = await router.funds(fundId);
-  if (!fund.exists || !fund.active || await router.fundBalances(fundId, PROMOTIONS_USDC) < BigInt(amountUnits)) throw new Error('Promotionals fund is missing, inactive or underfunded');
-  const args = [fundId, PROMOTIONS_USDC, recipientWallet, BigInt(amountUnits), ref,
+  if (!isPromotionsFund(fund)) throw new Error('Reward has no valid dedicated promotional fund');
+  const fundId = w.ethers.id(fund);
+  const routerFund = await router.funds(fundId);
+  if (!routerFund.exists || !routerFund.active || await router.fundBalances(fundId, asset.address) < BigInt(amountUnits)) {
+    throw new Error(`${fund} is missing, inactive or underfunded in ${asset.symbol}`);
+  }
+  const args = [fundId, asset.address, recipientWallet, BigInt(amountUnits), ref,
     w.ethers.id('TheJollyLaMa/DecentBusking'), w.ethers.id(recipientWallet), '', w.ethers.ZeroHash];
   await router.payout.staticCall(...args);
   await w.check();
-  await command({ action: 'prepare-payment', claimId: claim.id, legId: leg?.id, confirmRefundAndDisputeReview: sponsorReviewConfirmed });
+  await prepare();
   await w.check();
   storage.setItem(key, JSON.stringify({ status: 'awaiting-wallet', reference: ref }));
   let tx;
@@ -166,12 +164,65 @@ export async function payPromotion({ claim, snapshot, command, status, storage =
   try { storage.setItem(key, JSON.stringify({ hash: tx.hash, reference: ref })); }
   catch (error) { throw new Error(`Payment was sent as ${tx.hash}, but its browser journal failed: ${error.message}. Reconcile this hash; do not send again.`); }
   status.textContent = `Payment pending: ${tx.hash}. Do not send again; reconcile after two confirmations.`;
-  await command({ action: 'reconcile', claimId: claim.id, legId: leg?.id, txHash: tx.hash });
+  await reconcile(tx.hash);
   await tx.wait(2);
   await w.check();
-  const next = await command({ action: 'reconcile', claimId: claim.id, legId: leg?.id, txHash: tx.hash });
-  const updated = next.claims.find(c => c.id === claim.id);
-  if (leg ? updated?.legs.find(item => item.id === leg.id)?.status === 'paid' : updated?.status === 'paid') storage.removeItem(key);
+  if (isPaid(await reconcile(tx.hash))) storage.removeItem(key);
+}
+export async function payPromotion({ claim, snapshot, command, status, storage = localStorage, sponsorReviewConfirmed = false, leg = null }) {
+  const w = await wallet();
+  if (!isAdminWallet(w.address)) throw new Error('Connect the admin wallet');
+  const campaign = (snapshot.campaigns || []).find(c => c.id === claim.campaignId);
+  await routerPayout({ w, routerAddress: snapshot.routerAddress, fund: claim.fund, asset: campaignAsset(campaign),
+    recipientWallet: leg?.recipient || claim.wallet, amountUnits: leg?.amountUnits || claim.amountUnits,
+    reference: promotionWorkReference(claim, leg?.id), storage, status,
+    key: `decentbusking:promotion-payment:${claim.id}${leg ? `:${leg.id}` : ''}`,
+    prepare: () => command({ action: 'prepare-payment', claimId: claim.id, legId: leg?.id, confirmRefundAndDisputeReview: sponsorReviewConfirmed }),
+    reconcile: txHash => command({ action: 'reconcile', claimId: claim.id, legId: leg?.id, txHash }),
+    isPaid: next => {
+      const updated = next.claims.find(c => c.id === claim.id);
+      return leg ? updated?.legs.find(item => item.id === leg.id)?.status === 'paid' : updated?.status === 'paid';
+    } });
+}
+// Sends one frozen gift award (campaign.giftAwards entry) from the campaign's fund in its currency.
+export async function sendCampaignGift({ campaign, award, snapshot, command, status, storage = localStorage }) {
+  const w = await wallet();
+  if (!isAdminWallet(w.address)) throw new Error('Connect the admin wallet');
+  if (award.status !== 'approved') throw new Error('Gift payment is pending; reconcile it or release its preparation after wallet-history review');
+  const target = { campaignId: campaign.id, giftId: award.id, wallet: award.wallet };
+  await enablePromotionRecipient({ claim: { wallet: award.wallet, status: 'approved' }, snapshot, status });
+  await routerPayout({ w, routerAddress: snapshot.routerAddress, fund: campaign.fund, asset: campaignAsset(campaign),
+    recipientWallet: award.wallet, amountUnits: award.amountUnits, storage, status,
+    reference: promotionWorkReference({ campaignId: campaign.id, wallet: award.wallet }, award.id),
+    key: `decentbusking:promotion-gift:${campaign.id}:${award.id}:${award.wallet}`,
+    prepare: () => command({ action: 'prepare-gift', ...target }),
+    reconcile: txHash => command({ action: 'reconcile-gift', ...target, txHash }),
+    isPaid: next => next.campaigns.find(c => c.id === campaign.id)?.giftAwards
+      ?.find(item => item.id === award.id && item.wallet === award.wallet)?.status === 'paid' });
+}
+export async function reconcileCampaignGift({ campaign, award, command, storage = localStorage, txHash = '' }) {
+  const key = `decentbusking:promotion-gift:${campaign.id}:${award.id}:${award.wallet}`;
+  const entry = storage.getItem(key);
+  let journal = null;
+  if (entry) {
+    try { journal = JSON.parse(entry); }
+    catch { throw new Error('Gift payment journal is invalid; inspect wallet history before proceeding'); }
+  }
+  const hash = String(txHash || journal?.hash || award.txHash || '').trim();
+  if (!hash) throw new Error('Enter the transaction hash or confirm no payment was broadcast');
+  const result = await command({ action: 'reconcile-gift', campaignId: campaign.id, giftId: award.id,
+    wallet: award.wallet, txHash: hash });
+  const updated = result.campaigns?.find(item => item.id === campaign.id)?.giftAwards
+    ?.find(item => item.id === award.id && item.wallet === award.wallet);
+  if (updated?.status === 'paid' || updated?.lastRevertedHash === hash.toLowerCase()) storage.removeItem(key);
+  return result;
+}
+export async function releaseCampaignGiftPreparation({ campaign, award, command, storage = localStorage, reason }) {
+  if (!reason?.trim()) throw new Error('Record why wallet history confirms no gift payment was broadcast');
+  const result = await command({ action: 'release-gift-preparation', campaignId: campaign.id, giftId: award.id,
+    wallet: award.wallet, confirmNoBroadcast: true, reason: reason.trim() });
+  storage.removeItem(`decentbusking:promotion-gift:${campaign.id}:${award.id}:${award.wallet}`);
+  return result;
 }
 
 export async function enablePromotionRecipient({ claim, snapshot, status, confirmAction = globalThis.confirm }) {

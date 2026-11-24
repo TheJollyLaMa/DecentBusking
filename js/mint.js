@@ -212,7 +212,7 @@ export function openMintModal() {
   if (referralSection) {
     referralSection.hidden = true;
     document.getElementById('mint-referrer').value = new URLSearchParams(window.location.search).get('ref') || '';
-    void import('./promotions-ui.mjs?v=20261122-musician-referral')
+    void import('./promotions-ui.mjs?v=20261126-eth-gifts')
       .then(async ({ activeMusicianReferralCampaign }) => {
         const campaigns = await activeMusicianReferralCampaign();
         if (!campaigns.length) return;
@@ -281,7 +281,7 @@ async function handleSubmission(event) {
     document.querySelectorAll('#mint-form input, #mint-form button').forEach(control => { control.disabled = true; });
     if (referral && !document.getElementById('mint-devert')?.checked) {
       setStatus('Registering referral terms before upload…');
-      const { recordMusicianReferralUpload } = await import('./promotions-ui.mjs?v=20261122-musician-referral');
+      const { recordMusicianReferralUpload } = await import('./promotions-ui.mjs?v=20261126-eth-gifts');
       await recordMusicianReferralUpload({ referrer: referral });
     }
     setStatus('Detecting your media format…');
@@ -323,7 +323,7 @@ async function handleSubmission(event) {
     let referralWarning = '';
     if (referral && result.trackId && !document.getElementById('mint-devert')?.checked) {
       try {
-        const { recordMusicianReferralUpload } = await import('./promotions-ui.mjs?v=20261122-musician-referral');
+        const { recordMusicianReferralUpload } = await import('./promotions-ui.mjs?v=20261126-eth-gifts');
         await recordMusicianReferralUpload({ referrer: referral, trackId: result.trackId });
       } catch (error) {
         referralWarning = ` · Referral attribution needs attention: ${error.message}`;

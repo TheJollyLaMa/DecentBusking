@@ -16,12 +16,12 @@ import { completeCreatorSplitProposal, fetchCreatorSplitProposal, rejectCreatorS
 import { isAdminWallet } from './admin-access.mjs';
 import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261025-community-reminder';
 import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261116-longform';
-import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?v=20261124-referral-week';
+import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?v=20261126-eth-gifts';
 import { renderAdminRadioAnnouncements, requestRadioAnnouncement } from './admin-radio-announcements.mjs';
 import { removeDevertCampaign } from './devert-campaigns.mjs';
 import { renderWallet } from './wallet-label.mjs';
 import { renderCreatorSplitPie } from './creator-split-pie.mjs?v=20261123-split-admin-pies';
-import { mountAdminPromotions, mountPublicPromotion } from './promotions-ui.mjs?v=20261122-musician-referral';
+import { mountAdminPromotions, mountPublicPromotion } from './promotions-ui.mjs?v=20261126-eth-gifts';
 
 const ROLE_GRANT_ABI = [
   'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',

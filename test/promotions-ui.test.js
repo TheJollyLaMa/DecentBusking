@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { id, ZeroHash } = require('../discord-bot/node_modules/ethers');
+const { id, ZeroHash, ZeroAddress } = require('../discord-bot/node_modules/ethers');
 const owner = '0x807061DF657A7697c04045dA7d16D941861cAABc';
 const routerAddress = '0x' + 'ab'.repeat(20);
 const txHash = '0x' + 'ab'.repeat(32);
@@ -241,7 +241,7 @@ test('referral campaign blob titles, reuses templates and checks the referrals f
   assert.throws(() => referralCampaignPayload({ title: '', startsAt, endsAt, claimDeadline, referrers: [], legAmounts, budgetUnits: '210000000' }), /exact multiple/);
   assert.deepEqual(referralTemplateFrom({ ...custom, curatedReferrers: [wallet.toUpperCase().replace('0X', '0x')] }),
     { title: 'Jose', durationMs: 14 * 86400000, claimGraceMs: 7 * 86400000, referrers: [wallet], names: { [wallet]: 'Jose' },
-      legAmounts, budgetUnits: '200000000', requiredVotes: 5 });
+      legAmounts, budgetUnits: '200000000', requiredVotes: 5, asset: 'usdc', gifts: [] });
   assert.equal(dollarsToUnits('$12.5'), '12500000');
   assert.equal(dollarsToUnits('150'), '150000000');
   assert.equal(dollarsToUnits('1.234'), null);
@@ -251,4 +251,87 @@ test('referral campaign blob titles, reuses templates and checks the referrals f
   assert.deepEqual(referralFundAvailability({ balanceUnits: 200000000n, campaigns }),
     { balance: 200000000n, committed: 100000000n, available: 100000000n, shortfall: 50000000n });
   assert.equal(referralFundAvailability({ balanceUnits: 250000000n, campaigns }).shortfall, 0n);
+  assert.deepEqual(referralFundAvailability({ balanceUnits: 100000000n, budgetUnits: 1n, campaigns: [
+    { fund: 'dbusk-referrals', status: 'published', budgetUnits: '100000000', giftReserveUnits: '20000000',
+      paidUnits: '50000000', giftPaidUnits: '20000000' },
+  ] }), { balance: 100000000n, committed: 50000000n, available: 50000000n, shortfall: 0n });
+});
+
+test('ETH campaigns keep their own fund bucket, reserve gifts and convert amounts at the spot rate', async () => {
+  const { referralCampaignPayload, referralFundAvailability, referralTemplateFrom, convertCampaignUnits } = await import('../js/referral-campaign-editor.mjs');
+  const startsAt = new Date(Date.now() + 86400000).toISOString();
+  const endsAt = new Date(Date.now() + 15 * 86400000).toISOString();
+  const claimDeadline = new Date(Date.now() + 22 * 86400000).toISOString();
+  const wallet = '0x' + '12'.repeat(20);
+  const legAmounts = { referrer: '3000000000000000', musician: '1000000000000000', 'dbusk-top10': '1000000000000000', 'dbusk-playback': '0' };
+  const gifts = [{ trigger: 'top', amountUnits: '10000000000000000', supporter: true }, { trigger: 'participation', amountUnits: '0', supporter: true }];
+  const payload = referralCampaignPayload({ title: 'Ether', startsAt, endsAt, claimDeadline, referrers: [wallet], legAmounts,
+    budgetUnits: '50000000000000000', asset: 'eth', gifts });
+  assert.equal(payload.asset, 'eth');
+  assert.equal(payload.maxAwards, 10);
+  assert.deepEqual(payload.gifts.map(g => g.trigger), ['participation', 'top']);
+  assert.throws(() => referralCampaignPayload({ startsAt, endsAt, claimDeadline, referrers: [], gifts: [{ trigger: 'top', amountUnits: '0', supporter: false }] }), /amount or/);
+  assert.equal(referralTemplateFrom(payload).asset, 'eth');
+  const campaigns = [{ fund: 'dbusk-referrals', status: 'published', asset: 'eth', budgetUnits: '50000000000000000', giftReserveUnits: '10000000000000000', paidUnits: '0' },
+    { fund: 'dbusk-referrals', status: 'published', budgetUnits: '150000000', paidUnits: '0' }];
+  assert.equal(referralFundAvailability({ balanceUnits: 100000000000000000n, campaigns, budgetUnits: 50000000000000000n, asset: 'eth' }).available, 40000000000000000n);
+  assert.equal(referralFundAvailability({ balanceUnits: 150000000n, campaigns }).available, 0n);
+  assert.equal(convertCampaignUnits('10000000', 'usdc', 'eth', 4000), '2500000000000000');
+  assert.equal(convertCampaignUnits('2500000000000000', 'eth', 'usdc', 4000), '10000000');
+  assert.equal(convertCampaignUnits('10000000', 'usdc', 'eth', null), null);
+});
+test('campaign gifts pay native ETH from the campaign fund with their own work reference', async t => {
+  const { sendCampaignGift } = await import('../js/promotions-ui.mjs');
+  const previous = global.window;
+  t.after(() => { if (previous === undefined) delete global.window; else global.window = previous; });
+  const winner = '0x' + '56'.repeat(20);
+  const campaign = { id: 'offer-eth', fund: 'dbusk-referrals', asset: 'eth' };
+  const award = { id: 'gift-top', trigger: 'top', wallet: winner, amountUnits: '10000000000000000', status: 'approved' };
+  const actions = [];
+  let paid;
+  const router = { completedWorkReferences: async () => false, PAYROLL_ROLE: async () => ZeroHash, CONTRIBUTOR_ADMIN_ROLE: async () => ZeroHash,
+    hasRole: async () => true, paused: async () => false, approvedAssets: async asset => asset === ZeroAddress,
+    contributors: async () => ({ approved: true }), funds: async () => ({ exists: true, active: true }),
+    fundBalances: async (_, asset) => asset === ZeroAddress ? 10n ** 17n : 0n };
+  router.payout = async (...args) => { paid = args; return { hash: txHash, wait: async () => ({ status: 1 }) }; };
+  router.payout.staticCall = async () => {};
+  const signer = { provider: { getNetwork: async () => ({ chainId: 8453n }) } };
+  global.window = { _wallet: { address: owner, signer }, ethers: { id, ZeroHash, Contract: function () { return router; } } };
+  const entries = new Map();
+  const storage = { getItem: key => entries.get(key) || null, setItem: (key, value) => entries.set(key, value), removeItem: key => entries.delete(key) };
+  const command = async c => {
+    actions.push(c.action);
+    assert.equal(c.giftId, 'gift-top');
+    const reconciled = actions.filter(a => a === 'reconcile-gift').length;
+    return { campaigns: [{ ...campaign, giftAwards: [{ ...award, status: reconciled === 2 ? 'paid' : 'payment-pending' }] }] };
+  };
+  await sendCampaignGift({ campaign, award, snapshot: { routerAddress }, command, status: {}, storage });
+  assert.deepEqual(actions, ['prepare-gift', 'reconcile-gift', 'reconcile-gift']);
+  assert.equal(paid[1], ZeroAddress);
+  assert.equal(paid[3], 10000000000000000n);
+  assert.equal(paid[4], id(`decentbusking:promotions:v1:8453:offer-eth:${winner}:gift-top`));
+  assert.equal(entries.size, 0);
+});
+
+test('gift payment recovery reconciles a journal hash and releases only a confirmed no-broadcast preparation', async () => {
+  const { reconcileCampaignGift, releaseCampaignGiftPreparation } = await import('../js/promotions-ui.mjs');
+  const campaign = { id: 'offer-eth' };
+  const award = { id: 'gift-top', wallet: '0x' + '56'.repeat(20) };
+  const key = `decentbusking:promotion-gift:${campaign.id}:${award.id}:${award.wallet}`;
+  const entries = new Map([[key, JSON.stringify({ hash: txHash })]]);
+  const storage = { getItem: k => entries.get(k) || null, removeItem: k => entries.delete(k) };
+  const actions = [];
+  const command = async input => {
+    actions.push(input);
+    if (input.action === 'reconcile-gift') return { campaigns: [{ id: campaign.id,
+      giftAwards: [{ ...award, status: 'paid' }] }] };
+    return { campaigns: [{ id: campaign.id, giftAwards: [{ ...award, status: 'approved' }] }] };
+  };
+  await reconcileCampaignGift({ campaign, award, command, storage });
+  assert.equal(actions[0].txHash, txHash);
+  assert.equal(entries.has(key), false);
+  await assert.rejects(releaseCampaignGiftPreparation({ campaign, award, command, storage, reason: ' ' }), /Record why/);
+  await releaseCampaignGiftPreparation({ campaign, award, command, storage, reason: 'Wallet history shows no broadcast' });
+  assert.deepEqual(actions[1], { action: 'release-gift-preparation', campaignId: campaign.id, giftId: award.id,
+    wallet: award.wallet, confirmNoBroadcast: true, reason: 'Wallet history shows no broadcast' });
 });

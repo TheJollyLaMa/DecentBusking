@@ -1,6 +1,84 @@
 export const PROMOTIONS_FUND = 'dbusk-promotionals';
 export const REFERRALS_FUND = 'dbusk-referrals';
 export const PROMOTIONS_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+export const PROMOTIONS_ETH = '0x0000000000000000000000000000000000000000';
+export const CAMPAIGN_ASSETS = Object.freeze({
+  usdc: Object.freeze({ id: 'usdc', address: PROMOTIONS_USDC, decimals: 6, symbol: 'USDC', icon: '💵' }),
+  eth: Object.freeze({ id: 'eth', address: PROMOTIONS_ETH, decimals: 18, symbol: 'ETH', icon: 'Ξ' }),
+});
+export function campaignAsset(campaign) {
+  return CAMPAIGN_ASSETS[campaign?.asset === 'eth' ? 'eth' : 'usdc'];
+}
+// Compact display: $12.50 for USDC, Ξ0.0025 for ETH.
+export function formatAssetUnits(value, asset = CAMPAIGN_ASSETS.usdc) {
+  const amount = BigInt(value || 0);
+  const scale = 10n ** BigInt(asset.decimals);
+  const whole = amount / scale;
+  if (asset.id === 'usdc') {
+    const cents = String((amount % scale) / 10000n).padStart(2, '0');
+    return `$${whole.toLocaleString('en-US')}${cents === '00' ? '' : `.${cents}`}`;
+  }
+  const fraction = String(amount % scale).padStart(asset.decimals, '0').slice(0, 6).replace(/0+$/, '');
+  return `Ξ${whole}${fraction ? `.${fraction}` : ''}`;
+}
+export function parseAssetAmount(value, asset = CAMPAIGN_ASSETS.usdc) {
+  const places = asset.id === 'eth' ? 6 : 2;
+  const match = new RegExp(`^[$Ξ]?\\s*(\\d{1,9})(?:\\.(\\d{1,${places}}))?$`).exec(String(value).trim());
+  if (!match) return null;
+  const scale = 10n ** BigInt(asset.decimals);
+  return (BigInt(match[1]) * scale + BigInt((match[2] || '').padEnd(asset.decimals, '0'))).toString();
+}
+export const CAMPAIGN_GIFT_TRIGGERS = Object.freeze(['participation', 'completion', 'top']);
+export const CAMPAIGN_GIFT_ICONS = Object.freeze({ participation: '🎟', completion: '🏁', top: '🥇' });
+export const CAMPAIGN_GIFT_LABELS = Object.freeze({ participation: 'Every referrer who converts a musician',
+  completion: 'Every converting referrer when the campaign fills', top: 'Referrer who converts the most musicians' });
+// Gifts are paid in the campaign asset from the same fund; null means invalid.
+export function campaignGifts(value = []) {
+  if (!Array.isArray(value) || value.length > CAMPAIGN_GIFT_TRIGGERS.length) return null;
+  const seen = new Set();
+  const gifts = [];
+  for (const gift of value) {
+    if (!gift || !CAMPAIGN_GIFT_TRIGGERS.includes(gift.trigger) || seen.has(gift.trigger) ||
+        !/^(?:0|[1-9]\d{0,29})$/.test(gift.amountUnits ?? '') || typeof (gift.supporter ?? false) !== 'boolean' ||
+        gift.amountUnits === '0' && !gift.supporter) return null;
+    seen.add(gift.trigger);
+    gifts.push({ trigger: gift.trigger, amountUnits: gift.amountUnits, supporter: !!gift.supporter });
+  }
+  return gifts.sort((a, b) => CAMPAIGN_GIFT_TRIGGERS.indexOf(a.trigger) - CAMPAIGN_GIFT_TRIGGERS.indexOf(b.trigger));
+}
+// Most a campaign's gifts can ever pay, so Run can require it to be funded up front.
+export function campaignGiftReserveUnits(campaign) {
+  const referrers = (campaign?.curatedReferrers || []).length;
+  return (campaignGifts(campaign?.gifts || []) || []).reduce((total, gift) =>
+    total + BigInt(gift.amountUnits) * (gift.trigger === 'top' ? 1n : BigInt(referrers)), 0n);
+}
+// Only curated referrers win gifts. Conversions are approved, payment-pending or paid claims.
+export function campaignGiftWinners(campaign, claims = [], members = []) {
+  const gifts = campaignGifts(campaign?.gifts || []) || [];
+  const referrers = campaign?.curatedReferrers || [];
+  const held = claims.filter(c => c.campaignId === campaign.id && ['approved', 'payment-pending', 'paid'].includes(c.status));
+  const stats = referrers.map(wallet => ({ wallet, conversions: held.filter(c => c.wallet === wallet).length,
+    registered: members.filter(m => m.campaignId === campaign.id && m.referrer === wallet).length }));
+  const converting = stats.filter(s => s.conversions > 0);
+  const filled = held.length >= (campaign.maxAwards || Infinity);
+  const awards = [];
+  for (const gift of gifts) {
+    let winners = [];
+    if (gift.trigger === 'participation') winners = converting;
+    else if (gift.trigger === 'completion') winners = filled ? converting : [];
+    else if (converting.length) {
+      const best = converting.reduce((a, b) => b.conversions > a.conversions ||
+        b.conversions === a.conversions && b.registered > a.registered ? b : a);
+      winners = converting.filter(s => s.conversions === best.conversions && s.registered === best.registered);
+    }
+    const share = gift.trigger === 'top' && winners.length ? BigInt(gift.amountUnits) / BigInt(winners.length) : BigInt(gift.amountUnits);
+    for (const winner of winners) {
+      awards.push({ id: `gift-${gift.trigger}`, trigger: gift.trigger, wallet: winner.wallet,
+        amountUnits: share.toString(), supporter: gift.supporter });
+    }
+  }
+  return awards;
+}
 export function isPromotionsFund(value) {
   return typeof value === 'string' && value.length <= 64 &&
     /^dbusk-(?:promotionals|referrals)(?:-[a-z0-9]+)*$/.test(value);
@@ -44,7 +122,7 @@ export const MUSICIAN_REFERRAL_PILOT = Object.freeze({
   ]),
 });
 export const MUSICIAN_REFERRAL_TERMS = 'Six conversions maximum at $25 each. Every conversion requires all four legs and a referred musician with a verified minted DecentBusking playlist track plus 10 distinct campaign-signed song votes. The $5 Top10 and $5 Playback legs remain funding-needed settlement obligations; this UI does not transfer them. Supporter-token outcome is eligibility only, and no NFT is minted or transferred. No self-referrals, guaranteed payout, or silent term changes.';
-const UNIT = /^(?:0|[1-9]\d{0,14})$/;
+const UNIT = /^(?:0|[1-9]\d{0,29})$/;
 // Campaigns saved before custom breakdowns existed fall back to the $150 pilot terms.
 export function musicianReferralConfig(campaign = {}) {
   const amounts = campaign.legAmounts ||
@@ -56,7 +134,7 @@ export function musicianReferralConfig(campaign = {}) {
     Object.keys(amounts).length === legIds.length && legIds.every(id => UNIT.test(amounts[id] ?? ''));
   const rewardUnits = validAmounts ? legIds.reduce((sum, id) => sum + BigInt(amounts[id]), 0n) : 0n;
   const valid = validAmounts && BigInt(amounts.referrer) > 0n && rewardUnits > 0n &&
-    /^[1-9]\d{0,14}$/.test(baseBudgetUnits) && BigInt(baseBudgetUnits) % rewardUnits === 0n &&
+    /^[1-9]\d{0,29}$/.test(baseBudgetUnits) && BigInt(baseBudgetUnits) % rewardUnits === 0n &&
     BigInt(baseBudgetUnits) / rewardUnits <= 100n &&
     Number.isSafeInteger(requiredVotes) && requiredVotes >= 1 && requiredVotes <= 100;
   return { valid, amounts: { ...amounts }, baseBudgetUnits, requiredVotes,
@@ -90,7 +168,8 @@ export function promotionAuthorization({ address, origin, issuedAt, command }) {
 export function promotionWorkReference(claim, legId = '') {
   return `decentbusking:promotions:v1:8453:${claim.campaignId}:${claim.wallet.toLowerCase()}${legId ? `:${legId}` : ''}`;
 }
-export function promotionMoney(value) {
+export function promotionMoney(value, asset = CAMPAIGN_ASSETS.usdc) {
+  if (asset.id === 'eth') return `${formatAssetUnits(value, asset).slice(1)} ETH`;
   const amount = BigInt(value);
   const fraction = String(amount % 1000000n).padStart(6, '0').replace(/0+$/, '').padEnd(2, '0');
   return `${amount / 1000000n}.${fraction} USDC`;

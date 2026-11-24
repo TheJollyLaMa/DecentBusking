@@ -55,3 +55,6 @@
 @media (prefers-reduced-motion: reduce) {
   .profile-inbox, .inbox-referral, .inbox-referral::before, .inbox-badge, .inbox-alien, :is(#creator-profile, .profile-inbox) .inbox-action.is-done, .inbox-burst i { animation: none; }
 }
+.inbox-facts .inbox-gift.is-glow { animation: inbox-gift-glow 2.4s ease-in-out infinite; }
+@keyframes inbox-gift-glow { 50% { box-shadow: 0 0 18px #f4d380aa; transform: translateY(-1px); } }
+@media (prefers-reduced-motion: reduce) { .inbox-facts .inbox-gift.is-glow { animation: none; } }
