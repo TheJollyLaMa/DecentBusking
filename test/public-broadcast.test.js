@@ -49,7 +49,7 @@ test('edge publishes only authenticated, bounded, short-lived objects; expiry is
   assert.equal((await handleBroadcastRequest(request('HEAD'), env, {}, () => time)).body, null);
   assert.equal((await handleBroadcastRequest(request('GET'), env, {}, () => time + 120001)).status, 404);
   assert.equal((await handleBroadcastRequest(request('PUT', { ...auth,
-    'x-broadcast-expires-at': String(time + 121000) }, 'audio'), env, {}, () => time)).status, 400);
+    'x-broadcast-expires-at': String(time + 150001) }, 'audio'), env, {}, () => time)).status, 400);
   assert.equal((await handleBroadcastRequest(request('PUT', auth, Buffer.alloc(256001)), env, {}, () => time)).status, 413);
   assert.equal((await handleBroadcastRequest(new Request('https://edge.example/hls/private-recording'), env, {})).status, 404);
   const stateUrl = `https://edge.example/hls/${'a'.repeat(32)}/state.json`;
@@ -63,6 +63,32 @@ test('edge publishes only authenticated, bounded, short-lived objects; expiry is
   assert.equal((await handleBroadcastRequest(new Request(stateUrl), env, {}, () => time + 120001)).status, 404);
   env.BROADCAST_RATE_LIMITER.limit = async () => ({ success: false });
   assert.equal((await handleBroadcastRequest(request('GET'), env, {}, () => time)).status, 429);
+});
+
+test('edge accepts bounded publisher clock skew but never retains broadcast objects beyond two edge-clock minutes', async () => {
+  const { handleBroadcastRequest } = await import('../cloudflare/broadcast-worker.mjs');
+  const time = 1700000000000;
+  const objects = new Map();
+  const env = {
+    BROADCAST_UPLOAD_TOKEN: 't'.repeat(40),
+    BROADCAST_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    BROADCAST_BUCKET: {
+      put: async (key, body, options) => objects.set(key, { body, ...options }),
+      get: async key => objects.get(key),
+    },
+  };
+  for (const name of ['index.m3u8', 'state.json', 'segment-000000001.ts']) {
+    const url = `https://edge.example/hls/${'a'.repeat(32)}/${name}`;
+    for (const skew of [1, 1000, 30000]) {
+      const response = await handleBroadcastRequest(new Request(url, { method: 'PUT',
+        headers: { authorization: `Bearer ${'t'.repeat(40)}`, 'x-broadcast-expires-at': String(time + 120000 + skew) },
+        body: 'broadcast',
+      }), env, {}, () => time);
+      assert.equal(response.status, 204);
+      assert.equal(objects.get(new URL(url).pathname.slice(1)).customMetadata.expiresAt, String(time + 120000));
+      assert.equal((await handleBroadcastRequest(new Request(url), env, {}, () => time + 120001)).status, 404);
+    }
+  }
 });
 
 test('public state reads coalesce but expired failures never become stale successes', async () => {

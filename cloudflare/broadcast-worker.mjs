@@ -26,8 +26,16 @@ export async function handleBroadcastRequest(request, env, context, now = Date.n
   const contentType = manifest ? 'application/vnd.apple.mpegurl' : state ? 'application/json' : 'video/mp2t';
   if (request.method === 'PUT') {
     if (!await authorized(request, env.BROADCAST_UPLOAD_TOKEN)) return reply(403);
-    const expiresAt = Number(request.headers.get('x-broadcast-expires-at'));
-    if (!Number.isSafeInteger(expiresAt) || expiresAt <= now() || expiresAt > now() + 120000) return reply(400);
+    const requestedExpiry = Number(request.headers.get('x-broadcast-expires-at'));
+    const receivedAt = now();
+    // Publisher and edge clocks differ; retention is always capped by the edge's clock.
+    if (!Number.isSafeInteger(requestedExpiry) || requestedExpiry <= receivedAt || requestedExpiry > receivedAt + 150000) {
+      console.warn('[public-broadcast-edge] INVALID_UPLOAD_EXPIRY', {
+        aheadMs: Number.isSafeInteger(requestedExpiry) ? requestedExpiry - receivedAt : null,
+      });
+      return reply(400, 'Invalid broadcast expiry');
+    }
+    const expiresAt = Math.min(requestedExpiry, receivedAt + 120000);
     const chunks = [];
     let length = 0;
     for await (const chunk of request.body || []) {
