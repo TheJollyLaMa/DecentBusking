@@ -24,7 +24,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261123-split-admin-pies" />
+  <link rel="stylesheet" href="css/styles.css?v=20261123-supporter-queue" />
   <link rel="stylesheet" href="css/dmtv.css?v=20261118-dmtv-escrow" />
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth" />
   <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback" />
@@ -61,8 +61,10 @@
       "./js/performer-room.mjs?v=20261114-allocated-stage":"./js/performer-room.mjs?v=20261117-booking-assets",
       "./js/performer-room.mjs?v=20261116-curtain":"./js/performer-room.mjs?v=20261117-booking-assets",
       "./js/radio-schedule-ui.mjs?v=20261025-community-reminder":"./js/radio-schedule-ui.mjs?v=20261122-musician-referral",
-      "./js/promotions-ui.mjs?v=20261116-promotions":"./js/promotions-ui.mjs?v=20261126-eth-gifts",
-      "./js/promotions-ui.mjs?v=20261122-musician-referral":"./js/promotions-ui.mjs?v=20261126-eth-gifts",
+      "./js/promotions-ui.mjs?v=20261116-promotions":"./js/promotions-ui.mjs?v=20261123-supporter-queue",
+      "./js/promotions-ui.mjs?v=20261122-musician-referral":"./js/promotions-ui.mjs?v=20261123-supporter-queue",
+      "./js/promotions-ui.mjs?v=20261126-eth-gifts":"./js/promotions-ui.mjs?v=20261123-supporter-queue",
+      "./js/promotions.mjs?v=20261126-eth-gifts":"./js/promotions.mjs?v=20261123-supporter-queue",
       "./js/mint.js?v=20261030-ad-cutoff":"./js/mint.js?v=20261125-inviter",
       "./js/fund-display.mjs?v=20261024-djuke-labels":"./js/fund-display.mjs?v=20261108-live-audio-pilot"
     }}
@@ -1160,6 +1162,7 @@
             💸 Settle All
           </button>
         </div>
+        <section id="payroll-supporter-queue" class="supporter-payroll" aria-label="Supporter tokens owed"></section>
       </div>
     </div>
   </div>
@@ -1198,7 +1201,7 @@
   <script type="module" src="js/content-review-ui.mjs?v=20261107-flags"></script>
 
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
-  <script type="module" src="js/payroll.js?v=20261123-song-splits"></script>
+  <script type="module" src="js/payroll.js?v=20261123-supporter-queue"></script>
   <script type="module" src="js/radio-history.js?v=20261029-tally-sections"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261122-musician-referral"></script>
   <link rel="stylesheet" href="css/fund-tour.css?v=20261019-fund-tour">
@@ -1207,7 +1210,7 @@
   <script type="module" src="js/top-ten-board.mjs?v=20261123-song-splits"></script>
   <script type="module" src="js/djuke.mjs?v=20261112-playlist-continuity"></script>
   <script type="module" src="js/devert-site.mjs?v=20261107-review"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261126-eth-gifts"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261123-supporter-queue"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261118-artist-artwork"></script>
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/djuke-playlists-ui.mjs?v=20261025-scheduling-info"></script>
@@ -1216,7 +1219,7 @@
   <script type="module" src="js/panel-equalizers.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/top-ten-live-meter.mjs?v=20261025-seamless-handoff"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261123-song-splits';
+    import { initPayroll } from './js/payroll.js?v=20261123-supporter-queue';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
   <script type="module">

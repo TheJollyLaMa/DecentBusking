@@ -129,8 +129,8 @@ That reserve is added to the budget, so Run stays blocked until both are funded.
 
 Once the campaign fills or its claims close, and every claim has been reviewed,
 the admin presses **🎁 Award** on the campaign bar. That signed `award-gifts`
-command freezes the winners and adds 🎖 winners to the Supporter eligibility
-list (eligibility only, nothing is minted). Each money award then has its own
+command freezes the winners and adds 🎖 winners to the Supporter queue (see
+**🎖 Supporter tokens owed** below). Each money award then has its own
 **🎁 Send** button: one router payout with work reference
 `…:<campaign>:<wallet>:gift-<trigger>`, reconciled like a claim payment.
 If a wallet transaction is interrupted, **↻** reconciles its hash; **↩** can
@@ -150,10 +150,36 @@ Supporter-token goal, and an avatar for each referred musician (ENS avatar or
 👽) with a vote-progress ring. **🔗 Copy invite** copies the referral link
 without a signature. Cards disappear when their action is complete.
 
-The current prize pool is Base USDC only. The router can also hold ETH and
-approved ERC-20 tokens, but promotions accounting and the UI do not support
-them yet. Supporter NFT prizes would need either a router upgrade or separate
-escrow with admin recovery.
+Campaign rewards and money gifts use Base USDC or ETH. Other ERC-20 gifts are
+not yet supported. Supporter tokens are not escrowed: the v2.1 router cannot
+hold ERC-1155 tokens, so they are owed and sent as described below.
+
+### 🎖 Supporter tokens owed
+
+An earned Supporter enters the queue when an approved conversion earns a 🎖
+participation gift, when the campaign fills for a 🎖 completion gift, when the
+top-referrer 🎖 award is finalized, or when all configured conversions are paid.
+Each earning wallet is owed at most one
+Supporter #75 (Base `0xe63E…439B`) per campaign. Owed tokens appear in the
+**💸 Payroll** panel, below the repo dev payouts, as **🎖 Supporter tokens
+owed**. They come from the public promotions ledger rather than
+`payroll-queue.json`, because referrers are wallets, not registered GitHub
+contributors. Before a transfer is prepared, eligibility follows the current
+approved claims; preparing it records the obligation even if a claim is later
+reversed.
+
+**🎖 Send** checks that the admin wallet holds a copy and simulates the
+transfer. It then records a signed `prepare-supporter`, and the wallet sends
+`safeTransferFrom(admin, recipient, 75, 1)`. The token is marked delivered only
+after a twice-confirmed, canonical Base receipt has a `TransferSingle` of
+exactly one #75 from the admin wallet to that recipient. A hash can settle only
+one record. A proven reverted attempt returns the token to owed. **🔎 Check**
+reconciles an interrupted send and accepts a replacement transaction hash.
+**↩** releases a preparation without a hash only after wallet-history review,
+with a recorded reason. Tokens come from the admin wallet's existing inventory;
+nothing is minted. Recipients see **🎖 Supporter
+🎁** in **✨ For you** until delivery, including after the campaign closes.
+An active invite shows **🎖 Supporter ✅** after delivery; a closed invite clears.
 
 Open **Admin → Invites & Promotions → Unlock / refresh promotions** and sign the
 origin-bound read authorization. Missing storage, RPC, roles, active fund, or
@@ -263,10 +289,9 @@ An admin may top up the source or extend the end/claim dates only through an
 dates, reviewer, timestamp and reason are retained together. The normal draft
 editor cannot overwrite published pilot terms.
 
-The supporter token result is eligibility only. When all six conversions have
-both direct wallet legs paid before the campaign end, every earning referrer is
-marked eligible. No NFT is minted or transferred because no exact edition or
-authority configuration is present. Missing playlist, vote, router, amendment
+When all configured conversions have all their legs paid before the campaign
+end, every earning referrer is owed one Supporter token, sent from the payroll
+panel as described in **🎖 Supporter tokens owed**. Nothing is minted. Missing playlist, vote, router, amendment
 or settlement support is displayed as unavailable/blocked, not as success.
 
 Published terms are immutable and participants sign acceptance of that version;

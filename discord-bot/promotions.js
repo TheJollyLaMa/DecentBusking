@@ -4,7 +4,7 @@ import { PAYMENT_EVENT_ABI } from './payment-ledger.js';
 import { currentPayrollPeriod } from '../js/payroll-week.mjs';
 import { PROMOTIONS_FUND, REFERRALS_FUND, referralCampaignTitle, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS,
   MUSICIAN_REFERRAL_PILOT, isMusicianReferralCampaign, CAMPAIGN_ASSETS, campaignAsset, campaignGifts, campaignGiftReserveUnits,
-  campaignGiftWinners, musicianReferralLegs, musicianReferralConfig,
+  campaignGiftWinners, musicianReferralLegs, musicianReferralConfig, SUPPORTER_REWARD, SUPPORTER_REWARD_ABI,
   isPromotionsFund, promotionAnnouncementDraft, promotionAuthorization, promotionWorkReference } from '../js/promotions.mjs';
 
 const address = value => {
@@ -42,6 +42,7 @@ const paymentInterface = new Interface([
   'event Transfer(address indexed from,address indexed to,uint256 value)',
 ]);
 const routerInterface = new Interface(PROMOTIONS_ROUTER_ABI);
+const supporterInterface = new Interface(SUPPORTER_REWARD_ABI);
 const fundInterface = new Interface([
   'event FundFunded(bytes32 indexed fundId,address indexed asset,address indexed funder,uint256 amount)',
 ]);
@@ -104,7 +105,7 @@ export function validatePromotionCheckpoint(value) {
           Object.entries(c.curatedReferrerNames).some(([w, name]) => !c.curatedReferrers?.includes(w) ||
             typeof name !== 'string' || !name.trim() || name.length > 40)) ||
         !Array.isArray(c.curatedReferrers) || !Array.isArray(c.amendments) ||
-        !c.supporterToken || c.supporterToken.status !== 'eligibility-only' ||
+        !c.supporterToken || !['eligibility-only', 'payroll-queue'].includes(c.supporterToken.status) ||
         !Array.isArray(c.supporterToken.eligibleWallets) ||
         c.supporterToken.eligibleWallets.some(w => !validWallet(w)))) fail();
     if (c.curatedReferrers && c.curatedReferrers.some(w => !validWallet(w))) fail();
@@ -132,6 +133,26 @@ export function validatePromotionCheckpoint(value) {
           }
         }
         awarded.add(`${award.id}:${award.wallet}`);
+      }
+    }
+    if (c.supporterToken?.deliveries !== undefined) {
+      const deliveries = c.supporterToken.deliveries;
+      if (!Array.isArray(deliveries) || deliveries.length > 200) fail();
+      const delivered = new Set();
+      for (const d of deliveries) {
+        if (!d || !validWallet(d.wallet) || !c.supporterToken.eligibleWallets.includes(d.wallet) || delivered.has(d.wallet) ||
+            !['owed', 'transfer-pending', 'delivered'].includes(d.status) || !validDate(d.preparedAt) ||
+            d.txHash && (!/^0x[0-9a-f]{64}$/.test(d.txHash) || transactionHashes.has(d.txHash)) ||
+            d.lastRevertedHash !== undefined && !/^0x[0-9a-f]{64}$/.test(d.lastRevertedHash) ||
+            d.status === 'delivered' && (!d.txHash || !Number.isSafeInteger(d.blockNumber) ||
+              !/^0x[0-9a-f]{64}$/i.test(d.blockHash || '') || !validDate(d.deliveredAt))) fail();
+        if (d.txHash) transactionHashes.add(d.txHash);
+        if (d.history !== undefined && !Array.isArray(d.history)) fail();
+        for (const h of d.history || []) {
+          if (!h || !validDate(h.at) || !validWallet(h.reviewer) || h.action !== 'no-broadcast-confirmed') fail();
+          text(h.reason, 'Checkpoint Supporter delivery review reason');
+        }
+        delivered.add(d.wallet);
       }
     }
     for (const curation of c.curationHistory || []) {
@@ -380,6 +401,15 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       throw new Error(fault);
     }
   };
+  function supporterEarners(next, campaign) {
+    if (!isMusicianReferralCampaign(campaign)) return [];
+    const recorded = campaign.supporterToken?.eligibleWallets || [];
+    if (campaign.giftAwards) return recorded;
+    const earned = campaignGiftWinners(campaign, next.claims, next.members)
+      .filter(award => award.supporter && award.trigger !== 'top')
+      .map(award => award.wallet);
+    return [...new Set([...recorded, ...earned])];
+  }
   function summary(campaign, admin = false) {
     const claims = state.claims.filter(c => c.campaignId === campaign.id);
     const reserved = claims.filter(held);
@@ -390,6 +420,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       .reduce((n, leg) => n + BigInt(leg.amountUnits), 0n);
     const special = isMusicianReferralCampaign(campaign);
     return { ...offer, ...(admin && announcement ? { announcement } : {}),
+      ...(special ? { supporterToken: { ...campaign.supporterToken, eligibleWallets: supporterEarners(state, campaign) } } : {}),
       ...(isMusicianReferralCampaign(campaign) ? { giftReserveUnits: giftReserve(campaign).toString(),
         giftPaidUnits: giftPaid(campaign).toString() } : {}),
       committedUnits: committed.toString(), approvedUnits: special ? legTotal('approved').toString() : total('approved').toString(),
@@ -552,6 +583,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       const totals = status => earned.flatMap(c => c.legs || []).filter(l => l.kind === 'wallet' && l.recipient === wallet && l.status === status)
         .reduce((n, l) => n + BigInt(l.amountUnits), 0n);
       const relevantMembers = state.members.filter(m => m.campaignId === campaign.id && (m.referrer === wallet || m.wallet === wallet));
+      const supporterEligible = supporterEarners(state, campaign).includes(wallet);
       const reservedConversions = claims.filter(claim => ['approved', 'payment-pending', 'paid'].includes(claim.status)).length;
       const remainingConversions = Math.max(0, Math.min(
         campaign.maxAwards - reservedConversions,
@@ -584,8 +616,10 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
         referred, curated: campaign.curatedReferrers.includes(wallet),
         asset: campaignAsset(campaign).id, gifts: campaign.gifts || [],
         giftAwards: (campaign.giftAwards || []).filter(award => award.wallet === wallet),
-        supporterToken: { status: campaign.supporterToken?.status || 'eligibility-only', eligible: !!campaign.supporterToken?.eligibleWallets?.includes(wallet),
-          note: 'Eligibility only. No token is minted or transferred unless an exact edition and authority are separately configured.' } });
+        supporterToken: { status: campaign.supporterToken?.status || 'eligibility-only', eligible: supporterEligible,
+          delivery: supporterEligible
+            ? campaign.supporterToken.deliveries?.find(item => item.wallet === wallet)?.status || 'owed' : '',
+          note: 'Earned Supporter tokens join the dev payroll queue and are sent from the admin wallet.' } });
     }
     return result;
   }
@@ -595,7 +629,8 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       item.legs?.length && item.legs.every(leg => leg.status === 'paid' && leg.paidAt &&
         Date.parse(leg.paidAt) < Date.parse(campaign.endsAt)));
     if (qualifyingClaims.length !== musicianReferralConfig(campaign).maxConversions) return;
-    campaign.supporterToken ||= { status: 'eligibility-only', eligibleWallets: [] };
+    campaign.supporterToken ||= { status: 'payroll-queue', eligibleWallets: [] };
+    campaign.supporterToken.status = 'payroll-queue';
     campaign.supporterToken.eligibleWallets = [...new Set([...campaign.supporterToken.eligibleWallets,
       ...qualifyingClaims.map(item => item.wallet)])];
     campaign.supporterToken.evaluatedAt = new Date(now()).toISOString();
@@ -637,6 +672,53 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       activity: wallet ? { week, voted: state.votes.some(v => v.wallet === wallet && v.week === week) } : null,
     });
   }
+  // Delivery is proven only by a canonical, twice-confirmed TransferSingle of exactly one Supporter from the admin wallet.
+  async function reconcileSupporter(next, delivery, hash) {
+    if (Number((await provider.getNetwork()).chainId) !== SUPPORTER_REWARD.chainId) throw new Error('Supporter reconciliation requires Base');
+    if (!/^0x[0-9a-f]{64}$/i.test(hash || '')) throw new Error('Enter a valid Base transaction hash');
+    const txHash = lower(hash);
+    if (next.claims.some(c => c.txHash === txHash || c.legs?.some(item => item.txHash === txHash)) ||
+        next.campaigns.some(c => (c.giftAwards || []).some(item => item.txHash === txHash) ||
+          (c.supporterToken?.deliveries || []).some(item => item !== delivery && item.txHash === txHash))) {
+      throw new Error('Transaction already assigned');
+    }
+    const receipt = await provider.getTransactionReceipt(txHash);
+    if (delivery.txHash && delivery.txHash !== txHash && (!receipt || Number(receipt.status) !== 1)) {
+      throw new Error('Original transfer is unresolved; only a matching successful replacement may reconcile another hash');
+    }
+    if (!receipt || await provider.getBlockNumber() - receipt.blockNumber + 1 < 2) {
+      delivery.txHash = txHash;
+      return;
+    }
+    if ((await provider.getBlock(receipt.blockNumber))?.hash !== receipt.blockHash) throw new Error('Transfer is not in the canonical Base block');
+    if (lower(receipt.to) !== SUPPORTER_REWARD.contract) throw new Error('Wrong Supporter transfer target');
+    const tokenId = BigInt(SUPPORTER_REWARD.tokenId), quantity = BigInt(SUPPORTER_REWARD.quantity);
+    if (Number(receipt.status) !== 1) {
+      if (delivery.txHash && delivery.txHash !== txHash) throw new Error('Check the originally recorded transfer before another hash');
+      const tx = await provider.getTransaction(txHash);
+      let parsed;
+      try { parsed = tx && supporterInterface.parseTransaction({ data: tx.data, value: tx.value || 0 }); } catch {}
+      const args = parsed?.args;
+      if (!tx || lower(tx.to) !== SUPPORTER_REWARD.contract || lower(tx.from) !== owner || parsed?.name !== 'safeTransferFrom' ||
+          lower(args[0]) !== owner || lower(args[1]) !== delivery.wallet || args[2] !== tokenId || args[3] !== quantity) {
+        throw new Error('Reverted transaction does not prove this exact admin Supporter transfer attempt');
+      }
+      delivery.txHash = '';
+      delivery.status = 'owed';
+      delivery.lastRevertedHash = txHash;
+      return;
+    }
+    const match = receipt.logs.some(log => {
+      if (lower(log.address) !== SUPPORTER_REWARD.contract) return false;
+      let e;
+      try { e = supporterInterface.parseLog(log); } catch { return false; }
+      return e?.name === 'TransferSingle' && lower(e.args.from) === owner && lower(e.args.to) === delivery.wallet &&
+        e.args.id === tokenId && e.args.value === quantity;
+    });
+    if (!match) throw new Error(`Missing a transfer of exactly ${quantity} Supporter #${tokenId} from the admin wallet to this recipient`);
+    Object.assign(delivery, { status: 'delivered', txHash, blockNumber: receipt.blockNumber,
+      blockHash: receipt.blockHash, deliveredAt: new Date(now()).toISOString() });
+  }
   async function reconcile(next, claim, hash, leg = null) {
     if (Number((await provider.getNetwork()).chainId) !== 8453) throw new Error('Payment reconciliation requires Base');
     if (!/^0x[0-9a-f]{64}$/i.test(hash || '')) throw new Error('Enter a valid Base transaction hash');
@@ -646,7 +728,8 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
     const asset = campaignAsset(next.campaigns.find(item => item.id === claim.campaignId));
     if (next.claims.some(c => c.id !== claim.id && (c.txHash === lower(hash) ||
         c.legs?.some(item => item.txHash === lower(hash)))) ||
-        next.campaigns.some(c => (c.giftAwards || []).some(item => item !== leg && item.txHash === lower(hash)))) throw new Error('Transaction already assigned');
+        next.campaigns.some(c => (c.giftAwards || []).some(item => item !== leg && item.txHash === lower(hash)) ||
+          (c.supporterToken?.deliveries || []).some(item => item.txHash === lower(hash)))) throw new Error('Transaction already assigned');
     if (claim.legs?.some(item => item.id !== leg?.id && item.txHash === lower(hash))) throw new Error('Transaction already assigned');
     const receipt = await provider.getTransactionReceipt(hash);
     if (paymentTarget.txHash && paymentTarget.txHash !== lower(hash) && (!receipt || Number(receipt.status) !== 1)) {
@@ -706,7 +789,8 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
         await refresh();
         const participantProfiles = [...new Set([...state.members.map(member => member.wallet),
           ...state.campaigns.filter(c => isMusicianReferralCampaign(c) && c.status !== 'draft' && c.status !== 'archived')
-            .flatMap(c => c.curatedReferrers || [])])].flatMap(wallet =>
+            .flatMap(c => c.curatedReferrers || []),
+          ...state.campaigns.flatMap(c => supporterEarners(state, c))])].flatMap(wallet =>
           participantStats(wallet).map(stats => ({ wallet, ...stats })));
         return structuredClone({ ...state, inviters: state.inviters || [], campaigns: state.campaigns.map(c => summary(c, true)),
           checkpointUri: getCheckpointUri(), participantProfiles,
@@ -758,7 +842,8 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
         let campaign = next.campaigns.find(c => c.id === command.campaignId);
         const adminActions = ['save', 'run', 'amend', 'curate-referrer', 'correct-inviter', 'status', 'review', 'correct-attribution', 'prepare-payment', 'release-payment-preparation',
           'reconcile', 'reconcile-funding-leg', 'preview-discord', 'send-discord', 'reconcile-discord',
-          'award-gifts', 'prepare-gift', 'reconcile-gift', 'release-gift-preparation'];
+          'award-gifts', 'prepare-gift', 'reconcile-gift', 'release-gift-preparation',
+          'prepare-supporter', 'reconcile-supporter', 'release-supporter-preparation'];
         if (adminActions.includes(command.action)) {
           if (!admin) throw new Error('Only the configured admin may manage promotions');
           if (command.revision !== state.revision) throw new Error('Promotions changed; refresh before retrying');
@@ -873,8 +958,8 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
             qualification = { campaignConfigId: MUSICIAN_REFERRAL_PILOT.id, asset, gifts,
               legAmounts: config.amounts, baseBudgetUnits: config.baseBudgetUnits, requiredVotes: config.requiredVotes,
               curatedReferrerNames, curatedReferrers, amendments: campaign?.amendments || [],
-              supporterToken: campaign?.supporterToken || { status: 'eligibility-only', eligibleWallets: [],
-                note: 'No exact edition or authority is configured; no NFT may be minted or transferred.' } };
+              supporterToken: campaign?.supporterToken || { status: 'payroll-queue', eligibleWallets: [],
+                note: 'Earned Supporter tokens join the dev payroll queue and are sent from the admin wallet.' } };
           } else if (input.template === 'sponsor') {
             qualification = { minPurchaseUnits: units(input.minPurchaseUnits) };
           } else if (input.template === 'sponsor-match') {
@@ -1211,6 +1296,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           const supporters = winners.filter(award => award.supporter).map(award => award.wallet);
           if (supporters.length) {
             campaign.supporterToken.eligibleWallets = [...new Set([...campaign.supporterToken.eligibleWallets, ...supporters])];
+            campaign.supporterToken.status = 'payroll-queue';
             campaign.supporterToken.evaluatedAt = at;
           }
           campaign.updatedAt = at;
@@ -1237,6 +1323,32 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
             await reconcile(next, { id: `gift:${campaign.id}`, campaignId: campaign.id, wallet: award.wallet,
               fund: campaign.fund, legs: [award] }, command.txHash, award);
           }
+        } else if (['prepare-supporter', 'reconcile-supporter', 'release-supporter-preparation'].includes(command.action)) {
+          const recipient = lower(command.wallet);
+          if (!campaign || !supporterEarners(next, campaign).includes(recipient)) throw new Error('No Supporter token is owed to this wallet');
+          campaign.supporterToken.deliveries ||= [];
+          let delivery = campaign.supporterToken.deliveries.find(item => item.wallet === recipient);
+          if (command.action === 'prepare-supporter') {
+            if (delivery && delivery.status !== 'owed') throw new Error('Supporter token is already pending or delivered');
+            if (!campaign.supporterToken.eligibleWallets.includes(recipient)) campaign.supporterToken.eligibleWallets.push(recipient);
+            campaign.supporterToken.status = 'payroll-queue';
+            campaign.supporterToken.evaluatedAt ||= at;
+            if (!delivery) campaign.supporterToken.deliveries.push(delivery = { wallet: recipient });
+            delivery.status = 'transfer-pending';
+            delivery.preparedAt = at;
+          } else if (command.action === 'release-supporter-preparation') {
+            if (delivery?.status !== 'transfer-pending' || delivery.txHash || command.confirmNoBroadcast !== true) {
+              throw new Error('Only an unbroadcast Supporter transfer can be released after wallet-history review');
+            }
+            const reason = text(command.reason, 'Wallet-history review reason');
+            delivery.history ||= [];
+            delivery.history.push({ at, reviewer: owner, action: 'no-broadcast-confirmed', reason });
+            delivery.status = 'owed';
+          } else {
+            if (delivery?.status !== 'transfer-pending') throw new Error('Supporter token does not need transfer reconciliation');
+            await reconcileSupporter(next, delivery, command.txHash);
+          }
+          campaign.updatedAt = at;
         } else if (command.action === 'evidence') {
           const claim = next.claims.find(c => c.id === command.claimId && c.wallet === wallet);
           if (!claim || claim.status !== 'needs-evidence') throw new Error('Claim is not awaiting evidence');

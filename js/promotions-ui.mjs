@@ -107,7 +107,7 @@ function campaignCard(c) {
     ${c.template === 'sponsor' ? `<p>Minimum confirmed DVert purchase: ${money(c.minPurchaseUnits)}</p>` : ''}
     ${c.template === 'musician-referral' ? `<p>Conversion: verified minted playlist track + 10 distinct signed song votes. Allocation: $10 referrer + $5 musician + $5 Top10 funding-needed + $5 Playback funding-needed.</p>
       <p>Curated referrers: ${(c.curatedReferrers || []).map(escape).join(', ') || 'none'}</p>
-      <p>Supporter token: eligibility only${c.supporterToken?.eligibleWallets?.length ? ` for ${c.supporterToken.eligibleWallets.length} earning referrer(s)` : ''}. No mint/transfer is configured.</p>` : ''}
+      <p>Supporter token: ${c.supporterToken?.eligibleWallets?.length ? `🎖 ${c.supporterToken.eligibleWallets.length} earned, ${(c.supporterToken.deliveries || []).filter(d => d.status === 'delivered').length} delivered` : 'none earned yet'} · sent from the dev payroll queue.</p>` : ''}
     <p>${escape(c.criteria)}</p><p class="promotion-terms">${escape(c.terms)}</p>
     <p>${date(c.startsAt)} – ${date(c.endsAt)}<br>Claim by ${date(c.claimDeadline)}</p>
     ${(c.amendments || []).map(a => `<p><strong>Immutable amendment ${escape(a.id)}:</strong> ${escape(a.reason)} · budget ${money(a.before.budgetUnits)} → ${money(a.after.budgetUnits)} · end ${date(a.before.endsAt)} → ${date(a.after.endsAt)} · claim ${date(a.before.claimDeadline)} → ${date(a.after.claimDeadline)}</p>`).join('')}`;
@@ -683,7 +683,7 @@ export function mountPublicPromotion() {
       : 'Not registered for this offer.';
     const stats = participantState.participantStats?.find(item => item.campaignId === campaignId);
     if (stats) {
-      overlay.querySelector('[data-promo-activity]').textContent += ` · Qualified ${stats.qualifiedCount}; pending ${money(stats.pendingUnits)}; approved ${money(stats.approvedUnits)}; paid ${money(stats.paidUnits)}; maximum referrer earnings ${money(stats.maxEarningsUnits)}. ${stats.attributedMusicians.length} attributed musicians; curated referrers: ${stats.referrers.join(', ') || 'none'}. Supporter token: ${stats.supporterToken.eligible ? 'eligible' : 'not yet eligible; eligibility only, no token transfer'}.`;
+      overlay.querySelector('[data-promo-activity]').textContent += ` · Qualified ${stats.qualifiedCount}; pending ${money(stats.pendingUnits)}; approved ${money(stats.approvedUnits)}; paid ${money(stats.paidUnits)}; maximum referrer earnings ${money(stats.maxEarningsUnits)}. ${stats.attributedMusicians.length} attributed musicians; curated referrers: ${stats.referrers.join(', ') || 'none'}. Supporter token: ${stats.supporterToken.eligible ? (stats.supporterToken.delivery === 'delivered' ? 'delivered' : 'earned; queued for delivery') : 'not yet earned'}.`;
       const progress = document.createElement('ul');
       progress.innerHTML = stats.referred.map(item => `<li>${escape(item.wallet)} · votes ${item.voteProgress}/10 · ${escape(item.trackState)}${item.track ? ` · token #${escape(item.track.tokenId)}` : ''}</li>`).join('');
       let holder = overlay.querySelector('[data-promo-progress]');
