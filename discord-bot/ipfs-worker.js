@@ -7,7 +7,8 @@ import { finished, pipeline } from 'node:stream/promises';
 import { createRepeatLog } from './repeat-log.js';
 import { MEDIA_TYPES, mediaTypeFor, normalizeMediaCid, buildSubmissionAuthorizationMessage } from './media.js';
 import { validateLivePerformanceSchedule, validateWeeklyScheduleOverrides, validateRadioProgrammingConflicts } from '../js/radio-schedule.mjs';
-import { buildFundWeeklyArchive } from '../js/fund-archive.mjs';
+import { buildFundWeeklyArchive, projectFundState } from '../js/fund-archive.mjs';
+import { payrollPeriodFromKey } from '../js/payroll-week.mjs';
 import { catalogPage } from '../js/nft-loader.js';
 import { uploadToIPFS } from './ipfs.js';
 import { readRawBody } from './alchemy-webhook.js';
@@ -342,6 +343,22 @@ export function createWorkerRequestHandler({
   const origins = new Set(allowedOrigins);
   const radioOrigins = new Set([...allowedOrigins, ...radioAllowedOrigins]);
   const expectedOwner = ownerWallet.toLowerCase();
+  let fundsRead;
+  let fundsReadAt = 0;
+  let fundsReading = false;
+  const readFunds = () => {
+    if (!fundsRead || !fundsReading && now() - fundsReadAt >= 15_000) {
+      fundsReading = true;
+      fundsRead = Promise.resolve().then(() => getFunds()).then(state => {
+        fundsReadAt = now();
+        return state;
+      }).catch(error => {
+        fundsRead = null;
+        throw error;
+      }).finally(() => { fundsReading = false; });
+    }
+    return fundsRead;
+  };
   const consumedSignatures = new Map();
   function hasConsumedSignature(signature) {
     const time = now();
@@ -1274,7 +1291,16 @@ export function createWorkerRequestHandler({
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/funds') {
         if (!getFunds) throw new Error('Fund balances are not configured');
-        const funds = await getFunds();
+        const view = requestUrl.searchParams.get('view');
+        if (view && !['summary', 'recent'].includes(view)) {
+          sendJson(response, 400, { error: 'Invalid fund view' }, '*'); return;
+        }
+        const snapshot = await readFunds();
+        const funds = { ...snapshot, funds: { ...snapshot.funds } };
+        if (view) {
+          sendJson(response, 200, projectFundState(funds, view, now()), '*', 'public, max-age=15');
+          return;
+        }
         if (liveBookings && funds.funds?.['dbusk-live-performers']) {
           try {
             const live = await liveBookings.getState();
@@ -1301,14 +1327,29 @@ export function createWorkerRequestHandler({
           if (!getFunds || !getWeeklyPayflow) {
             sendJson(response, 503, { error: 'Fund payout history is not configured' }, '*'); return;
           }
-          const [funds, weekly] = await Promise.all([getFunds(), getWeeklyPayflow({})]);
+          const [funds, weekly] = await Promise.all([readFunds(), getWeeklyPayflow({})]);
           if (funds?.ready === false || weekly?.ready === false || funds?.lastError || weekly?.lastError) {
             sendJson(response, 503, { error: 'Fund payout history is still indexing; retry shortly' }, '*'); return;
           }
           const fund = funds?.funds?.[fundSlug];
           if (!fund) { sendJson(response, 404, { error: 'Unknown fund' }, '*'); return; }
-          sendJson(response, 200, buildFundWeeklyArchive({ fundSlug, fund, weeklyPayflow: weekly }), '*', 'public, max-age=30, stale-while-revalidate=60');
-        } catch {
+          const selectedWeek = requestUrl.searchParams.get('week');
+          if (selectedWeek) {
+            try { payrollPeriodFromKey(selectedWeek); }
+            catch { sendJson(response, 400, { error: 'Invalid New York payroll week' }, '*'); return; }
+          }
+          const archive = buildFundWeeklyArchive({ fundSlug, fund, weeklyPayflow: weekly, now: now(),
+            activity: Boolean(selectedWeek || requestUrl.searchParams.get('index')) });
+          if (selectedWeek) archive.weeks = archive.weeks.filter(week => week.week === selectedWeek);
+          if (requestUrl.searchParams.get('index') === '1') {
+            archive.weeks = archive.weeks.map(({ entries, sources, activityPayouts, ...summary }) => summary);
+          }
+          if (selectedWeek || requestUrl.searchParams.get('index')) {
+            delete archive.unmatchedPayouts;
+          }
+          sendJson(response, 200, archive, '*', 'public, max-age=30, stale-while-revalidate=60');
+        } catch (error) {
+          console.warn('[fund-archive]', error.message);
           sendJson(response, 503, { error: 'Weekly fund archive unavailable; retry shortly' }, '*');
         }
         return;
@@ -1377,7 +1418,11 @@ export function createWorkerRequestHandler({
         if (!getWeeklyPayflow) throw new Error('Weekly payflow is not configured');
         const wallet = requestUrl.searchParams.get('wallet');
         if (wallet && !/^0x[0-9a-fA-F]{40}$/.test(wallet)) throw new Error('Invalid artist wallet');
-        sendJson(response, 200, await getWeeklyPayflow({ wallet }), '*');
+        const state = await getWeeklyPayflow({ wallet });
+        if (requestUrl.searchParams.get('view') === 'summary') {
+          const { allocations, ...summary } = state;
+          sendJson(response, 200, summary, '*', 'public, max-age=15');
+        } else sendJson(response, 200, state, '*');
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/payroll/reconcile') {

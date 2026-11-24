@@ -492,6 +492,7 @@ test('fund week archive groups payroll payouts by week and surfaces queued entri
     getFunds: async () => ({ funds: { [fundSlug]: { slug: fundSlug, payouts: [payout] } } }),
     getWeeklyPayflow: async ({ wallet }) => { assert.equal(wallet, undefined); return { currentPeriod: { week: 'NY-2026-10-12' }, allocations: [{ allocation, metadataUri: 'ipfs://meta' }] }; },
   });
+
   await withServer(handler, async base => {
     const response = await fetch(`${base}/api/funds/${fundSlug}/weeks`, { headers: { Origin: 'http://127.0.0.1:3000' } });
     assert.equal(response.status, 200);
@@ -504,6 +505,48 @@ test('fund week archive groups payroll payouts by week and surfaces queued entri
     assert.equal(body.weeks[0].entries[1].paid, false);
     assert.equal(body.weeks[0].metadataUri, 'ipfs://meta');
   });
+});
+
+test('summary and recent fund views exclude old ledger arrays, cache shared reads, and lazy weeks include income proofs', async () => {
+    const { createWorkerRequestHandler } = await import(moduleUrl);
+    const fundSlug = 'dbusk-top10';
+    const epoch = Date.parse('2026-11-23T15:00:00-05:00');
+    const recentStart = Date.parse('2026-11-09T00:00:00-05:00') / 1000;
+    const funder = `0x${'1'.repeat(40)}`;
+    const entry = (timestamp, amountUnits, digit) => ({ funder, recipient: funder, timestamp, amountUnits,
+      txHash: `0x${digit.repeat(64)}`, slug: fundSlug });
+    let reads = 0;
+    const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: funder, now: () => epoch,
+      getFunds: async () => {
+        reads++;
+        return { ready: true, funds: { [fundSlug]: {
+          sources: [entry(recentStart - 1, '100', '2'), entry(recentStart, '200', '3')],
+          payouts: [entry(recentStart - 1, '30', '4'), entry(recentStart + 1, '40', '5')],
+        } } };
+      },
+      getWeeklyPayflow: async () => ({ ready: true, allocations: [] }),
+    });
+    await withServer(handler, async base => {
+      const summary = await (await fetch(`${base}/api/funds?view=summary`)).json();
+      assert.equal(summary.funds[fundSlug].sources, undefined);
+      assert.equal(summary.funds[fundSlug].payouts, undefined);
+      assert.equal(summary.funds[fundSlug].inflowUnits, '300');
+      const recent = await (await fetch(`${base}/api/funds?view=recent`)).json();
+      assert.equal(recent.funds[fundSlug].sources.length, 1);
+      assert.equal(recent.funds[fundSlug].payouts.length, 1);
+      const index = await (await fetch(`${base}/api/funds/${fundSlug}/weeks?index=1`)).json();
+      assert.equal(index.weeks.length, 2, 'deposit-only weeks are archived too');
+      assert.ok(index.weeks.every(week => !week.entries && !week.sources && !week.activityPayouts));
+      const archive = await (await fetch(`${base}/api/funds/${fundSlug}/weeks?week=NY-2026-11-02`)).json();
+      assert.equal(archive.weeks.length, 1);
+      assert.equal(archive.weeks[0].incomeUnits, '100');
+      assert.equal(archive.weeks[0].sources[0].txHash, `0x${'2'.repeat(64)}`);
+      assert.equal(archive.weeks[0].activityPayouts.length, 1);
+      assert.equal(reads, 1, 'summary, recent, index and selected week share one balance read');
+      assert.equal((await fetch(`${base}/api/funds/${fundSlug}/weeks?week=bad`)).status, 400);
+      const weeklySummary = await (await fetch(`${base}/api/payroll/weekly?view=summary`)).json();
+      assert.equal(weeklySummary.allocations, undefined);
+    });
 });
 
 test('weekly fund archive errors remain readable from local and hosted browsers', async () => {
