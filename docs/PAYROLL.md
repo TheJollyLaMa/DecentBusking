@@ -25,8 +25,11 @@ Read-only treasury status checks USDC approval, fund existence/activity and bala
 
 The public fund pills open immediately; wallet names enhance the rows after
 transaction proofs appear. The default view shows this week's pending estimates
-and confirmed additions/payouts from this week plus the previous two completed
-New York weeks. **Weekly archives** fetches a lightweight week index only when
+in full, without a pending-list dropdown. Recent data covers this week plus the
+previous two completed New York weeks; the visible activity table stops at the
+earliest payment in the second-most-recent weekly payout run, retaining all
+payments in that run and newer additions. Earlier activity is available under
+**Weekly archives**, which fetches a lightweight week index only when
 opened, then each selected week's income, actual payouts and frozen allocation
 receipts on demand. Funding-only weeks are included. BaseScan links remain
 available for both income and payouts; an allocation is not proof of payment.

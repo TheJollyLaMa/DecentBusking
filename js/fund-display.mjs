@@ -194,7 +194,7 @@ export function renderFundPendingTable(rows, { fundSlug, week = '' } = {}) {
   }).join('')}</tbody></table>`;
   const content = rows == null ? '<p class="fund-pending-empty">Current-week estimates unavailable. Retrying.</p>'
     : !rows.length ? '<p class="fund-pending-empty">No qualifying songs recorded this week.</p>'
-      : `${table(rows.slice(0, 4))}${rows.length > 4 ? `<details class="fund-pending-details" data-fund-pending="${escapeHtml(`${fundSlug}:${week}`)}"><summary>Show ${rows.length - 4} more pending payments</summary>${table(rows.slice(4))}</details>` : ''}`;
+      : table(rows);
   return `<section class="fund-pending-section" aria-labelledby="fund-pending-title"><h4 id="fund-pending-title">Pending · ${topTen ? 'Top 10 song prizes' : 'Playback song shares'}${week ? ` · ${escapeHtml(week)}` : ''}</h4>${!topTen ? '<p class="fund-pending-meta">Song contributions to artist-wallet payments</p>' : ''}${content}</section>`;
 }
 

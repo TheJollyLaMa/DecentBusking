@@ -57,17 +57,13 @@ test('fund summary features only the prize pool and preserves unavailable-budget
   assert.match(renderFundSummary({ balanceUnits: 0n, budgetUnits: 0n }), /This week's prize pool/);
 });
 
-test('pending payments preview four rows and put the remainder in a closed dropdown', async () => {
+test('all pending payments display directly without a dropdown', async () => {
   const { renderFundPendingTable } = await import(url);
   const rows = Array.from({ length: 10 }, (_value, index) => ({ rank: index + 1, trackId: `song-${index}`, title: `Song ${index}`, votes: 10 - index, plays: 1, amountUnits: '1000000' }));
   for (const fundSlug of ['dbusk-top10', 'dbusk-playback']) {
     const html = renderFundPendingTable(rows, { fundSlug, week: 'NY-2026-10-12' });
-    const [preview, rest] = html.split('<details');
-    assert.equal((preview.match(/class="fund-pending-row"/g) || []).length, 4);
-    assert.equal((rest.match(/class="fund-pending-row"/g) || []).length, 6);
-    assert.match(rest, /Show 6 more pending payments/);
-    assert.doesNotMatch(rest.split('>')[0], /\bopen\b/);
-    assert.doesNotMatch(renderFundPendingTable(rows.slice(0, 4), { fundSlug }), /<details/);
+    assert.equal((html.match(/class="fund-pending-row"/g) || []).length, 10);
+    assert.doesNotMatch(html, /<details|more pending payments/);
   }
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /Payments are marked Pending because/);

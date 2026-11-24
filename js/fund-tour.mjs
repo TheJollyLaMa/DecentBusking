@@ -1,4 +1,4 @@
-import { initFundHeader, openFundPanel, openFundArchives } from './fund-header.mjs?v=20261124-lazy-funds';
+import { initFundHeader, openFundPanel, openFundArchives } from './fund-header.mjs?v=20261124-visible-payments';
 import { payrollPeriodFromKey } from './payroll-week.mjs';
 
 export function payrollTourWeek(search) {
@@ -15,7 +15,7 @@ export const FUND_TOUR_STEPS = [
     body: 'These two subheader pills are the weekly artist pots: Top 10 song prizes and Playback artist payments. Their dollar figures show the current weekly budget, not proof that artists have already been paid.' },
   { title: 'Inside the Top 10 fund', fund: 'dbusk-top10', selectors: ['#fund-breakdown-summary'],
     body: 'The pool is money available for this week. Older frozen, unpaid allocations are reserved separately. A funded pool is not a completed payroll; follow the confirmed transactions to see what was actually paid.' },
-  { title: 'Estimates are not payments', fund: 'dbusk-top10', selectors: ['[data-fund-pending]', '.fund-confirmed-section'],
+  { title: 'Estimates are not payments', fund: 'dbusk-top10', selectors: ['.fund-pending-section', '.fund-confirmed-section'],
     body: 'Pending estimates move with votes, plays and funding. The week freezes at Sunday/Monday midnight in New York. Confirmed on-chain activity shows money in and money out, with BaseScan transaction proofs.' },
   { title: 'Find the archived week', fund: 'dbusk-top10', archive: true, selectors: ['.fund-weekly-section'],
     body: 'Expand a week in the payout archive. The frozen allocation is the intended prize plan; only verified payouts mean paid. Open its receipt and transaction links to inspect the exact amounts and proofs.' },
@@ -129,10 +129,6 @@ export function initFundTour() {
         await openFundPanel(step.fund);
         if (!active) { if (fundDialog.open) fundDialog.close(); return; }
         fundDialog.append(root);
-        if (step.selectors.includes('[data-fund-pending]')) {
-          const pending = fundDialog.querySelector('[data-fund-pending]');
-          if (pending) pending.open = true;
-        }
         if (step.archive) {
           await openFundArchives(week);
           const archives = [...fundDialog.querySelectorAll('[data-fund-week]')];
