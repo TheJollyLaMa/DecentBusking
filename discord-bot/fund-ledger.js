@@ -338,7 +338,7 @@ export function createFundLedger({
     if (!weeklyAvailable && !weeklyError) weeklyError = weekly?.lastError || 'Weekly source unavailable or not configured';
     const weeklyFunds = weeklyAvailable ? weekly.funds || {} : {};
     const bySlug = new Map();
-    for (const fund of funds) {
+    await Promise.all(funds.map(async fund => {
       let balanceUnits = null;
       let balanceError = '';
       try {
@@ -372,7 +372,7 @@ export function createFundLedger({
         ...(reservedUnits != null ? { reservedUnits } : {}),
         availableUnits: balanceUnits == null ? null : availableUnits ?? null,
       });
-    }
+    }));
     const grouped = new Map(funds.map(fund => [fund.slug, []]));
     for (const source of sources) {
       const list = grouped.get(source.slug);

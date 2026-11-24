@@ -216,6 +216,26 @@ function makeRouter(logs, balances) {
   };
 }
 
+test('public fund balance reads run concurrently instead of a per-fund RPC waterfall', async () => {
+  const { createFundLedger } = await import(url);
+  const router = makeRouter([], new Map());
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let started = 0;
+  router.fundBalances = async () => { started++; await gate; return 0n; };
+  const ledger = createFundLedger({
+    provider: makeProvider({ head: 10, logs: [], txFrom: new Map() }), router,
+    config: { chainId: 8453, routerAddress, radioFunds: { topTen: funds.top10, playback: funds.playback },
+      assets: { USDC: { address: usdc } } },
+  });
+  const expected = Object.keys(ledger.getState().funds).length;
+  const read = ledger.getCurrentState();
+  await new Promise(setImmediate);
+  assert.equal(started, expected, 'all fund RPC calls must start without waiting for earlier balances');
+  release();
+  await read;
+});
+
 test('public balances distinguish RPC failure, real zero and recovery without losing history readiness', async () => {
   const { createFundLedger } = await import(url);
   const router = makeRouter([], new Map());

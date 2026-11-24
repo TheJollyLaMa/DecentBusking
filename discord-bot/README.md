@@ -812,6 +812,22 @@ No independent receipt verification or weekly reconciliation is implied.
 Owner-maintained sponsor aliases live in `payroll-assets.json.sponsorAliases` and
 are only shown after a reverse lookup or verified forward resolution.
 
+Public fund pills use `GET /api/funds?view=summary` (balances, availability and
+all-time totals, without transaction arrays) on page view, and `?view=recent`
+when opened (this week plus the previous two completed New York weeks).
+`GET /api/payroll/weekly?view=summary` omits old allocation receipts. The full
+legacy endpoints remain unchanged for existing integrations. Fund balances
+are read concurrently; fund and archive requests share a 15-second read cache,
+including in-flight requests. RPC failure remains unavailable, never zero.
+
+`GET /api/funds/:slug/weeks?index=1` returns week summaries without receipts or
+transaction arrays. `?week=NY-YYYY-MM-DD` returns just that week's frozen
+allocation, income transactions and actual calendar-week payouts, including
+income-only weeks. The browser requests these only when archives/weeks are
+expanded. Actual payment time is distinct from the allocation's earned week.
+Deploy these additive worker views before the updated fund UI; keep the
+radio predeploy drain guard enabled.
+
 Worker gas is monitored. Optional DeVert reporting is deferred below
 `WORKER_MIN_BALANCE_WEI` and retried automatically once the worker is funded
 again. If the node still rejects a write with "insufficient funds", reporting

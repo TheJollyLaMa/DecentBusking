@@ -1,5 +1,5 @@
 import { id } from '../discord-bot/node_modules/ethers/lib.esm/index.js';
-import { payrollPeriodFromKey } from './payroll-week.mjs';
+import { currentPayrollPeriod, payrollPeriodFromKey, payrollPeriods } from './payroll-week.mjs';
 import { BASE_USDC_ADDRESS } from './settlement-funds.mjs?v=20261017-mercury-release';
 
 function normalize(value) {
@@ -27,7 +27,7 @@ function emptyWeek(record) {
   };
 }
 
-export function buildFundWeeklyArchive({ fundSlug, fund, weeklyPayflow = {}, now = Date.now() }) {
+export function buildFundWeeklyArchive({ fundSlug, fund, weeklyPayflow = {}, now = Date.now(), activity = false }) {
   const allocations = Array.isArray(weeklyPayflow.allocations) ? weeklyPayflow.allocations : [];
   const payouts = [...new Map((Array.isArray(fund?.payouts) ? fund.payouts : [])
     .filter(payout => (!payout.slug || payout.slug === fundSlug) && (!payout.asset || normalize(payout.asset) === normalize(BASE_USDC_ADDRESS)))
@@ -95,9 +95,48 @@ export function buildFundWeeklyArchive({ fundSlug, fund, weeklyPayflow = {}, now
       : paidUnits === 0n ? 'queued' : totalUnits > paidUnits ? 'partial' : 'paid';
     weeks.set(week, weekData);
   }
+  if (activity) {
+    for (const [field, entries] of [['sources', fund?.sources || []], ['activityPayouts', payouts]]) {
+      for (const entry of entries) {
+        if (!Number.isFinite(entry.timestamp) || entry.timestamp <= 0) continue;
+        const period = currentPayrollPeriod(entry.timestamp * 1000);
+        const data = weeks.get(period.week) || {
+          week: period.week, period, fundSlug, entries: [], totalUnits: '0', paidUnits: '0',
+          status: 'activity', closed: period.week !== currentPayrollPeriod(now).week,
+        };
+        (data[field] ||= []).push(entry);
+        weeks.set(period.week, data);
+      }
+    }
+    for (const data of weeks.values()) {
+      data.sources ||= [];
+      data.activityPayouts ||= [];
+      data.incomeUnits = data.sources.reduce((sum, entry) => sum + parseBigInt(entry.amountUnits), 0n).toString();
+      data.outflowUnits = data.activityPayouts.reduce((sum, entry) => sum + parseBigInt(entry.amountUnits), 0n).toString();
+    }
+  }
   const orderedWeeks = [...weeks.values()].sort((first, second) => second.period.startAt.localeCompare(first.period.startAt));
   const unmatchedPayouts = payouts.filter(payout => !matchedPayouts.has(payout));
   return { fundSlug, weeks: orderedWeeks, unmatchedPayouts,
     unmatchedPaidUnits: unmatchedPayouts.reduce((sum, payout) => sum + parseBigInt(payout.amountUnits), 0n).toString(),
     currentWeek: weeklyPayflow.currentPeriod || null, now };
+}
+
+export function projectFundState(state, view, now = Date.now()) {
+  if (!['summary', 'recent'].includes(view)) throw new Error('Invalid fund view');
+  const start = Date.parse(payrollPeriods(3, now)[0].startAt) / 1000;
+  const end = Date.parse(currentPayrollPeriod(now).endAt) / 1000;
+  return { ...state, historyScope: view, historyStartAt: new Date(start * 1000).toISOString(),
+    funds: Object.fromEntries(Object.entries(state.funds || {}).map(([slug, fund]) => {
+      const { sources = [], payouts = [], bookings, ...summary } = fund;
+      const total = entries => entries.reduce((sum, entry) => sum + parseBigInt(entry.amountUnits), 0n).toString();
+      const recent = entries => entries.filter(entry => entry.timestamp >= start && entry.timestamp < end);
+      return [slug, { ...summary,
+        largeSponsorDepositCount: fund.sourcesAvailable === false ? null :
+          sources.filter(source => source.kind === 'sponsor' && parseBigInt(source.amountUnits) >= 100_000_000n).length,
+        inflowUnits: fund.sourcesAvailable === false ? null : total(sources),
+        outflowUnits: fund.payoutsAvailable === false ? null : total(payouts),
+        ...(view === 'recent' ? { sources: recent(sources), payouts: recent(payouts) } : {}),
+      }];
+    })) };
 }
