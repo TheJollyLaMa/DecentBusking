@@ -203,7 +203,7 @@ test('entry points expose the admin section and public offer while suppressing a
   assert.match(html, /id="admin-promotions"/);
   assert.match(admin, /mountAdminPromotions/);
   assert.match(admin, /mountPublicPromotion\(\)/);
-  assert.match(leftAnkh, /📻 Radio Programming/);
+  assert.match(leftAnkh, /☿ Admin Community Calendar/);
   assert.match(leftAnkh, /new CustomEvent\('open-radio-programming'\)/);
   assert.match(admin, /document\.addEventListener\('open-radio-programming'/);
   assert.match(admin, /_radioModal\.showModal\(\)/);

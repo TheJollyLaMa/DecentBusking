@@ -112,7 +112,7 @@ test('technical details and previews start collapsed and category buttons retain
   assert.match(source, /disclosure\.className = 'payroll-reference-disclosure'/);
   assert.match(source, /const buttons = new Map/);
   assert.match(source, /card\.append\(button\)/);
-  assert.match(source, /weeklySection\.after\(treasurySection\)/);
+  assert.match(source, /getElementById\('radio-programming-modal'\)\?\.append\(treasurySection\)/);
   for (const id of ['radio-settle-playback', 'radio-settle-top10', 'radio-playback-budget', 'radio-prize-budget', 'radio-minimum-payout']) {
     assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1);
   }

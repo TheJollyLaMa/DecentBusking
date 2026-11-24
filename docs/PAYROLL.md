@@ -3,15 +3,15 @@
 ## Base Payroll Panel
 
 Promotional offers use the separate **Promotionals (`dbusk-promotionals`)**
-allocation, not artist or development payroll. Create/deposit using Settlements
-Router, then review offers and reward claims in Admin → Invites & Promotions.
+allocation, not artist or development payroll. Create/deposit using Left ankh →
+Admin Community Calendar → Fund Allocations, then review offers and reward claims in Admin → Invites & Promotions.
 See [promotions setup, activity rules and payment recovery](PROMOTIONS.md).
 
 Active payroll is Base-only. Historical records are preserved outside the active queue; see [retired payroll history](LEGACY-PAYROLL.md). The public Left Ankh entry is Playback Tally; Admin Nft Mint and Payroll are visible only to the configured admin wallet. UI visibility does not replace transaction-level owner and role checks.
 
 The panel opens with a week-first **Weekly Artist Payments** workspace: choose a completed week, review and back up receipts, then confirm wallet payments. Separate Playback and Top 10 cards show the unpaid amount, payment progress, readiness and the next required action. Missing receipts say **Not prepared**, not zero dollars. Expand a card's recipients to review wallets or copy technical payment references. There is no manual contributor-identity entry. Existing payment references and frozen amounts are unchanged.
 
-**Estimates & allocation settings**, **Treasury & preparation details**, backup import, Settlements Router (deposits and owner recovery), and Payment History & Proofs are collapsed secondary controls below the primary workflow. Repo Dev Bot Payouts remain separate; beneath them, **🎖 Supporter tokens owed** lists referral-campaign Supporter tokens to send directly from the admin wallet (see [Supporter tokens owed](PROMOTIONS.md#-supporter-tokens-owed)). New York budgets are automatically prepared from unreserved funds; legacy UTC receipts retain their existing amounts. Opening or previewing the panel never moves funds. Current-week shares are provisional; only closed weeks with published receipts can offer owner-authorized payouts.
+**Estimates & allocation settings**, **Treasury & preparation details**, backup import, and Payment History & Proofs are collapsed secondary controls below the primary workflow. Router deposits and owner recovery now live in **Admin Community Calendar → Fund Allocations**, not Payroll. Repo Dev Bot Payouts remain separate; beneath them, **🎖 Supporter tokens owed** lists referral-campaign Supporter tokens to send directly from the admin wallet (see [Supporter tokens owed](PROMOTIONS.md#-supporter-tokens-owed)). New York budgets are automatically prepared from unreserved funds; legacy UTC receipts retain their existing amounts. Opening or previewing the panel never moves funds. Current-week shares are provisional; only closed weeks with published receipts can offer owner-authorized payouts.
 
 Playback drafts group qualified weekly plays by verified artist wallet and distribute the selected budget proportionally with exact six-decimal token-unit rounding. The share calculation includes every qualified play, including plays whose artist has no valid wallet by the Monday New York cutoff. That artist's share is forfeited for the week, is not redistributed, and remains unreserved in the fund for the next week's budget. Amounts below the selected minimum and rounding remainder likewise stay unallocated. Current weeks remain provisional.
 
@@ -20,6 +20,57 @@ New Top 10 allocations rank individual songs by positive weekly net votes (upvot
 New payout plays and vote changes use `NY-YYYY-MM-DD` buckets starting Monday 00:00 `America/New_York`, including daylight-saving transitions. UTC history is also retained. The first New York week is partial from rollout; old aggregates are not relabelled. Old buckets and all-time counters survive rollover and restart. Repeated Discord count snapshots apply only their delta; historical backfill never creates new weekly prize votes.
 
 Read-only treasury status checks USDC approval, fund existence/activity and balances, plus the owner's Base ETH gas balance. Separate fund slugs are `dbusk-playback` and `dbusk-top10`; the development fund is not used as the radio budget. Funds are never automatically created or funded.
+
+### Admin Fund Allocations
+
+Open **Left ankh → Admin Community Calendar → Fund Allocations** near the bottom
+of the calendar. Its switchable bar/pie chart uses verified project allocations,
+with separate ETH and USDC views. Opening this workspace does not fetch the
+payroll queue or payment ledger. The chart shows total balances, not spendable
+campaign budgets; incomplete registry metadata is reported, not invented.
+
+For the first referral campaign:
+
+1. Choose **Prepare referral fund**. The permanent slug is `dbusk-referrals`
+   (plural). If already registered it selects that allocation instead.
+2. Review the suggested name/purpose, save the public metadata to IPFS, then
+   separately review and create the empty allocation on Base.
+3. Enter the ETH amount and choose **Review ETH deposit**. Keep extra Base ETH
+   for gas. Native funding needs no ERC-20 approval.
+4. In the existing referral campaign editor, select ETH and review the budget,
+   gifts and existing commitments. The editor checks available funds and offers
+   to deposit any remaining shortfall before publication. Depositing alone
+   neither reserves a budget nor publishes a campaign.
+
+**New fund** supports other purpose slugs using the same metadata/creation flow.
+Verified additions enter the admin chart and public Fund Us chart, splits and
+bunny rotation on creation/refresh. **Archive selected allocation** deactivates
+it on-chain, stops deposits/payouts (including referral claims), and removes it
+from active charts and Fund Us. Nothing is deleted: the admin archive retains
+both balances, and **Manage / restore** exposes restoration and owner recovery.
+Consider outstanding commitments before archiving or recovering.
+
+Creation, deposits, ETH recovery and archive/restore have explicit review dialogs.
+ETH recovery sends only to the registered owner, including while inactive.
+Exact router event receipts are verified; uncertain broadcasts remain locked.
+Use **Unresolved ETH / archive transaction** and the original/replacement hash
+before retrying. An unrelated failed receipt never unlocks the action. These
+journals are browser-local, not protection across devices or cleared storage.
+Existing USDC receipt controls and journal keys are preserved.
+
+Reuse decision: adapt the existing [public chart renderer](../js/fund-visual.mjs),
+[fund discovery and ETH contribution journal](../js/fund-contribution.mjs),
+[metadata/creation/USDC helpers](../js/settlement-funds.mjs), and
+[referral budget checks](../js/referral-campaign-editor.mjs). The donor contract
+is ArtFi's `contracts/ArtFiSettlementRouter.sol` at commit `843e770`:
+`allFundIds`, `setFundActive`, `fundNative` and `recoverFund`. It has no deletion;
+archival preserves identity/history. No contract or speculative shared package
+is added. Shared-router foreign funds are excluded by project metadata identity;
+ETH and USDC cannot be interchanged. Receiving-app tests cover creation followed
+by exact-wei native funding, lifecycle/owner/role checks, archived recovery and
+public-vs-admin discovery. Chrome verification covers review cancellation,
+receipt locks, public archive removal and responsive chart views using mocks;
+no real transactions or campaign publication are part of validation.
 
 ### USDC Deposits
 
@@ -100,13 +151,13 @@ top-layer spotlight/bunny, keyboard and reduced-motion patterns. Discovery uses
 ArtFi's existing `ArtFiSettlementRouter.allFundIds` registry (commit `843e770`),
 with Busking-specific metadata checks rather than displaying all shared funds.
 
-Select an existing active fund in Settlements Router, enter the deposit amount, and confirm the deposit action. The app verifies native Base USDC, six decimals, asset approval, wallet balance, and Base network. It requests an ERC-20 approval only if the current allowance is insufficient, for the exact intended amount rather than an unlimited allowance; then it requests the `fundToken` transaction. Approval is not a deposit. Depositing into a fund is not an artist payout.
+Select an existing active fund in Fund Allocations, enter the deposit amount, and confirm the deposit action. The app verifies native Base USDC, six decimals, asset approval, wallet balance, and Base network. It requests an ERC-20 approval only if the current allowance is insufficient, for the exact intended amount rather than an unlimited allowance; then it requests the `fundToken` transaction. Approval is not a deposit. Depositing into a fund is not an artist payout.
 
 Pending approval/deposit stages and hashes are kept in browser storage. An unresolved operation locks another deposit to that fund. Check its receipt or supply the replacement transaction hash; unlocking requires a successful matching Approval/FundFunded event, or the exact recorded reverted transaction. An approval cannot unlock an operation already marked as a deposit. Unknown broadcasts remain locked for wallet-history review. This journal is browser-local: changing devices or clearing storage loses it, so always check wallet history before retrying an uncertain deposit.
 
 ### Owner USDC Recovery
 
-In Settlements Router, select the fund and expand **Recover USDC to Owner Wallet**. Enter the remaining amount to recover; the recipient is fixed to the configured owner. Confirm the Base wallet transaction. The helper requires `DEFAULT_ADMIN_ROLE`, a real deployed router, native USDC, and sufficient fund/actual token balances, then static-preflights and verifies the exact router recovery plus token transfer events. Recovery remains possible while paused or inactive. It is not a repayment reversal and can leave reviewed payouts underfunded.
+In Fund Allocations, select the fund and expand **Recover USDC to Owner Wallet**. Enter the remaining amount to recover; the recipient is fixed to the configured owner. Confirm the Base wallet transaction. The helper requires `DEFAULT_ADMIN_ROLE`, a real deployed router, native USDC, and sufficient fund/actual token balances, then static-preflights and verifies the exact router recovery plus token transfer events. Recovery remains possible while paused or inactive. It is not a repayment reversal and can leave reviewed payouts underfunded.
 
 If a receipt is uncertain, recovery/deposit controls for that fund stay locked. Use **Check Recovery Receipt** with the original or replacement hash. Only an exact successful recovery proof or the recorded reverted transaction unlocks another attempt. The journal is browser-local; do not clear it or change devices to bypass it. Recovery still involves contract/admin risk and gas, not wallet-equivalent safety. Test a small deposit and recovery yourself before larger deposits; development verification uses mocks and does not move user funds.
 

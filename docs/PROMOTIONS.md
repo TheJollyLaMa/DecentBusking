@@ -62,7 +62,7 @@ preserve them and arrange an explicit verified export if any exist.
 
 ## Funding and offers
 
-In **Payroll → Settlements Router**, create and deposit native Base USDC into
+In **Left ankh → Admin Community Calendar → Fund Allocations**, create and deposit native Base USDC into
 **Promotionals (`dbusk-promotionals`)** with the existing owner-confirmed
 controls. Creation, token approval if needed, and deposit are separate wallet
 actions. The admin may instead choose a dedicated slug beginning
@@ -71,11 +71,13 @@ source is accounted independently. Playback, Top 10, pinner, live-performer,
 and repo-development funds cannot be selected as promotional reward sources.
 
 Musician referral campaigns always use **Referrals (`dbusk-referrals`)**. Create
-that fund once in Payroll; the calendar does not create router funds.
+that fund once using the calendar's **Fund Allocations → Prepare referral fund**
+flow. Save its metadata, create the empty allocation, then deposit ETH or USDC.
+The campaign editor separately checks available budget and commitments.
 
 ### Running a referral campaign from the calendar
 
-Drag **🤝 Referral campaign** onto a day in **Left ankh → Radio Programming**
+Drag **🤝 Referral campaign** onto a day in **Left ankh → Admin Community Calendar**
 (or tap it on a phone to use the selected day). A compact editor opens with the
 title, start, end, claims-close, referrers and 💵 budget. The default
 title is "Referral Campaign"; a custom title is shown as "<title> Referral

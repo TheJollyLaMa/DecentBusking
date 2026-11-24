@@ -31,6 +31,7 @@ import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { repositoryWorkReferenceText } from './repository-payroll-status.mjs?v=20261118-verified-backlog';
 import { loadSupporterPayroll } from './supporter-payroll.mjs?v=20261123-supporter-queue';
+import { FUND_ADMIN_ABI, SETTLEMENT_ROUTER_ADDRESS, verifyFundAdmin, confirmFundAction, mountFundAdmin } from './fund-admin.mjs?v=20261124-admin-funds';
 
 function _displayTokenAmount(units, currency, decimals) {
   return currency === 'USDC' ? formatUsdcUnits(units) : ethers.formatUnits(units, decimals);
@@ -51,6 +52,7 @@ const ACCOUNTS_URL =
 const BASE_CHAIN_ID = 8453;
 const PAYROLL_ASSETS_URL = new URL('../payroll-assets.json', import.meta.url).toString();
 const ROUTER_ABI = [
+  ...FUND_ADMIN_ABI,
   'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
   'function createFund(bytes32 fundId, string metadataUri)',
   'function paused() view returns (bool)',
@@ -96,6 +98,44 @@ let _weeklyPayflowTask = null;
 let _weeklyHistoryRefreshedAt = 0;
 let _fundMetadataRevision = 0;
 const _customFundSlugs = new Set();
+let _fundAdmin;
+
+async function _fundAdminContext(write = false) {
+  if (!isAdminWallet()) throw new Error('Connect the configured admin wallet');
+  if (!_payrollAssetConfig) _payrollAssetConfig = await _fetchJSON(PAYROLL_ASSETS_URL);
+  if (!_ownerAddress) _ownerAddress = await _loadOwnerAddress();
+  if (!_ownerAddress || !_isRouterConfigured()) throw new Error('Owner and Base router configuration must be available');
+  if (_payrollAssetConfig.routerAddress.toLowerCase() !== SETTLEMENT_ROUTER_ADDRESS.toLowerCase()) throw new Error('Unexpected Base settlement router');
+  if (!isAdminWallet() || window._wallet.address.toLowerCase() !== _ownerAddress.toLowerCase()) throw new Error('Connect the registered owner wallet');
+  if (!document.getElementById('router-fund-select').options.length) {
+    _loadCustomFundSlugs();
+    _populateSettlementFunds();
+  }
+  const signer = write ? await _getSigner(BASE_CHAIN_ID) : null;
+  return { config: _payrollAssetConfig, owner: _ownerAddress, signer,
+    router: signer ? new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, signer) : _readOnlyRouter() };
+}
+
+function _selectAdminFund(slug, { rememberOnly = false } = {}) {
+  if (!configuredSettlementFunds(_payrollAssetConfig || {}).some(fund => fund.slug === slug) && !_customFundSlugs.has(slug)) {
+    _rememberCustomFund(slug);
+    _populateSettlementFunds();
+  }
+  if (rememberOnly) return;
+  const select = document.getElementById('router-fund-select');
+  select.value = slug;
+  select.dispatchEvent(new Event('change'));
+}
+
+function _prepareAdminFund(slug) {
+  if (!isAdminWallet() || _settling) return;
+  const select = document.getElementById('router-fund-select');
+  select.value = CUSTOM_FUND_OPTION;
+  document.getElementById('router-custom-fund-slug').value = slug;
+  for (const id of ['router-fund-name', 'router-fund-purpose', 'router-fund-website']) document.getElementById(id).value = '';
+  select.dispatchEvent(new Event('change'));
+  document.getElementById(slug ? 'router-fund-name' : 'router-custom-fund-slug').focus();
+}
 
 function _selectedFundSlug() {
   return resolveSettlementFundSlug(document.getElementById('router-fund-select')?.value,
@@ -213,17 +253,17 @@ function _recoveryKey() {
 async function _recoverUsdc() {
   const status = document.getElementById('router-recovery-status');
   if (_settling || !isAdminWallet()) return;
+  _settling = true;
   let operationKey;
   try {
     const slug = _selectedFundSlug();
     operationKey = _recoveryKey();
-    if (localStorage.getItem(operationKey) || localStorage.getItem(_depositKey())) throw new Error('Resolve the pending recovery or deposit receipt first');
+    if (localStorage.getItem(operationKey) || localStorage.getItem(_depositKey()) || _fundAdmin?.pending(slug)) throw new Error('Resolve the pending recovery or deposit receipt first');
     const asset = _getAssetConfig('USDC');
     if (!asset || asset.decimals !== 6) throw new Error('Native Base USDC is not configured');
     const amountUnits = ethers.parseUnits(document.getElementById('router-recovery-amount').value || '0', 6);
     if (amountUnits <= 0n) throw new Error('Enter a positive recovery amount');
-    if (!confirm(`Recover ${formatUsdcUnits(amountUnits)} USDC from ${slug} to your owner wallet ${_ownerAddress}? This reduces the funds available for artist payouts.`)) return;
-    _settling = true;
+    if (!await confirmFundAction({ title: `Recover USDC from ${slug}`, description: `Send ${formatUsdcUnits(amountUnits)} USDC to the registered owner ${_ownerAddress}. This can leave existing campaign or payout commitments underfunded.` })) return;
     document.getElementById('router-recover-usdc').disabled = true;
     const signer = await _getSigner(BASE_CHAIN_ID);
     const router = new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, signer);
@@ -242,7 +282,7 @@ async function _recoverUsdc() {
       if (record && !record.txHash) localStorage.removeItem(operationKey);
     }
     _setStatus(status, `${error.message}. Check any unresolved recovery receipt before retrying.`, true);
-  } finally { _settling = false; await _refreshSettlementFund(); }
+  } finally { _settling = false; await _refreshSettlementFund(); await _fundAdmin?.refresh(); }
 }
 
 async function _checkRecoveryReceipt() {
@@ -316,6 +356,7 @@ async function _onWalletConnected({ detail } = {}) {
     _onWalletDisconnected();
     return;
   }
+  if (document.getElementById('payroll-modal')?.classList.contains('hidden')) return;
   const statusEl  = document.getElementById('payroll-wallet-status');
   const addrEl    = document.getElementById('payroll-connected-addr');
   const warningEl = document.getElementById('payroll-owner-warning');
@@ -364,7 +405,7 @@ function _onWalletDisconnected() {
   _radioRecipientStates.clear();
   _invalidateFundMetadata();
   _radioReviews = {};
-  for (const id of ['router-recover-usdc', 'router-save-metadata', 'router-deposit-usdc', 'radio-payroll-finalize', 'radio-settle-playback', 'radio-settle-top10']) {
+  for (const id of ['router-recover-usdc', 'router-save-metadata', 'router-deposit-usdc', 'router-deposit-native', 'router-recover-native', 'router-fund-active', 'radio-payroll-finalize', 'radio-settle-playback', 'radio-settle-top10']) {
     const button = document.getElementById(id); if (button) button.disabled = true;
   }
   ++_routerRefreshId;
@@ -1035,6 +1076,7 @@ async function _refreshSettlementFund() {
   const createButton = document.getElementById('router-create-fund');
   if (!select || !createButton) return;
   const refreshId = ++_routerRefreshId;
+  for (const id of ['router-deposit-native', 'router-recover-native', 'router-fund-active']) document.getElementById(id).disabled = true;
   _routerCreateAllowed = false;
   createButton.disabled = true;
   const depositButton = document.getElementById('router-deposit-usdc');
@@ -1059,7 +1101,10 @@ async function _refreshSettlementFund() {
     const usdc = _getAssetConfig('USDC');
     const exists = Boolean(fund.exists ?? fund[2]);
     const active = Boolean(fund.active ?? fund[1]);
-    const balance = exists && usdc ? await router.fundBalances(id, usdc.address) : 0n;
+    const [balance, nativeBalance] = await Promise.all([
+      exists && usdc ? router.fundBalances(id, usdc.address) : 0n,
+      exists ? router.fundBalances(id, ethers.ZeroAddress) : 0n,
+    ]);
     if (refreshId !== _routerRefreshId || !isAdminWallet(address) || window._wallet?.address?.toLowerCase() !== address.toLowerCase()) return;
     const link = document.getElementById('router-address-link');
     link.href = `https://basescan.org/address/${_payrollAssetConfig.routerAddress}`;
@@ -1067,21 +1112,28 @@ async function _refreshSettlementFund() {
     document.getElementById('router-fund-id').textContent = id;
     document.getElementById('router-admin-role').textContent = allowed ? 'DEFAULT_ADMIN_ROLE verified' : 'DEFAULT_ADMIN_ROLE required';
     document.getElementById('router-fund-state').textContent = exists ? active ? 'Created · active' : 'Created · inactive' : 'Not created';
-    document.getElementById('router-fund-balance').textContent = usdc ? `${formatUsdcUnits(balance)} USDC` : 'USDC not configured';
+    document.getElementById('router-fund-balance').textContent = `${ethers.formatEther(nativeBalance)} ETH · ${usdc ? `${formatUsdcUnits(balance)} USDC` : 'USDC not configured'}`;
     _routerCreateAllowed = allowed && !exists && _metadataUriReady();
     if (saveButton) saveButton.disabled = !allowed || exists || _settling || select.value !== CUSTOM_FUND_OPTION;
     createButton.disabled = !_routerCreateAllowed || _settling;
-    const pendingDeposit = localStorage.getItem(_depositKey());
+    const pendingDeposit = localStorage.getItem(_depositKey()) || _fundAdmin?.pending(slug);
     const pendingRecovery = localStorage.getItem(_recoveryKey());
-    if (depositButton) depositButton.disabled = !exists || !active || _settling || Boolean(pendingDeposit || pendingRecovery);
+    if (depositButton) depositButton.disabled = !allowed || !exists || !active || _settling || Boolean(pendingDeposit || pendingRecovery);
+    document.getElementById('router-deposit-native').disabled = !allowed || !exists || !active ||
+      [window.DecentConfig?.radioFunds?.playback || 'dbusk-playback', window.DecentConfig?.radioFunds?.topTen || 'dbusk-top10'].includes(slug) ||
+      _settling || Boolean(pendingDeposit || pendingRecovery);
+    document.getElementById('router-recover-native').disabled = !allowed || !exists || nativeBalance <= 0n || _settling || Boolean(pendingDeposit || pendingRecovery);
+    const activeButton = document.getElementById('router-fund-active');
+    activeButton.disabled = !allowed || !exists || _settling || Boolean(pendingDeposit || pendingRecovery);
+    activeButton.textContent = active ? 'Archive selected allocation' : 'Restore selected allocation';
     if (recoverButton) recoverButton.disabled = !allowed || !exists || balance <= 0n || _settling || Boolean(pendingDeposit || pendingRecovery);
     const recoveryOwner = document.getElementById('router-recovery-owner');
     if (recoveryOwner) recoveryOwner.textContent = _ownerAddress || '';
     const recoveryPending = document.getElementById('router-recovery-pending');
     if (recoveryPending) recoveryPending.textContent = pendingRecovery ? 'Unresolved recovery. Check its receipt before another withdrawal or deposit.' : '';
     const pendingText = document.getElementById('router-deposit-pending');
-    if (pendingText) pendingText.textContent = pendingDeposit ? 'A prior deposit/approval is unresolved. Check its receipt before sending again.' : '';
-    _setStatus(status, exists ? 'Fund exists. USDC deposits and reviewed closed-week settlements are separate transactions.'
+    if (pendingText) pendingText.textContent = pendingDeposit ? 'A prior fund action is unresolved. Use the matching receipt controls before sending again.' : '';
+    _setStatus(status, exists ? 'Verified on Base. Deposits, campaign reservations and payouts are separate actions.'
       : !allowed ? 'The connected wallet cannot create funds on this router.'
       : !_metadataUriReady() ? 'Enter an HTTPS or IPFS metadata URI describing this fund purpose before creation.'
       : `Ready to create empty fund ${slug}. Confirm once on Base; this does not deposit funds.`);
@@ -1094,21 +1146,26 @@ async function _depositUsdc() {
   const status = document.getElementById('router-fund-status');
   const button = document.getElementById('router-deposit-usdc');
   if (_settling || !isAdminWallet()) return;
+  _settling = true;
   let failed = false;
+  let operationKey;
   try {
     const slug = _selectedFundSlug();
     const asset = _getAssetConfig('USDC');
     if (!asset || asset.decimals !== 6) throw new Error('Native Base USDC is not configured');
     const amountUnits = ethers.parseUnits(document.getElementById('router-deposit-amount').value || '0', 6);
     if (amountUnits <= 0n) throw new Error('Enter a positive USDC deposit amount');
-    const operationKey = _depositKey();
+    operationKey = _depositKey();
+    if (_fundAdmin?.pending(slug)) throw new Error('A fund action is unresolved; verify its receipt first');
     if (localStorage.getItem(operationKey)) throw new Error('A prior deposit is unresolved; verify it before retrying');
-    if (!confirm(`Deposit ${formatUsdcUnits(amountUnits)} USDC into ${slug} on Base? This moves funds from your wallet; it does not pay artists.`)) return;
-    _settling = true; button.disabled = true;
+    if (localStorage.getItem(_recoveryKey())) throw new Error('A recovery is unresolved; verify it before depositing');
+    if (!await confirmFundAction({ title: `Fund ${slug} with USDC`, description: `Deposit ${formatUsdcUnits(amountUnits)} USDC on Base. This moves funds from your wallet; it does not pay artists or publish a campaign.` })) return;
+    button.disabled = true;
     const operationDetails = { owner: _ownerAddress, router: _payrollAssetConfig.routerAddress,
       asset: asset.address, fundId: ethers.id(slug), amountUnits: amountUnits.toString() };
     const signer = await _getSigner(BASE_CHAIN_ID);
     const router = new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, signer);
+    await verifyFundAdmin({ router, signer, owner: _ownerAddress });
     const token = new ethers.Contract(asset.address, USDC_ABI, signer);
     const result = await depositSettlementUsdc({ router, token, signer, owner: _ownerAddress, fundId: ethers.id(slug), amountUnits,
       onStep: message => _setStatus(status, message), onBroadcast: record => {
@@ -1122,9 +1179,8 @@ async function _depositUsdc() {
     _setStatus(status, `USDC deposit confirmed: ${result.txHash}`);
   } catch (error) {
     failed = true;
-    const key = _depositKey();
-    const operation = JSON.parse(localStorage.getItem(key) || 'null');
-    if (operation && !operation.txHash && (error.code === 4001 || error.code === 'ACTION_REJECTED')) localStorage.removeItem(key);
+    const operation = JSON.parse(operationKey && localStorage.getItem(operationKey) || 'null');
+    if (operation && !operation.txHash && (error.code === 4001 || error.code === 'ACTION_REJECTED')) localStorage.removeItem(operationKey);
     _setStatus(status, `${error.message}. Check any unresolved receipt before depositing again.`, true);
   }
   finally {
@@ -1132,6 +1188,7 @@ async function _depositUsdc() {
     const message = status.textContent;
     await _refreshSettlementFund();
     _setStatus(status, message, failed);
+    await _fundAdmin?.refresh();
   }
 }
 
@@ -1539,10 +1596,11 @@ async function _createSettlementFund() {
   const status = document.getElementById('router-fund-status');
   const button = document.getElementById('router-create-fund');
   if (_settling || !_routerCreateAllowed || !isAdminWallet()) return;
+  _settling = true;
   try {
     const slug = _selectedFundSlug();
     const metadataUri = document.getElementById('router-fund-metadata').value.trim();
-    _settling = true;
+    if (!await confirmFundAction({ title: `Create ${slug}`, description: `Create an empty Base allocation using the saved public metadata: ${metadataUri}. This does not deposit money or publish a campaign. Fund IDs are permanent; archive rather than delete.` })) return;
     button.disabled = true;
     _setStatus(status, `Creating ${slug} on Base — confirm the fund creation transaction in your wallet...`);
     const signer = await _getSigner(BASE_CHAIN_ID);
@@ -1559,12 +1617,15 @@ async function _createSettlementFund() {
     await _refreshRadioPayroll();
     await _refreshSettlementFund();
     _setStatus(status, result.alreadyExists ? `${slug} already exists; no creation transaction sent.`
-      : `${slug} created. Empty fund; no USDC deposited.${result.txHash ? ` Transaction: ${result.txHash}` : ''}`);
+      : `${slug} created. Empty fund; no ETH or USDC deposited.${result.txHash ? ` Transaction: ${result.txHash}` : ''}`);
   } catch (error) {
     _setStatus(status, error.message || 'Fund creation failed', true);
   } finally {
     _settling = false;
-    button.disabled = !_routerCreateAllowed;
+    const message = status.textContent;
+    await _refreshSettlementFund();
+    _setStatus(status, message);
+    await _fundAdmin?.refresh();
   }
 }
 
@@ -1641,9 +1702,20 @@ function _previewRadioPayroll() {
 // ─── Initialise the payroll panel ─────────────────────────────────────────────
 
 export function initPayroll() {
-  const weeklySection = document.getElementById('weekly-artist-payroll');
   const treasurySection = document.getElementById('settlement-router-section');
-  if (weeklySection && treasurySection) weeklySection.after(treasurySection);
+  if (treasurySection) document.getElementById('radio-programming-modal')?.append(treasurySection);
+  const disabledControls = new Map();
+  _fundAdmin = mountFundAdmin({ context: _fundAdminContext, selected: _selectedFundSlug,
+    select: _selectAdminFund, create: _prepareAdminFund, isBusy: () => _settling,
+    legacyPending: () => localStorage.getItem(_depositKey()) || localStorage.getItem(_recoveryKey()),
+    setBusy: value => {
+      _settling = value;
+      treasurySection.querySelectorAll('input,select,textarea,button').forEach(control => {
+        if (value) { disabledControls.set(control, control.disabled); control.disabled = true; }
+        else if (disabledControls.has(control)) control.disabled = disabledControls.get(control);
+      });
+      if (!value) disabledControls.clear();
+    }, refreshSelected: _refreshSettlementFund });
   document.getElementById('router-recover-usdc')?.addEventListener('click', _recoverUsdc);
   document.getElementById('router-recovery-check')?.addEventListener('click', _checkRecoveryReceipt);
   document.getElementById('radio-receipt-import')?.addEventListener('change', event => _importRadioReceipt(event.target.files?.[0]));
