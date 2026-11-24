@@ -56,6 +56,75 @@ test('public contribution parses suggested and precise amounts without floating 
   }
 });
 
+test('custom percentages allocate every micro-USDC and reject invalid or dust splits', async () => {
+  const { contributionPlan, contributionAmount, contributionFunds } = await fixture();
+  assert.equal(contributionFunds().length, 6);
+  const plan = contributionPlan('1.000001', [
+    { slug: 'dbusk-playback', percent: '33.33' },
+    { slug: 'dbusk-top10', percent: '33.33' },
+    { slug: 'dbusk-repo-dev', percent: '33.34' },
+  ]);
+  assert.deepEqual(plan.map(leg => leg.amountUnits), ['333300', '333300', '333401']);
+  assert.equal(plan.reduce((sum, leg) => sum + BigInt(leg.amountUnits), 0n), 1000001n);
+  assert.equal(contributionAmount(333401n), '0.333401');
+  assert.throws(() => contributionPlan('5', [{ slug: 'dbusk-top10', percent: '99' }]), /100%/);
+  assert.throws(() => contributionPlan('5', [{ slug: 'unknown', percent: '100' }]), /configured/);
+  assert.throws(() => contributionPlan('5', [
+    { slug: 'dbusk-top10', percent: '50' }, { slug: 'dbusk-top10', percent: '50' },
+  ]), /at most once/);
+  assert.throws(() => contributionPlan('0.000001', [
+    { slug: 'dbusk-playback', percent: '50' }, { slug: 'dbusk-top10', percent: '50' },
+  ]), /at least 0.000001/);
+});
+
+test('a partially cancelled split resumes only unfinished funds and retains proven receipts', async () => {
+  const value = await fixture();
+  let rejectSecond = true;
+  const calls = [];
+  const controller = value.createContributionController({ storage: value.storage, ethers, deposit: async options => {
+    const slug = options.fundId === ethers.id('dbusk-playback') ? 'dbusk-playback' : 'dbusk-top10';
+    calls.push(slug);
+    options.onStage('deposit');
+    if (slug === 'dbusk-top10' && rejectSecond) throw Object.assign(new Error('Rejected second payment'), { code: 4001 });
+    options.onBroadcast({ stage: 'deposit', txHash: value.hash });
+    value.setReceipt({ status: 1, logs: [
+      value.log('FundFunded', [ethers.id(slug), value.BASE_USDC_ADDRESS, value.address, options.amountUnits], value.SETTLEMENT_ROUTER_ADDRESS),
+      value.log('Transfer', [value.address, value.SETTLEMENT_ROUTER_ADDRESS, options.amountUnits], value.BASE_USDC_ADDRESS),
+    ] });
+    return { txHash: value.hash };
+  } });
+  const plan = value.contributionPlan('5', [
+    { slug: 'dbusk-playback', percent: '50' }, { slug: 'dbusk-top10', percent: '50' },
+  ]);
+  const options = { ...value.options, plan };
+  await assert.rejects(controller.contributeSplit(options), /Rejected second/);
+  const journal = JSON.parse([...value.data.values()][0]);
+  assert.equal(journal.legs[0].status, 'confirmed');
+  assert.equal(journal.legs[0].txHash, value.hash);
+  await assert.rejects(controller.contributeSplit(options), /unfinished/);
+  rejectSecond = false;
+  const result = await controller.contributeSplit({ ...options, resume: true });
+  assert.deepEqual(calls, ['dbusk-playback', 'dbusk-top10', 'dbusk-top10']);
+  assert.ok(result.every(leg => leg.status === 'confirmed'));
+  assert.equal(value.data.size, 0);
+});
+
+test('split cancellation cannot unlock an uncertain transaction, and single receipt recovery updates the split before unlocking', async () => {
+  const value = await fixture();
+  const planKey = `decentbusking:fund-split:8453:${value.SETTLEMENT_ROUTER_ADDRESS.toLowerCase()}:${value.address.toLowerCase()}`;
+  const legs = [{ slug: value.slug, amountUnits: '5000000', status: 'pending', txHash: '' }];
+  value.storage.setItem(planKey, JSON.stringify({ address: value.address, legs }));
+  value.storage.setItem(value.key, JSON.stringify({ address: value.address, slug: value.slug,
+    amountUnits: '5000000', stage: 'deposit', txHash: value.hash }));
+  await assert.rejects(value.controller.abandonSplit(value.options), /unresolved/);
+  assert.equal((await value.controller.check(value.options)).stage, 'deposit');
+  assert.equal(JSON.parse(value.storage.getItem(planKey)).legs[0].status, 'confirmed');
+  assert.equal(value.storage.getItem(value.key), null);
+  const results = await value.controller.abandonSplit(value.options);
+  assert.equal(results[0].txHash, value.hash);
+  assert.equal(value.data.size, 0);
+});
+
 test('any connected contributor can fund the selected pool with exact USDC approval and verified deposit', async () => {
   const value = await fixture();
   const result = await value.controller.contribute(value.options);
@@ -77,7 +146,7 @@ test('a second unresolved deposit is blocked across reload and isolated by walle
   assert.equal(value.calls.length, 2);
   assert.notEqual(value.key, value.contributionJournalKey(value.address, 'dbusk-top10'));
   assert.notEqual(value.key, value.contributionJournalKey(`0x${'5'.repeat(40)}`, value.slug));
-  assert.throws(() => value.contributionJournalKey(value.address, 'dbusk-repo-dev'), /Invalid/);
+  assert.throws(() => value.contributionJournalKey(value.address, 'not-a-configured-fund'), /Invalid/);
 });
 
 test('pending deposits require exact fund, token, sender, amount and token-transfer proofs', async () => {

@@ -23,6 +23,32 @@ Read-only treasury status checks USDC approval, fund existence/activity and bala
 
 ### USDC Deposits
 
+The public fund pills open immediately; wallet names enhance the rows after
+transaction proofs appear. The default view shows this week's pending estimates
+and confirmed additions/payouts from this week plus the previous two completed
+New York weeks. **Weekly archives** fetches a lightweight week index only when
+opened, then each selected week's income, actual payouts and frozen allocation
+receipts on demand. Funding-only weeks are included. BaseScan links remain
+available for both income and payouts; an allocation is not proof of payment.
+
+The centered **Fund Us** button opens a separate contribution modal. It offers
+all six configured settlement allocations and an exact-percentage custom split.
+Splits use one deposit transaction per fund, not an atomic batch. Amounts are
+calculated in micro-USDC with any rounding remainder assigned to the last
+selected fund; percentages must total 100%. Confirmed legs retain their
+transaction links if a later leg fails or is cancelled. **Resume unfinished
+split** checks uncertain receipts and sends only remaining legs. As with single
+deposits, this protection is browser-local; clearing storage or changing devices
+loses the journal. Never retry an uncertain payment without checking its receipt.
+**Stop unsent split legs** abandons only the unsent remainder; it refuses to
+unlock an uncertain transaction and never refunds confirmed contributions.
+
+Reuse: this adapts `configuredSettlementFunds` and `depositSettlementUsdc` in
+[settlement-funds.mjs](../js/settlement-funds.mjs), the existing contribution
+journal, and [fund-archive.mjs](../js/fund-archive.mjs). No new contract or fund
+is created. The current router has no atomic multi-fund deposit, so split
+completion is explicit and resumable rather than all-or-nothing.
+
 Select an existing active fund in Settlements Router, enter the deposit amount, and confirm the deposit action. The app verifies native Base USDC, six decimals, asset approval, wallet balance, and Base network. It requests an ERC-20 approval only if the current allowance is insufficient, for the exact intended amount rather than an unlimited allowance; then it requests the `fundToken` transaction. Approval is not a deposit. Depositing into a fund is not an artist payout.
 
 Pending approval/deposit stages and hashes are kept in browser storage. An unresolved operation locks another deposit to that fund. Check its receipt or supply the replacement transaction hash; unlocking requires a successful matching Approval/FundFunded event, or the exact recorded reverted transaction. An approval cannot unlock an operation already marked as a deposit. Unknown broadcasts remain locked for wallet-history review. This journal is browser-local: changing devices or clearing storage loses it, so always check wallet history before retrying an uncertain deposit.

@@ -1,4 +1,4 @@
-import { initFundHeader, openFundPanel } from './fund-header.mjs?v=20261124-contract-sigils';
+import { initFundHeader, openFundPanel, openFundArchives } from './fund-header.mjs?v=20261124-lazy-funds';
 import { payrollPeriodFromKey } from './payroll-week.mjs';
 
 export function payrollTourWeek(search) {
@@ -23,8 +23,8 @@ export const FUND_TOUR_STEPS = [
     body: 'The Playback fund rewards qualified plays and groups earnings by artist wallet across songs. Its separate weekly archive lets you compare intended payouts and actual confirmed payments. The Discord report lists the top ten Playback payees by total USDC paid.' },
   { title: 'Bring a sponsor or run an ad', selectors: ['#devert-tab'], action: 'devert',
     body: 'Buying an advertising campaign in the DVert sidepanel helps fund weekly artist payouts through the campaign funding rules. Bring your own project or invite a sponsor. Ad purchases are separate from direct fund contributions: review campaign pricing and terms in DVert.' },
-  { title: 'Help grow next week’s pot', fund: 'dbusk-playback', selectors: ['#fund-contribution'], action: 'contribute',
-    body: 'You or a sponsor can add $5, $10, $1,000 or a custom amount. Choose Playback or Top 10, then use the contribution button. MetaMask will show Base, native USDC, the fund and amount prefilled; approve only the intended amount, then confirm the contribution. You need Base ETH for gas. No payment is requested by this tour.' },
+  { title: 'Help grow next week’s pot', fund: 'dbusk-playback', selectors: ['#fund-us-button'], action: 'contribute',
+    body: 'You or a sponsor can add $5, $10, $1,000 or a custom amount. Open Fund Us to choose any configured allocation or a custom percentage split. Your wallet confirms each fund separately; confirmed legs remain sent if you stop partway. No payment is requested by this tour.' },
 ];
 
 export function initFundTour() {
@@ -134,6 +134,7 @@ export function initFundTour() {
           if (pending) pending.open = true;
         }
         if (step.archive) {
+          await openFundArchives(week);
           const archives = [...fundDialog.querySelectorAll('[data-fund-week]')];
           const selected = (week && archives.find(item => item.dataset.fundWeek === week)) || (!week && archives[0]);
           if (selected) selected.open = true;
@@ -200,7 +201,10 @@ export function initFundTour() {
     stop({ keepFund: step.action === 'contribute' });
     if (step.action === 'devert') {
       if (!document.getElementById('devert-panel')?.classList.contains('is-open')) document.getElementById('devert-tab')?.click();
-    } else document.getElementById('fund-contribution-amount')?.focus();
+    } else {
+      document.getElementById('fund-us-button')?.click();
+      document.getElementById('fund-contribution-amount')?.focus();
+    }
   });
   for (const dialog of [shell, fundDialog]) {
     dialog.addEventListener('cancel', event => {

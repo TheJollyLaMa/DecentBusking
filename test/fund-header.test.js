@@ -77,7 +77,7 @@ test('loadFundBreakdown groups inflows, payouts, and reconciles the balance', as
   const advert = result.rows.find(row => row.kind === 'advert');
   assert.ok(advert);
   assert.equal(advert.direction, 'in');
-  assert.match(advert.sourceHtml, /☿📜 🔊 DeVert v0\.1/);
+  assert.match(advert.sourceHtml, /☿📜 DeVert v0\.1🔊/);
   assert.match(advert.sourceHtml, /Purchased by[\s\S]*thejollylama\.eth/);
   assert.match(advert.sourceHtml, /data-fund-role="advertiser"/);
   assert.match(advert.extra, /Campaign #7/);
@@ -85,7 +85,7 @@ test('loadFundBreakdown groups inflows, payouts, and reconciles the balance', as
 
   const djuke = result.rows.find(row => row.kind === 'djuke');
   assert.ok(djuke);
-  assert.match(djuke.sourceHtml, /🜡🎰 🎶 DJuke v0\.3/);
+  assert.match(djuke.sourceHtml, /🜡🎰 DJuke v0\.3🎶/);
   assert.match(djuke.extra, /DJuke request #42/);
 
   const sponsor = result.rows.find(row => row.kind === 'sponsor');
@@ -113,6 +113,36 @@ test('loadFundBreakdown reports indexing instead of scanning logs when the worke
   assert.equal(result.balanceUnits, 5n);
 });
 
+test('visible transaction proofs never wait for ENS or fetch an archive', async () => {
+  const { loadFundBreakdown, renderFundActivity } = await import(url);
+  const funder = `0x${'9'.repeat(40)}`;
+  const txHash = `0x${'8'.repeat(64)}`;
+  const result = await loadFundBreakdown({ fundSlug: top10, resolveNames: false,
+    ensProvider: { lookupAddress() { throw new Error('Opening must not look up ENS'); } },
+    fundState: { balanceUnits: '500', inflowUnits: '1500', outflowUnits: '1000', historyScope: 'recent',
+      sources: [{ funder, amountUnits: '100', txHash }], payouts: [] } });
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.reconciles, true, 'all-time totals reconcile even when visible rows are recent only');
+  assert.match(renderFundActivity(result.rows), new RegExp(`basescan.org/tx/${txHash}`));
+  assert.match(result.rows[0].sourceHtml, /fund-wallet-address/);
+  assert.equal(result.weeklyArchive, undefined);
+});
+
+test('page summaries do not request pending radio history, and archive reads select only the requested week', async () => {
+  const { loadFundState, loadFundArchive } = await import(url);
+  const calls = [];
+  const fetchImpl = async address => {
+    calls.push(address);
+    return { ok: true, json: async () => ({ ready: false }) };
+  };
+  await loadFundState({ serviceUrl: 'https://worker.example', fetchImpl, includePending: false, view: 'summary' });
+  assert.deepEqual(calls.map(address => new URL(address).pathname + new URL(address).search),
+    ['/api/funds?view=summary', '/api/payroll/weekly?view=summary']);
+  calls.length = 0;
+  await loadFundArchive({ fundSlug: top10, serviceUrl: 'https://worker.example', fetchImpl, week: 'NY-2026-11-09' });
+  assert.equal(new URL(calls[0]).search, '?week=NY-2026-11-09');
+});
+
 test('fund reports name current and historical DJuke inflows without requiring ENS', async () => {
   const { loadFundBreakdown } = await import(url);
   const addresses = [
@@ -127,7 +157,7 @@ test('fund reports name current and historical DJuke inflows without requiring E
   });
   assert.equal(result.reconciles, true);
   for (const version of ['0.5', '0.4']) {
-    const row = result.rows.find(row => row.sourceLabel === `🜡🎰 🎶 DJuke v${version}`);
+    const row = result.rows.find(row => row.sourceLabel === `🜡🎰 DJuke v${version}🎶`);
     assert.ok(row, `DJuke v${version} must be named in the fund report`);
     assert.equal(row.typeLabel, 'DJuke purchase');
     assert.match(row.sourceHtml, /fund-contract-link/);
@@ -179,7 +209,7 @@ test('fund snapshots refresh budgets and reservations and reject the previous we
   let week = 'NY-2026-10-19';
   let lastCheckedAt = '2026-10-19T04:00:30.000Z';
   const now = Date.parse('2026-10-19T00:01:00-04:00');
-  const fetchImpl = async address => ({ ok: true, json: async () => address.endsWith('/api/funds')
+  const fetchImpl = async address => ({ ok: true, json: async () => new URL(address).pathname === '/api/funds'
     ? { ready: true, funds: { [top10]: { balanceUnits: balance, sources: [], payouts: [] } } }
     : { ready: true, chainId: 8453, currentPeriod: { week }, lastCheckedAt, funds: { top10: { budgetUnits: budget, reservedUnits: reserved } } } });
   const snapshot = await loadFundState({ serviceUrl: 'https://worker.example', fetchImpl, now });

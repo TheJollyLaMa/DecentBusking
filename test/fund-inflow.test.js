@@ -1,6 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+test('summary-only refreshes preserve large sponsor celebrations without loading transaction arrays', async () => {
+  const { fundInflowSnapshot: snapshot, planFundInflow: plan } = await import('../js/fund-inflow.mjs');
+  const old = snapshot({ balanceUnits: '1000000', largeSponsorDepositCount: 2 }, 'NY-2026-11-23');
+  const next = snapshot({ balanceUnits: '201000000', largeSponsorDepositCount: 3 }, 'NY-2026-11-23');
+  assert.equal(next.sources, null);
+  assert.equal(plan(old, next).kind, 'bag');
+  const unchangedCount = snapshot({ balanceUnits: '201000000', largeSponsorDepositCount: 2 }, 'NY-2026-11-23');
+  assert.equal(plan(old, unchangedCount).kind, 'dollar');
+});
+
 const week = 'NY-2026-10-26';
 const source = (id, amountUnits, kind = 'sponsor') => ({ txHash: `0x${id}`, logIndex: 0, amountUnits, kind });
 
