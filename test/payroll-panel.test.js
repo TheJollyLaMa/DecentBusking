@@ -59,7 +59,7 @@ test('Base payroll excludes retired legacy entries without sending or verifying 
     if (!nodes.has(id)) nodes.set(id, { textContent: '', innerHTML: '', style: {}, querySelectorAll: () => [] });
     return nodes.get(id);
   };
-  const context = vm.createContext({ owner, localStorage: storage, createLegacyReceiptStore, verifyLegacyPayment,
+  const context = vm.createContext({ ...await import('../js/fund-admin.mjs'), owner, localStorage: storage, createLegacyReceiptStore, verifyLegacyPayment,
     isAdminWallet: address => address === owner, loadSupporterPayroll: async () => {},
     window: { _wallet: { address: owner } }, document: { getElementById: node }, URL,
     ethers: { ...ethers, JsonRpcProvider: class {
@@ -98,7 +98,7 @@ test('invalid custom slug changes disable deposits and invalidate earlier fund r
   const requested = new Promise(resolve => { roleRequested = resolve; });
   const router = { DEFAULT_ADMIN_ROLE: async () => 'admin', funds: async () => ({ exists: true, active: true }),
     hasRole: () => { roleRequested(); return new Promise(resolve => { releaseRole = resolve; }); }, fundBalances: async () => 0n };
-  const context = vm.createContext({ ...funds, URL, ethers, isAdminWallet: () => true,
+  const context = vm.createContext({ ...await import('../js/fund-admin.mjs'), ...funds, URL, ethers, isAdminWallet: () => true,
     window: { _wallet: { address: '0xowner' } }, document: { getElementById: node },
     localStorage: { getItem: () => null }, router });
   const source = fs.readFileSync(path.join(__dirname, '../js/payroll.js'), 'utf8').replace(/^import .*;\n/gm, '')
@@ -124,6 +124,7 @@ test('invalid custom slug changes disable deposits and invalidate earlier fund r
 });
 
 test('fund purpose saves JSON to IPFS, fills its URI, and rejects failed or stale uploads without creating funds', async () => {
+  const awaitedAdmin = await import('../js/fund-admin.mjs');
   const funds = await import(pathToFileURL(path.join(__dirname, '../js/settlement-funds.mjs')).href);
   const owner = `0x${'1'.repeat(40)}`;
   const routerAddress = `0x${'2'.repeat(40)}`;
@@ -145,7 +146,7 @@ test('fund purpose saves JSON to IPFS, fills its URI, and rejects failed or stal
       createFund: () => { throw new Error('Saving metadata must not create a fund'); } };
     const signer = { getAddress: async () => owner, provider: { getNetwork: async () => ({ chainId: 8453 }), getCode: async () => '0x1234' } };
     const window = { _wallet: { address: owner }, DecentConfig: { ipfsUploadServiceUrl: 'https://worker.example' }, location: { origin: 'https://site.example' } };
-    const context = vm.createContext({ ...funds, owner, routerAddress, signer, URL, File, window,
+    const context = vm.createContext({ ...awaitedAdmin, ...funds, owner, routerAddress, signer, URL, File, window,
       ethers: { ...ethers, Contract: class { constructor() { return router; } } }, document: { getElementById: node },
       isAdminWallet: () => window._wallet?.address === owner,
       createBrowserIpfsUploader: options => async file => { uploaded.push({ options, file }); return context.uploadResult(file); } });

@@ -561,7 +561,7 @@ export function openReferralCampaignEditor({ startsAt, template = null, campaign
     else if (!campaignGifts(values.gifts)) { message = '⚠️ Each gift needs an amount or 🎖'; tone = 'error'; }
     else if (fund?.error) { message = `⚠️ ${fund.error}`; tone = 'error'; }
     else if (!ready) message = '⏳ Checking fund…';
-    else if (!fund.exists || !fund.active) { message = `🏦 Create ${REFERRALS_FUND} in Payroll first`; tone = 'error'; }
+    else if (!fund.exists || !fund.active) { message = `🏦 Create or restore ${REFERRALS_FUND} in Admin Community Calendar → Fund Allocations`; tone = 'error'; }
     else {
       const giftNote = gifts > 0n ? ` incl. 🎁 ${money(gifts)}` : '';
       message = shortfall > 0n

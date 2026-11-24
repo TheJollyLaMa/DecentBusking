@@ -4,7 +4,7 @@ import { escapeHtml } from './fund-display.mjs?v=20261124-lazy-funds';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { REFERRALS_FUND, CAMPAIGN_ASSETS } from './promotions.mjs?v=20261126-eth-gifts';
 import { renderFundBalanceChart } from './fund-visual.mjs?v=20261124-fund-bunny';
-import { discoverAdditionalFunds } from './fund-discovery.mjs?v=20261124-fund-bunny';
+import { discoverAdditionalFunds } from './fund-discovery.mjs?v=20261124-admin-funds';
 import { initFundGuide } from './fund-guide.mjs?v=20261124-fund-bunny-keys';
 
 const DEFAULT_FUNDS = { radioFunds: { playback: 'dbusk-playback', topTen: 'dbusk-top10' },
@@ -36,7 +36,7 @@ const same = (first, second) => typeof first === 'string' && typeof second === '
   first.toLowerCase() === second.toLowerCase();
 
 export async function loadContributionFunds({ ethers = globalThis.window?.ethers, router, config, readMetadata,
-  onUpdate = () => {}, onWarning } = {}) {
+  onUpdate = () => {}, onWarning, includeInactive = false } = {}) {
   if (!ethers) throw new Error('Fund reader is not ready. Refresh and try again');
   router ||= new ethers.Contract(SETTLEMENT_ROUTER_ADDRESS, ROUTER_ABI, getBaseReadProvider({ ethers }));
   const ids = await router.allFundIds();
@@ -49,17 +49,17 @@ export async function loadContributionFunds({ ethers = globalThis.window?.ethers
   const withBalance = async fund => {
     const id = ethers.id(fund.slug);
     const record = byId.get(id);
-    if (!record?.exists || !record.active) return null;
+    if (!record?.exists || !includeInactive && !record.active) return null;
     const [balance, nativeBalance] = await Promise.all([
       router.fundBalances(id, BASE_USDC_ADDRESS),
-      acceptsEth(fund.slug) ? router.fundBalances(id, CAMPAIGN_ASSETS.eth.address) : 0n,
+      includeInactive || acceptsEth(fund.slug) ? router.fundBalances(id, CAMPAIGN_ASSETS.eth.address) : 0n,
     ]);
-    return { ...fund, balanceUnits: balance.toString(), nativeBalanceUnits: nativeBalance.toString() };
+    return { ...fund, active: record.active, metadataUri: record.metadataUri, balanceUnits: balance.toString(), nativeBalanceUnits: nativeBalance.toString() };
   };
   const funds = (await Promise.all(candidates.map(withBalance))).filter(Boolean);
   onUpdate(funds);
   const additional = await discoverAdditionalFunds({ records, knownIds: new Set(candidates.map(fund => ethers.id(fund.slug))),
-    routerAddress: SETTLEMENT_ROUTER_ADDRESS, ethers, readMetadata, onWarning });
+    routerAddress: SETTLEMENT_ROUTER_ADDRESS, ethers, readMetadata, onWarning, includeInactive });
   return [...funds, ...await Promise.all(additional.map(withBalance))].filter(Boolean);
 }
 
@@ -546,7 +546,7 @@ export function initFundContributions({ loadFunds = loadContributionFunds } = {}
   };
   document.getElementById('fund-us-button')?.addEventListener('click', openContributions);
   retry.addEventListener('click', () => { loadedAt = 0; refreshFunds(); });
-  document.addEventListener('settlement-fund-created', event => {
+  const refreshCatalog = event => {
     if (!same(event.detail?.routerAddress, SETTLEMENT_ROUTER_ADDRESS)) return;
     const refresh = () => {
       loadedAt = 0;
@@ -554,7 +554,8 @@ export function initFundContributions({ loadFunds = loadContributionFunds } = {}
     };
     if (pending) pending.then(refresh);
     else refresh();
-  });
+  };
+  for (const type of ['settlement-fund-created', 'settlement-fund-updated']) document.addEventListener(type, refreshCatalog);
   document.addEventListener('fund-contribution-confirmed', () => {
     loadedAt = 0;
     if (contributionDialog.open) refreshFunds();

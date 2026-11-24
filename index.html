@@ -69,15 +69,19 @@
       "./js/fund-display.mjs?v=20261024-djuke-labels":"./js/fund-display.mjs?v=20261124-visible-payments",
       "./js/fund-display.mjs?v=20261124-lazy-funds":"./js/fund-display.mjs?v=20261124-visible-payments",
       "./js/fund-display.mjs":"./js/fund-display.mjs?v=20261124-visible-payments",
-      "./js/settlement-funds.mjs":"./js/settlement-funds.mjs?v=20261124-fund-bunny",
-      "./js/settlement-funds.mjs?v=20261116-promotions":"./js/settlement-funds.mjs?v=20261124-fund-bunny",
+      "./js/settlement-funds.mjs":"./js/settlement-funds.mjs?v=20261124-admin-funds",
+      "./js/settlement-funds.mjs?v=20261124-fund-bunny":"./js/settlement-funds.mjs?v=20261124-admin-funds",
+      "./js/settlement-funds.mjs?v=20261116-promotions":"./js/settlement-funds.mjs?v=20261124-admin-funds",
+      "./js/referral-campaign-editor.mjs?v=20261126-eth-gifts":"./js/referral-campaign-editor.mjs?v=20261124-admin-funds",
       "./js/fund-header.mjs?v=20261124-visible-payments":"./js/fund-header.mjs?v=20261124-fund-bunny-keys",
-      "./js/fund-contribution.mjs":"./js/fund-contribution.mjs?v=20261124-fund-bunny-keys",
-      "./js/fund-contribution.mjs?v=20261124-verified-funds":"./js/fund-contribution.mjs?v=20261124-fund-bunny-keys",
-      "./js/fund-contribution.mjs?v=20261124-fund-bunny":"./js/fund-contribution.mjs?v=20261124-fund-bunny-keys"
+      "./js/fund-contribution.mjs":"./js/fund-contribution.mjs?v=20261124-admin-funds",
+      "./js/fund-contribution.mjs?v=20261124-verified-funds":"./js/fund-contribution.mjs?v=20261124-admin-funds",
+      "./js/fund-contribution.mjs?v=20261124-fund-bunny":"./js/fund-contribution.mjs?v=20261124-admin-funds",
+      "./js/fund-contribution.mjs?v=20261124-fund-bunny-keys":"./js/fund-contribution.mjs?v=20261124-admin-funds"
     }}
   </script>
   <link rel="stylesheet" href="css/radio-programming.css?v=20261126-eth-gifts" />
+  <link rel="stylesheet" href="css/fund-admin.css?v=20261124-admin-funds" />
   <link rel="stylesheet" href="css/profile-inbox.css?v=20261126-eth-gifts" />
   <link rel="stylesheet" href="css/inviter-prompt.css?v=20261125-inviter" />
 
@@ -965,8 +969,8 @@
 
   <dialog id="radio-programming-modal" aria-labelledby="radio-programming-title">
     <div class="radio-programming-header">
-      <h2 id="radio-programming-title">📻 Radio Programming</h2>
-      <button id="radio-programming-close-btn" type="button" aria-label="Close Radio Programming" autofocus>✕</button>
+      <h2 id="radio-programming-title">☿ Admin Community Calendar</h2>
+      <button id="radio-programming-close-btn" type="button" aria-label="Close Admin Community Calendar" autofocus>✕</button>
     </div>
     <div class="radio-programming-wallet">
       <span id="radio-programming-connected-addr" class="admin-addr"></span>
@@ -1068,6 +1072,11 @@
     </div>
   </div>
 
+  <dialog id="router-action-dialog" aria-labelledby="router-action-title">
+    <h3 id="router-action-title"></h3><p></p>
+    <div><button data-fund-action-cancel type="button" autofocus>Cancel</button><button data-fund-action-confirm type="button">Continue to wallet</button></div>
+  </dialog>
+
   <div id="payroll-overlay" class="hidden"></div>
 
   <!-- Payroll modal -->
@@ -1091,7 +1100,25 @@
       </div>
 
       <details id="settlement-router-section" class="payroll-section settlement-router-section">
-        <summary>Settlements Router</summary>
+        <summary><span>⚸ Fund Allocations</span><small>Create · fund · archive · restore</small></summary>
+        <div class="fund-admin-intro">
+          <div><p class="fund-admin-eyebrow">BASE · ADMIN TREASURY</p><h3>Give the community room to grow.</h3><p>Real fund balances. Separate currencies. Every change reviewed in your wallet.</p></div>
+          <div class="fund-admin-toolbar">
+            <button id="admin-fund-referrals" type="button" disabled>🤝 Prepare referral fund</button>
+            <button id="admin-fund-new" type="button" disabled>＋ New fund</button>
+          </div>
+        </div>
+        <section class="fund-admin-visual" aria-label="Admin fund balances">
+          <div class="fund-admin-toolbar">
+            <div role="group" aria-label="Admin balance currency"><button type="button" data-admin-fund-asset="eth" aria-pressed="true">Ξ ETH</button><button type="button" data-admin-fund-asset="usdc" aria-pressed="false">USDC</button></div>
+            <button id="admin-fund-view" type="button">◉ Pie view</button>
+            <button id="admin-fund-refresh" type="button">↻ Refresh allocations</button>
+          </div>
+          <div id="admin-fund-chart" aria-live="polite">Open Fund Allocations to verify balances.</div>
+          <p id="admin-fund-status" role="status"></p>
+        </section>
+        <p class="fund-admin-referral-note">First referral campaign: prepare <strong>dbusk-referrals</strong>, save its public metadata, create the empty allocation on Base, then deposit ETH below. Campaign publication is separate: its editor checks the full reward budget, gift reserves and existing commitments.</p>
+        <h3>Manage an allocation</h3>
         <dl class="payroll-allocation">
           <dt>Network</dt><dd>Base</dd>
           <dt>Router</dt><dd><a id="router-address-link" class="payroll-link" target="_blank" rel="noopener noreferrer">Not loaded</a></dd>
@@ -1102,7 +1129,7 @@
           <label id="router-custom-fund-label" hidden>New fund slug<input id="router-custom-fund-slug" type="text" minlength="3" maxlength="64" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="community-grants" autocomplete="off" /><span class="payroll-field-hint">Choose a short purpose ID: lowercase letters/numbers with single hyphens. Example: <code>community-grants</code>. This becomes the permanent on-chain fund ID.</span></label>
         </div>
         <form id="router-custom-fund-form" hidden>
-          <p class="payroll-fund-guide">Create in two steps: review the suggested public name and purpose, save that metadata to IPFS, then confirm <strong>Create Fund on Base</strong>. Creation makes an empty allocation only; it does not deposit USDC or start payouts.</p>
+          <p class="payroll-fund-guide">1. Name &amp; purpose · 2. Save public metadata · 3. Create on Base. Then fund with ETH or USDC. Creation alone does not deposit money or publish a campaign.</p>
           <div class="radio-payroll-controls">
             <label>Public fund name<input id="router-fund-name" type="text" maxlength="120" required placeholder="Suggested from your fund slug" /><span class="payroll-field-hint">Prefilled from the slug; edit it to make the purpose clear to contributors.</span></label>
             <label>Purpose and payout scope<textarea id="router-fund-purpose" rows="4" maxlength="2000" required placeholder="Suggested from your fund slug"></textarea><span class="payroll-field-hint">Explain what this allocation supports and who may be paid from it. This text is public metadata.</span></label>
@@ -1123,7 +1150,13 @@
           <button id="router-fund-refresh" class="payroll-btn payroll-btn-secondary" type="button">Refresh Fund</button>
           <button id="router-create-fund" class="payroll-btn payroll-btn-primary" type="button" disabled>Create Fund on Base</button>
         </div>
-        <p id="router-fund-status" class="payroll-status" role="status">Choose a project fund, or create a custom fund for a new purpose. Fund creation does not deposit USDC or enable payouts.</p>
+        <p id="router-fund-status" class="payroll-status" role="status">Choose a verified allocation or prepare a new fund.</p>
+        <section class="fund-admin-native">
+          <h4>Ξ Add Base ETH</h4>
+          <label>ETH amount<input id="router-native-amount" type="text" inputmode="decimal" placeholder="0.001" autocomplete="off" /></label>
+          <button id="router-deposit-native" type="button" disabled>Review ETH deposit</button>
+          <p>No conversion to USDC. Keep additional Base ETH in your wallet for gas.</p>
+        </section>
         <div class="radio-payroll-controls"><label>USDC deposit amount<input id="router-deposit-amount" type="number" min="0" step="0.01" value="0" /></label></div>
         <button id="router-deposit-usdc" class="payroll-btn payroll-btn-primary" type="button" disabled>Deposit USDC into Selected Fund</button>
         <p id="router-deposit-pending" class="payroll-status"></p>
@@ -1139,6 +1172,22 @@
           <div class="radio-payroll-controls"><label>Unresolved/replacement recovery hash<input id="router-recovery-hash" type="text" placeholder="0x..." /></label></div>
           <button id="router-recovery-check" class="payroll-btn payroll-btn-secondary" type="button">Check Recovery Receipt</button>
         </details>
+        <details class="fund-admin-recovery">
+          <summary>Owner ETH recovery</summary>
+          <p>Available even for archived funds. Recovery goes only to the configured owner and can leave campaign commitments underfunded.</p>
+          <label>ETH to recover<input id="router-native-recover-amount" type="text" inputmode="decimal" placeholder="0.001" autocomplete="off" /></label>
+          <button id="router-recover-native" type="button" disabled>Review ETH recovery</button>
+        </details>
+        <div class="fund-admin-lifecycle"><button id="router-fund-active" type="button" disabled>Archive / restore selected fund</button><p>Archiving stops deposits and payouts and removes the fund from Fund Us. Nothing is erased: balances, history and owner recovery remain.</p></div>
+        <p id="admin-fund-action-status" role="status"></p>
+        <a id="admin-fund-proof" target="_blank" rel="noopener" hidden>View confirmed transaction on Basescan ↗</a>
+        <details class="fund-admin-recovery">
+          <summary>Unresolved ETH / archive transaction</summary>
+          <label>Transaction hash (optional if saved)<input id="router-native-receipt-hash" type="text" placeholder="0x…" autocomplete="off" /></label>
+          <button id="router-native-check" type="button">Check exact receipt before retrying</button>
+          <p>Receipt journals are browser-local. Never resend an uncertain transfer; consult wallet history if you change devices or clear storage.</p>
+        </details>
+        <details id="admin-fund-archive" class="fund-admin-recovery"><summary>Archived allocations</summary><div id="admin-fund-archive-list">Not loaded.</div></details>
       </details>
 
       <section id="weekly-artist-payroll" class="payroll-section" aria-labelledby="weekly-payroll-title">
@@ -1244,7 +1293,7 @@
   <script type="module" src="js/payroll-notice.mjs?v=20261118-verified-backlog"></script>
 
   <!-- Inject 🔑 Admin link + owner pending mint badge -->
-  <script type="module" src="js/components/header-admin-inject.js?v=20261123-standalone"></script>
+  <script type="module" src="js/components/header-admin-inject.js?v=20261124-admin-funds"></script>
 
   <!-- Override .title-main color to DecentBusking orange inside AppTitle shadow root -->
   <script type="module" src="js/components/header-title-color-override.js?v=20261017-mercury-release"></script>
@@ -1263,7 +1312,7 @@
   <script type="module" src="js/content-review-ui.mjs?v=20261107-flags"></script>
 
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
-  <script type="module" src="js/payroll.js?v=20261123-supporter-queue"></script>
+  <script type="module" src="js/payroll.js?v=20261124-admin-funds"></script>
   <script type="module" src="js/radio-history.js?v=20261029-tally-sections"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261122-musician-referral"></script>
   <link rel="stylesheet" href="css/fund-tour.css?v=20261124-fund-bunny">
@@ -1281,7 +1330,7 @@
   <script type="module" src="js/panel-equalizers.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/top-ten-live-meter.mjs?v=20261025-seamless-handoff"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261123-supporter-queue';
+    import { initPayroll } from './js/payroll.js?v=20261124-admin-funds';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
   <script type="module">

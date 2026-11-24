@@ -75,7 +75,7 @@ implementation alone; the owner performs the operations below.
    and `estimatedDurationMs` (null means unknown). Pinata/checkpoint persistence
    must be working. An empty eligible pool is valid but will use ordinary rotation.
 3. **Owner schedules the hour:** reload the site, connect the authorized owner
-   wallet, open **Admin → Radio Programming**, refresh, then choose **Event type:
+   wallet, open **Left ankh → Admin Community Calendar**, refresh, then choose **Event type:
    Playlist show** and **Playlist definition: Songs Awaiting Your Vote — no votes
    ever**. Title: **Songs Awaiting Your Vote**. Set **Starts (New York time)** to
    **2026-10-22 21:00** and **Ends** to **2026-10-22 22:00**. Review the rule,

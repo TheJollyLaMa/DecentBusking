@@ -18,6 +18,7 @@ export function defaultSettlementFundMetadata(slug) {
   const fundSlug = validateSettlementFundSlug(slug);
   const name = fundSlug.split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
   const purposes = {
+    'dbusk-referrals': 'Funds published musician-referral campaigns and their approved rewards. ETH and USDC remain separate; campaign budgets are reserved only when a campaign is published. Owner-managed and recoverable, not contributor-withdrawable escrow.',
     'dbusk-live-performers': 'Live performer fees: earmarked, NOT escrowed. The admin can recoverFund. Booking terms and decisions are published per dated occurrence.',
     'dbusk-promotionals': 'Owner-reviewed promotional rewards for approved participation and referral campaigns. Earmarked, not escrowed; separate from artist and development payroll.',
     'dbusk-playback': 'USDC allocation for eligible artist payouts from completed, audible DecentBusking radio plays.',
@@ -26,7 +27,7 @@ export function defaultSettlementFundMetadata(slug) {
     'dbusk-pinners': 'USDC allocation for community pinning rewards after the approved availability checks and eligibility rules are implemented.',
   };
   return {
-    name,
+    name: fundSlug === 'dbusk-referrals' ? 'Musician referrals' : name,
     description: purposes[fundSlug] || `Dedicated Base settlement allocation for ${name}. Deposits and payouts use the DecentBusking owner-reviewed settlement workflow.`,
   };
 }

@@ -19,14 +19,14 @@ export function discoveredFund(metadata, { fundId, routerAddress, ethers }) {
     earningRules: metadata.earningRules?.trim() || '' };
 }
 
-export async function discoverAdditionalFunds({ records, knownIds, routerAddress, ethers,
+export async function discoverAdditionalFunds({ records, knownIds, routerAddress, ethers, includeInactive = false,
   readMetadata = uri => fetchIpfsJson(uri, {
     primaryGateway: globalThis.window?.DecentConfig?.ipfsGateway,
     timeoutMs: 2000,
     fetchImpl: (url, options) => fetch(url, { ...options, credentials: 'omit', referrerPolicy: 'no-referrer' }),
   }), onWarning = message => console.warn('[fund-discovery]', message) }) {
   const reads = new Map();
-  const funds = await Promise.all(records.filter(record => record.exists && record.active && !knownIds.has(record.fundId)).map(async record => {
+  const funds = await Promise.all(records.filter(record => record.exists && (includeInactive || record.active) && !knownIds.has(record.fundId)).map(async record => {
     const uri = record.metadataUri;
     try {
       const url = new URL(uri);
