@@ -311,7 +311,7 @@ function renderBreakdown(details, fund, fundState) {
   note.textContent = fundState?.ready === false
     ? `History indexing${fundState?.lastError ? ` paused: ${fundState.lastError}` : '…'}`
     : details.historyAvailable
-      ? (details.reconciles ? 'History reconciles against the on-chain balance.' : 'History loaded, but the totals do not fully reconcile yet.')
+      ? (details.reconciles ? '' : 'History loaded, but the totals do not fully reconcile yet.')
       : `${details.error?.message || 'Breakdown unavailable'}, try again shortly.`;
   body.innerHTML = `
     ${renderFundPendingTable(details.currentWeek === currentPayrollPeriod().week ? details.pendingRows : null, { fundSlug: fund.slug, week: currentPayrollPeriod().week })}
