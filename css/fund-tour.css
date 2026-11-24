@@ -172,6 +172,20 @@
 .fund-chart-legend li:has(.fund-chart-dot) strong { grid-column: 3; }
 .fund-chart-pie { width: min(230px,80%); aspect-ratio: 1; margin: -5px auto; border-radius: 50%; transform: perspective(600px) rotateX(32deg); box-shadow: 0 9px #172536,0 13px #101823,0 22px 28px #0009; border: 1px solid #ffffff44; }
 .fund-chart-empty { text-align: center; color: #bac5d2; font-size: .85rem; }
+#fund-contribution #fund-guide-launch { border: 0; background: transparent; padding: 2px 6px; font-size: 1.7rem; cursor: pointer; }
+#fund-guide-launch:disabled { opacity: .4; }
+.fund-guide-overlay { position: fixed; inset: 0; z-index: 1000; }
+.fund-guide-shade { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: auto; }
+.fund-guide-rabbit { position: fixed; font-size: 2.5rem; filter: drop-shadow(0 0 15px #e7d28b); pointer-events: none; }
+.fund-guide-card { box-sizing: border-box; position: fixed; bottom: max(16px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: min(440px, calc(100vw - 32px)); max-height: 48dvh; overflow-y: auto; padding: 20px; border: 1px solid #e7d28b88; border-radius: 22px; background: linear-gradient(135deg,#102c37,#2a1d37); box-shadow: 0 15px 65px #000b; color: #f3f0ff; }
+.fund-guide-card h3 { color: #ffe3a9; font-size: 1.15rem; margin: 8px 0; }
+.fund-guide-card h4 { color: #91ddd3; font-size: .85rem; margin: 16px 0 6px; }
+.fund-guide-card p { margin: 8px 0; font-size: .85rem; line-height: 1.6; }
+.fund-guide-card .fund-guide-count { color: #c5b7df; font-size: .72rem; }
+.fund-guide-card > div { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.fund-guide-card button { padding: 9px 12px; border: 1px solid #91ddd355; border-radius: 12px; color: #e4fff5; background: #193744; cursor: pointer; }
+.fund-guide-card button:disabled { opacity: .4; cursor: default; }
+.fund-guide-card [data-guide-next] { color: #172430; background: #e7d28b; }
 #fund-contribution-dialog.fund-receipt-open { width: min(1050px,96vw); }
 #fund-contribution-receipt { position: sticky; bottom: 0; padding: 22px; background: #101929f5; border: 1px solid #91ddd355; border-radius: 18px; box-shadow: -16px 0 40px #0005; overflow-wrap: anywhere; }
 #fund-contribution-receipt h4 { color: #ffe3a9; font-size: 1.15rem; }

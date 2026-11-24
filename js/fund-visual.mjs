@@ -14,7 +14,7 @@ export function renderFundBalanceChart(rows, view = 'bars') {
     boundary = total ? Number(cumulative * 1000000n / total) / 10000 : 0;
     return `${COLORS[index % COLORS.length]} ${start}% ${boundary}%`;
   });
-  const bars = rows.map((row, index) => `<li style="--fund-color:${COLORS[index % COLORS.length]};--fund-width:${maximum ? Number(amounts[index] * 10000n / maximum) / 100 : 0}%">
+  const bars = rows.map((row, index) => `<li data-fund-chart-slug="${escapeHtml(row.slug || '')}" style="--fund-color:${COLORS[index % COLORS.length]};--fund-width:${maximum ? Number(amounts[index] * 10000n / maximum) / 100 : 0}%">
     <span class="fund-chart-name">${escapeHtml(row.label)}</span>
     ${view === 'bars' ? `<span class="fund-chart-track" aria-hidden="true">${amounts[index] ? '<span class="fund-chart-bar"></span>' : ''}</span>` : '<span class="fund-chart-dot" aria-hidden="true"></span>'}
     <strong>${escapeHtml(row.amountText)}</strong></li>`).join('');

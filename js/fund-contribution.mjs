@@ -1,9 +1,11 @@
 import { ensureBaseNetwork, getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
-import { BASE_USDC_ADDRESS, configuredSettlementFunds, depositSettlementUsdc } from './settlement-funds.mjs?v=20261019-fund-tour';
+import { BASE_USDC_ADDRESS, configuredSettlementFunds, depositSettlementUsdc, isSettlementFundSlug } from './settlement-funds.mjs?v=20261124-fund-bunny';
 import { escapeHtml } from './fund-display.mjs?v=20261124-lazy-funds';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { REFERRALS_FUND, CAMPAIGN_ASSETS } from './promotions.mjs?v=20261126-eth-gifts';
-import { renderFundBalanceChart } from './fund-visual.mjs?v=20261124-verified-funds';
+import { renderFundBalanceChart } from './fund-visual.mjs?v=20261124-fund-bunny';
+import { discoverAdditionalFunds } from './fund-discovery.mjs?v=20261124-fund-bunny';
+import { initFundGuide } from './fund-guide.mjs?v=20261124-fund-bunny';
 
 const DEFAULT_FUNDS = { radioFunds: { playback: 'dbusk-playback', topTen: 'dbusk-top10' },
   fundSlug: 'dbusk-repo-dev', pinnerFundSlug: 'dbusk-pinners',
@@ -13,11 +15,11 @@ export function contributionFunds(config = globalThis.window?.DecentConfig || DE
     radioFunds: { ...DEFAULT_FUNDS.radioFunds, ...config.radioFunds } }),
   { slug: REFERRALS_FUND, label: 'Referrals' }];
 }
-const allowedFund = slug => contributionFunds().some(fund => fund.slug === slug);
 export const SETTLEMENT_ROUTER_ADDRESS = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';
 const ROUTER_ABI = [
   'function paused() view returns(bool)',
   'function funds(bytes32) view returns(string metadataUri,bool active,bool exists)',
+  'function allFundIds() view returns(bytes32[])',
   'function fundBalances(bytes32,address) view returns(uint256)',
   'function approvedAssets(address) view returns(bool)',
   'function fundToken(bytes32,address,uint256)',
@@ -33,20 +35,32 @@ const TOKEN_ABI = [
 const same = (first, second) => typeof first === 'string' && typeof second === 'string' &&
   first.toLowerCase() === second.toLowerCase();
 
-export async function loadContributionFunds({ ethers = globalThis.window?.ethers, router, config } = {}) {
+export async function loadContributionFunds({ ethers = globalThis.window?.ethers, router, config, readMetadata,
+  onUpdate = () => {}, onWarning } = {}) {
   if (!ethers) throw new Error('Fund reader is not ready. Refresh and try again');
   router ||= new ethers.Contract(SETTLEMENT_ROUTER_ADDRESS, ROUTER_ABI, getBaseReadProvider({ ethers }));
-  const funds = await Promise.all(contributionFunds(config).map(async fund => {
+  const ids = await router.allFundIds();
+  const records = await Promise.all(ids.map(async fundId => {
+    const record = await router.funds(fundId);
+    return { fundId, metadataUri: record.metadataUri, exists: record.exists, active: record.active };
+  }));
+  const byId = new Map(records.map(record => [record.fundId, record]));
+  const candidates = contributionFunds(config);
+  const withBalance = async fund => {
     const id = ethers.id(fund.slug);
-    const record = await router.funds(id);
-    if (!record.exists || !record.active) return null;
+    const record = byId.get(id);
+    if (!record?.exists || !record.active) return null;
     const [balance, nativeBalance] = await Promise.all([
       router.fundBalances(id, BASE_USDC_ADDRESS),
       acceptsEth(fund.slug) ? router.fundBalances(id, CAMPAIGN_ASSETS.eth.address) : 0n,
     ]);
     return { ...fund, balanceUnits: balance.toString(), nativeBalanceUnits: nativeBalance.toString() };
-  }));
-  return funds.filter(Boolean);
+  };
+  const funds = (await Promise.all(candidates.map(withBalance))).filter(Boolean);
+  onUpdate(funds);
+  const additional = await discoverAdditionalFunds({ records, knownIds: new Set(candidates.map(fund => ethers.id(fund.slug))),
+    routerAddress: SETTLEMENT_ROUTER_ADDRESS, ethers, readMetadata, onWarning });
+  return [...funds, ...await Promise.all(additional.map(withBalance))].filter(Boolean);
 }
 
 let openContributions;
@@ -63,7 +77,7 @@ function contributionAsset(asset) {
 
 export function acceptsEth(slug) {
   const config = globalThis.window?.DecentConfig || DEFAULT_FUNDS;
-  return allowedFund(slug) && ![config.radioFunds?.playback || DEFAULT_FUNDS.radioFunds.playback,
+  return isSettlementFundSlug(slug) && ![config.radioFunds?.playback || DEFAULT_FUNDS.radioFunds.playback,
     config.radioFunds?.topTen || DEFAULT_FUNDS.radioFunds.topTen].includes(slug);
 }
 
@@ -80,7 +94,7 @@ export function contributionUnits(value, asset = 'usdc') {
 
 export function contributionJournalKey(address, slug, asset = 'usdc') {
   contributionAsset(asset);
-  if (!/^0x[0-9a-f]{40}$/i.test(address || '') || !allowedFund(slug)) throw new Error('Invalid contribution wallet or fund');
+  if (!/^0x[0-9a-f]{40}$/i.test(address || '') || !isSettlementFundSlug(slug)) throw new Error('Invalid contribution wallet or fund');
   if (asset === 'eth' && !acceptsEth(slug)) throw new Error('Top10 and Playback accept USDC only');
   return `decentbusking:fund-contribution:8453:${SETTLEMENT_ROUTER_ADDRESS.toLowerCase()}:${address.toLowerCase()}:${slug}${asset === 'eth' ? ':eth' : ''}`;
 }
@@ -100,7 +114,7 @@ export function contributionPlan(amount, shares, { asset = 'usdc', mode = 'perce
   const seen = new Set();
   let totalBps = 0;
   const legs = shares.map(({ slug, percent, amount: legAmount }) => {
-    if (!allowedFund(slug) || seen.has(slug)) throw new Error('Select each configured fund at most once');
+    if (!isSettlementFundSlug(slug) || seen.has(slug)) throw new Error('Select each valid fund at most once');
     if (asset === 'eth' && !acceptsEth(slug)) throw new Error('Top10 and Playback accept USDC only');
     seen.add(slug);
     if (mode === 'amount') return { slug, amountUnits: /^0(?:\.0+)?$/.test(String(legAmount)) ? 0n : contributionUnits(legAmount, asset) };
@@ -331,8 +345,9 @@ export function createContributionController({ storage, ethers, deposit = deposi
   function recovery(address) {
     if (!/^0x[0-9a-f]{40}$/i.test(address || '')) throw new Error('Connect your wallet to view its saved contribution receipts');
     const split = JSON.parse(storage.getItem(splitKey(address)) || 'null');
-    const operations = contributionFunds().flatMap(fund => ['usdc', ...(acceptsEth(fund.slug) ? ['eth'] : [])].flatMap(asset => {
-      const operation = JSON.parse(storage.getItem(contributionJournalKey(address, fund.slug, asset)) || 'null');
+    const candidates = [...new Set([...contributionFunds().map(fund => fund.slug), ...(split?.legs || []).map(leg => leg.slug)])];
+    const operations = candidates.flatMap(slug => ['usdc', ...(acceptsEth(slug) ? ['eth'] : [])].flatMap(asset => {
+      const operation = JSON.parse(storage.getItem(contributionJournalKey(address, slug, asset)) || 'null');
       return operation ? [{ ...operation, asset }] : [];
     }));
     return { split, operations };
@@ -366,7 +381,7 @@ export function initFundContributions({ loadFunds = loadContributionFunds } = {}
     if (!verified) { chart.textContent = 'Verified balances will appear here.'; return; }
     chart.innerHTML = renderFundBalanceChart(funds.filter(fund => chartAsset === 'usdc' || acceptsEth(fund.slug)).map(fund => {
       const units = chartAsset === 'usdc' ? fund.balanceUnits : fund.nativeBalanceUnits;
-      return { label: fund.label, units, amountText: chartAsset === 'usdc'
+      return { slug: fund.slug, label: fund.label, units, amountText: chartAsset === 'usdc'
         ? `$${formatUsdcUnits(units)} USDC` : `${contributionAmount(units, 'eth')} ETH` };
     }), chartView);
   };
@@ -456,35 +471,62 @@ export function initFundContributions({ loadFunds = loadContributionFunds } = {}
   for (const event of ['input', 'change']) form.addEventListener(event, invalidateReview);
   updatePreview();
   const contributionDialog = document.getElementById('fund-contribution-dialog');
+  let guideAsset;
+  initFundGuide({ dialog: contributionDialog, getFunds: () => funds,
+    onStart: () => {
+      guideAsset = chartAsset;
+      document.querySelector('[data-fund-chart-asset="usdc"]').click();
+    },
+    onStop: () => document.querySelector(`[data-fund-chart-asset="${guideAsset}"]`).click(),
+  });
+  const applyFunds = next => {
+    const selected = slugInput.dataset.preferredFund || slugInput.value;
+    delete slugInput.dataset.preferredFund;
+    const percentages = new Map([...form.querySelectorAll('[data-fund-split]')].map(input => [`${input.dataset.fundSplit}:${input.dataset.asset}`, input.value]));
+    funds = next;
+    slugInput.innerHTML = '<option value="">Choose a fund</option>' +
+      funds.map(fund => `<option value="${escapeHtml(fund.slug)}">${escapeHtml(fund.label)} — $${formatUsdcUnits(fund.balanceUnits)} USDC${acceptsEth(fund.slug) ? ` · ${contributionAmount(fund.nativeBalanceUnits, 'eth')} ETH` : ''}</option>`).join('') +
+      (funds.length ? '<option value="__split__">✨ Custom split</option>' : '');
+    slugInput.value = available(selected) || selected === '__split__' && funds.length ? selected : '';
+    renderSplits(percentages);
+    loadedAt = Date.now();
+    verified = true;
+    renderChart();
+    document.getElementById('fund-guide-launch').disabled = working || !funds.length;
+    balancesNote.textContent = funds.length ? 'Current on-chain balances · checked just now. Top10 and Playback accept USDC only.'
+      : 'No active contribution funds are available right now.';
+    updatePreview();
+    updateAvailability();
+  };
   const refreshFunds = () => {
     if (pending) return pending;
     if (verified && Date.now() - loadedAt < 15000) return Promise.resolve();
     verified = false;
+    document.getElementById('fund-guide-launch').disabled = true;
     updateAvailability();
     balancesNote.textContent = 'Checking active funds and balances on Base…';
     retry.hidden = true;
-    pending = loadFunds().then(next => {
-      const selected = slugInput.dataset.preferredFund || slugInput.value;
-      delete slugInput.dataset.preferredFund;
-      const percentages = new Map([...form.querySelectorAll('[data-fund-split]')].map(input => [`${input.dataset.fundSplit}:${input.dataset.asset}`, input.value]));
-      funds = next;
-      slugInput.innerHTML = '<option value="">Choose a fund</option>' +
-        funds.map(fund => `<option value="${escapeHtml(fund.slug)}">${escapeHtml(fund.label)} — $${formatUsdcUnits(fund.balanceUnits)} USDC${acceptsEth(fund.slug) ? ` · ${contributionAmount(fund.nativeBalanceUnits, 'eth')} ETH` : ''}</option>`).join('') +
-        (funds.length ? '<option value="__split__">✨ Custom split</option>' : '');
-      slugInput.value = available(selected) || selected === '__split__' && funds.length ? selected : '';
-      renderSplits(percentages);
-      loadedAt = Date.now();
-      verified = true;
-      renderChart();
-      balancesNote.textContent = funds.length ? 'Current on-chain balances · checked just now. Top10 and Playback accept USDC only.'
-        : 'No active contribution funds are available right now.';
-      updatePreview();
+    const warnings = new Set();
+    pending = loadFunds({ onUpdate: applyFunds, onWarning: message => {
+      console.warn('[fund-discovery]', message);
+      warnings.add(message);
+    } }).then(next => {
+      applyFunds(next);
+      if (warnings.size) {
+        balancesNote.textContent += ` ${[...warnings].join(' ')}`;
+        retry.hidden = false;
+      }
     }).catch(error => {
       console.warn('[fund-contribution] Fund verification failed:', error);
+      verified = false;
+      loadedAt = 0;
+      funds = [];
+      invalidateReview();
       slugInput.innerHTML = '<option value="">Funds could not be verified</option>';
       if (splitInputs) splitInputs.replaceChildren();
       balancesNote.textContent = `Unable to verify fund balances: ${error.message}. No contribution can be sent until verification succeeds.`;
       retry.hidden = false;
+      document.getElementById('fund-guide-launch').disabled = true;
       renderChart();
       updatePreview();
     }).finally(() => { pending = null; updateAvailability(); });
@@ -503,7 +545,16 @@ export function initFundContributions({ loadFunds = loadContributionFunds } = {}
     updateRecovery();
   };
   document.getElementById('fund-us-button')?.addEventListener('click', openContributions);
-  retry.addEventListener('click', refreshFunds);
+  retry.addEventListener('click', () => { loadedAt = 0; refreshFunds(); });
+  document.addEventListener('settlement-fund-created', event => {
+    if (!same(event.detail?.routerAddress, SETTLEMENT_ROUTER_ADDRESS)) return;
+    const refresh = () => {
+      loadedAt = 0;
+      if (contributionDialog.open) refreshFunds();
+    };
+    if (pending) pending.then(refresh);
+    else refresh();
+  });
   document.addEventListener('fund-contribution-confirmed', () => {
     loadedAt = 0;
     if (contributionDialog.open) refreshFunds();
