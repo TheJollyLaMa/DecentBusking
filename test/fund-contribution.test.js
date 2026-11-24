@@ -72,7 +72,7 @@ test('custom percentages allocate every micro-USDC and reject invalid or dust sp
   assert.equal(plan.reduce((sum, leg) => sum + BigInt(leg.amountUnits), 0n), 1000001n);
   assert.equal(contributionAmount(333401n), '0.333401');
   assert.throws(() => contributionPlan('5', [{ slug: 'dbusk-top10', percent: '99' }]), /100%/);
-  assert.throws(() => contributionPlan('5', [{ slug: 'unknown', percent: '100' }]), /configured/);
+  assert.throws(() => contributionPlan('5', [{ slug: 'bad--slug', percent: '100' }]), /valid fund/);
   assert.throws(() => contributionPlan('5', [
     { slug: 'dbusk-top10', percent: '50' }, { slug: 'dbusk-top10', percent: '50' },
   ]), /at most once/);
@@ -150,7 +150,7 @@ test('a second unresolved deposit is blocked across reload and isolated by walle
   assert.equal(value.calls.length, 2);
   assert.notEqual(value.key, value.contributionJournalKey(value.address, 'dbusk-top10'));
   assert.notEqual(value.key, value.contributionJournalKey(`0x${'5'.repeat(40)}`, value.slug));
-  assert.throws(() => value.contributionJournalKey(value.address, 'not-a-configured-fund'), /Invalid/);
+  assert.throws(() => value.contributionJournalKey(value.address, 'bad--slug'), /Invalid/);
 });
 
 test('pending deposits require exact fund, token, sender, amount and token-transfer proofs', async () => {
@@ -234,6 +234,7 @@ test('only created active funds are offered, including empty funds, with balance
   ]);
   const reads = [];
   const router = {
+    allFundIds: async () => [...balances.keys(), ethers.id('dbusk-top10')],
     funds: async id => ({ exists: balances.has(id) || id === ethers.id('dbusk-top10'), active: balances.has(id) }),
     fundBalances: async (id, asset) => { reads.push(id); return asset === BASE_USDC_ADDRESS ? balances.get(id) : 1n; },
   };
@@ -259,6 +260,93 @@ test('ETH uses exact wei, amount splits match independent totals, and radio fund
   }
   assert.notEqual(contributionJournalKey(address, 'dbusk-repo-dev'), contributionJournalKey(address, 'dbusk-repo-dev', 'eth'));
   assert.throws(() => contributionUnits('0.0000000000000000001', 'eth'), /18/);
+});
+
+test('registry discovery progressively includes a new verified Busking fund, never another project or an inactive fund', async () => {
+  const { loadContributionFunds, SETTLEMENT_ROUTER_ADDRESS } = await fixture();
+  const slug = 'community-studio';
+  const metadata = { schema: 'decentbusking/settlement-fund/v1', fundSlug: slug, fundId: ethers.id(slug),
+    name: '<Studio & friends>', description: 'Support rehearsals.', earningRules: 'Apply for an approved rehearsal.',
+    chainId: 8453, routerAddress: SETTLEMENT_ROUTER_ADDRESS };
+  const records = new Map([
+    [ethers.id('dbusk-playback'), ['https://example.test/known', true, true]],
+    [ethers.id(slug), ['ipfs://studio', true, true]],
+    [ethers.id('foreign-one'), ['ipfs://foreign', true, true]],
+    [ethers.id('foreign-two'), ['ipfs://foreign', true, true]],
+    [ethers.id('dbusk-inactive'), ['ipfs://inactive', false, true]],
+  ]);
+  const reads = [], updates = [], warnings = [];
+  const router = {
+    allFundIds: async () => [...records.keys()],
+    funds: async id => ethers.Result.fromItems(records.get(id), ['metadataUri', 'active', 'exists']),
+    fundBalances: async () => 0n,
+  };
+  const funds = await loadContributionFunds({ ethers, router, onUpdate: rows => updates.push(rows),
+    onWarning: warning => warnings.push(warning), readMetadata: async uri => {
+      assert.deepEqual(updates[0].map(fund => fund.slug), ['dbusk-playback']);
+      reads.push(uri);
+      return uri === 'ipfs://studio' ? metadata : { schema: 'another-project/v1', name: 'Foreign' };
+    } });
+  assert.deepEqual(funds.map(fund => fund.slug), ['dbusk-playback', slug]);
+  assert.equal(funds[1].earningRules, metadata.earningRules);
+  const { contributionPlan } = await fixture();
+  assert.equal(contributionPlan('1', [{ slug: funds[1].slug, percent: '100' }])[0].slug, slug);
+  assert.deepEqual(reads, ['ipfs://studio', 'ipfs://foreign']);
+  assert.deepEqual(warnings, []);
+});
+
+test('unreadable or mismatched fund metadata reports incomplete discovery, preserving known balances and retrying next time', async () => {
+  const { loadContributionFunds, SETTLEMENT_ROUTER_ADDRESS } = await fixture();
+  const known = ethers.id('dbusk-playback'), custom = ethers.id('dbusk-new');
+  const warnings = [];
+  const router = { allFundIds: async () => [known, custom],
+    funds: async id => ({ metadataUri: `ipfs://${id}`, active: true, exists: true }), fundBalances: async () => 12n };
+  let attempts = 0;
+  for (const metadata of [null, { schema: 'decentbusking/settlement-fund/v1', fundSlug: 'dbusk-new',
+    fundId: custom, chainId: 8453, routerAddress: `0x${'9'.repeat(40)}`, name: 'Wrong router', description: 'Mismatch' }]) {
+    const funds = await loadContributionFunds({ ethers, router, readMetadata: async () => { attempts++; return metadata; },
+      onWarning: warning => warnings.push(warning) });
+    assert.deepEqual(funds.map(fund => [fund.slug, fund.balanceUnits]), [['dbusk-playback', '12']]);
+  }
+  assert.equal(attempts, 2);
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /may be missing/);
+  assert.match(warnings[1], /does not match/);
+  const { discoveredFund } = await import('../js/fund-discovery.mjs');
+  const valid = { schema: 'decentbusking/settlement-fund/v1', fundSlug: 'dbusk-new', fundId: custom,
+    chainId: 8453, routerAddress: SETTLEMENT_ROUTER_ADDRESS, name: 'New', description: 'Purpose' };
+  for (const change of [{ chainId: 1 }, { fundId: known }, { schema: 'other/v1' }, { earningRules: {} }]) {
+    assert.throws(() => discoveredFund({ ...valid, ...change }, { fundId: custom, routerAddress: SETTLEMENT_ROUTER_ADDRESS, ethers }));
+  }
+});
+
+test('a newly discovered fund retains uncertain ETH receipt recovery across reload without resending', async () => {
+  const value = await fixture(), slug = 'community-studio';
+  const amountUnits = '1000000000000000';
+  const key = value.contributionJournalKey(value.address, slug, 'eth');
+  const planKey = `decentbusking:fund-split:8453:${value.SETTLEMENT_ROUTER_ADDRESS.toLowerCase()}:${value.address.toLowerCase()}`;
+  value.storage.setItem(planKey, JSON.stringify({ address: value.address,
+    legs: [{ slug, asset: 'eth', amountUnits, status: 'pending', txHash: '' }] }));
+  value.storage.setItem(key, JSON.stringify({ address: value.address, slug, asset: 'eth', amountUnits, stage: 'deposit', txHash: value.hash }));
+  value.setReceipt({ status: 1, logs: [
+    value.log('FundFunded', [ethers.id(slug), ethers.ZeroAddress, value.address, amountUnits], value.SETTLEMENT_ROUTER_ADDRESS),
+  ] });
+  const restored = value.createContributionController({ storage: value.storage, ethers });
+  assert.equal(restored.recovery(value.address).operations[0].slug, slug);
+  await restored.check({ signer: value.signer, slug, asset: 'eth' });
+  assert.equal(JSON.parse(value.storage.getItem(planKey)).legs[0].status, 'confirmed');
+  assert.deepEqual(value.calls, []);
+});
+
+test('bunny copy distinguishes inactive rewards and unpublished rules; chart identities and labels remain escaped', async () => {
+  const { fundGuideCopy } = await import('../js/fund-guide.mjs');
+  const { renderFundBalanceChart } = await import('../js/fund-visual.mjs');
+  assert.match(fundGuideCopy({ slug: 'dbusk-pinners' }).earning, /not active/);
+  assert.match(fundGuideCopy({ slug: 'dbusk-new' }).earning, /No earning schedule/);
+  assert.equal(fundGuideCopy({ slug: 'dbusk-new', description: 'Purpose', earningRules: 'Published terms' }).earning, 'Published terms');
+  const html = renderFundBalanceChart([{ slug: 'dbusk-new', label: '<img onerror=alert(1)>', units: '1', amountText: '$0.01' }]);
+  assert.match(html, /data-fund-chart-slug="dbusk-new"/);
+  assert.ok(!html.includes('<img'));
 });
 
 test('native contribution proof requires the exact native FundFunded event, not an unrelated USDC receipt', async () => {

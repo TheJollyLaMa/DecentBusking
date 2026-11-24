@@ -37,10 +37,20 @@ available for both income and payouts; an allocation is not proof of payment.
 The centered **Fund Us** button and About's matching button open the same
 contribution modal. Opening About no longer fetches the complete ledger or
 resolves its wallets. Fund Us lazily reads the Base router through the shared
-public-first read provider: only configured candidate funds (including
-`dbusk-referrals`) that actually exist and are active appear. Results are shared
-for 15 seconds and refreshed after contributions. Failed reads show an explicit
-retry state and disable new contributions, never invent zero balances.
+public-first read provider. Existing active funds render first; the router's
+`allFundIds` registry then supplies additional funds whose public metadata matches
+the `decentbusking/settlement-fund/v1` schema, slug/hash, Base chain,
+router address and fund ID. Other projects sharing the router are excluded.
+Names and descriptions render as text, not markup. Metadata outages or identity
+mismatches show an incomplete-discovery warning and retry action without hiding
+verified balances. Discovery runs on opening/refreshing, not a background chain
+scan; confirming a new fund in this app invalidates the cache and refreshes an
+open popup. Results are otherwise shared for 15 seconds and refreshed after
+contributions. Failed registry/balance reads disable new contributions and show
+an explicit retry state, never invent zero balances.
+Custom purpose slugs do not need a `dbusk-` prefix: this preserves the existing
+fund creator. The app-specific schema and matching on-chain identity establish
+which project's fund it is, not a cosmetic name prefix.
 
 The switchable 3D-style bar/pie visual shows current total balances, not weekly
 spendable budgets or fundraising targets. ETH and USDC have separate views and
@@ -49,6 +59,17 @@ active funds offer both USDC and native ETH. ETH is not converted into USDC and
 does not increase USDC payroll budgets. The information button explains funding
 sources and how to inspect weekly income/payout proofs and router events.
 USDC quick fills are 1, 2, 3, 5, 8, 13, 21, 108 and 1234.
+
+The icon-only bunny walks through every displayed fund, spotlighting its chart
+row with purpose and participation guidance. Back/Next/Finish, Escape, keyboard
+focus containment and reduced-motion support are included. The guide temporarily
+shows USDC so every fund is represented, then restores the prior currency. It
+does not connect a wallet, fill contribution amounts or request transactions.
+Only Playback/Top10 describe weekly artist allocations; work/booking/campaign
+funds follow their own approvals, and public pinner rewards remain inactive.
+New funds use their metadata `description` and optional text `earningRules`
+(up to 2000 characters); missing rules explicitly make no weekly reward promise.
+Newly discovered funds enter the chart, selector, splits and guide together.
 
 Each currency has a separate total. Custom splits use either percentages that
 total 100% per currency, or exact amounts that sum to that currency's total.
@@ -71,6 +92,10 @@ journal, [fund-archive.mjs](../js/fund-archive.mjs), and ArtFi's existing
 `ArtFiSettlementRouter.fundNative` path already used by the referral editor.
 No new contract or fund is created. The renderer uses CSS depth and conic
 gradients, not a new chart dependency.
+The fund guide adapts the existing [fund-tour.mjs](../js/fund-tour.mjs)
+top-layer spotlight/bunny, keyboard and reduced-motion patterns. Discovery uses
+ArtFi's existing `ArtFiSettlementRouter.allFundIds` registry (commit `843e770`),
+with Busking-specific metadata checks rather than displaying all shared funds.
 
 Select an existing active fund in Settlements Router, enter the deposit amount, and confirm the deposit action. The app verifies native Base USDC, six decimals, asset approval, wallet balance, and Base network. It requests an ERC-20 approval only if the current allowance is insufficient, for the exact intended amount rather than an unlimited allowance; then it requests the `fundToken` transaction. Approval is not a deposit. Depositing into a fund is not an artist payout.
 

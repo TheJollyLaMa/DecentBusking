@@ -26,6 +26,24 @@ test('fund creation requires owner, Base, router admin, metadata, and confirmed 
   assert.equal(options.sent(), 1);
 });
 
+test('only confirmed new fund creation notifies open fund panels to discover it', async () => {
+  const { createConfiguredSettlementFund } = await import(url);
+  const previous = globalThis.document;
+  const events = [];
+  globalThis.document = { dispatchEvent: event => events.push(event) };
+  try {
+    const options = fixture();
+    await createConfiguredSettlementFund(options);
+    await createConfiguredSettlementFund(options);
+    assert.deepEqual(events.map(event => [event.type, event.detail]), [
+      ['settlement-fund-created', { routerAddress: options.router.target, fundId: options.fundId }],
+    ]);
+  } finally {
+    if (previous === undefined) delete globalThis.document;
+    else globalThis.document = previous;
+  }
+});
+
 test('fund preflight rejects wrong owners, chains, roles, addresses, and URI without a transaction', async () => {
   const { createConfiguredSettlementFund } = await import(url);
   for (const modify of [

@@ -68,7 +68,9 @@
       "./js/mint.js?v=20261030-ad-cutoff":"./js/mint.js?v=20261125-inviter",
       "./js/fund-display.mjs?v=20261024-djuke-labels":"./js/fund-display.mjs?v=20261124-visible-payments",
       "./js/fund-display.mjs?v=20261124-lazy-funds":"./js/fund-display.mjs?v=20261124-visible-payments",
-      "./js/fund-display.mjs":"./js/fund-display.mjs?v=20261124-visible-payments"
+      "./js/fund-display.mjs":"./js/fund-display.mjs?v=20261124-visible-payments",
+      "./js/settlement-funds.mjs":"./js/settlement-funds.mjs?v=20261124-fund-bunny",
+      "./js/settlement-funds.mjs?v=20261116-promotions":"./js/settlement-funds.mjs?v=20261124-fund-bunny"
     }}
   </script>
   <link rel="stylesheet" href="css/radio-programming.css?v=20261126-eth-gifts" />
@@ -428,6 +430,7 @@
               <button type="button" data-fund-chart-asset="eth" aria-pressed="false">Ξ ETH</button>
             </div>
             <button id="fund-chart-toggle" type="button" aria-label="Show pie chart">◉ Pie view</button>
+            <button id="fund-guide-launch" type="button" aria-label="Let the bunny explain each fund" title="Let the bunny explain each fund" disabled>🐇</button>
             <button id="fund-receipts-open" type="button">🧾 Receipts</button>
           </div>
           <div id="fund-balance-chart" aria-live="polite"></div>
@@ -1223,7 +1226,7 @@
   </div>
 
   <!-- Override about-modal BEFORE CDN header so DecentBusking listings are shown -->
-  <script type="module" src="js/components/about-override.js?v=20261124-verified-funds"></script>
+  <script type="module" src="js/components/about-override.js?v=20261124-fund-bunny"></script>
 
   <!-- Override right-ankh BEFORE CDN header so the OMMM token code never runs -->
   <script type="module" src="js/components/header-right-ankh-override.js?v=20261025-header-compat"></script>
@@ -1259,8 +1262,8 @@
   <script type="module" src="js/payroll.js?v=20261123-supporter-queue"></script>
   <script type="module" src="js/radio-history.js?v=20261029-tally-sections"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261122-musician-referral"></script>
-  <link rel="stylesheet" href="css/fund-tour.css?v=20261124-verified-funds">
-  <script type="module" src="js/fund-header.mjs?v=20261124-verified-funds"></script>
+  <link rel="stylesheet" href="css/fund-tour.css?v=20261124-fund-bunny">
+  <script type="module" src="js/fund-header.mjs?v=20261124-fund-bunny"></script>
   <script type="module" src="js/fund-tour.mjs?v=20261124-visible-payments"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261123-song-splits"></script>
   <script type="module" src="js/djuke.mjs?v=20261112-playlist-continuity"></script>

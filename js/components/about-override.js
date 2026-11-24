@@ -7,7 +7,7 @@ import { formatUsdcUnits } from '../usdc-format.mjs?v=20261017-mercury-release';
 // replaces it with a DecentBusking-specific version.
 //
 import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261123-split-admin-pies';
-import { openFundContributions } from '../fund-contribution.mjs?v=20261124-verified-funds';
+import { openFundContributions } from '../fund-contribution.mjs?v=20261124-fund-bunny';
 
 // The CDN AboutModal lists generic escrow listings. This override pins the
 // purchase card to the reviewed DecentBusking v1.0.0 Base listing in config.

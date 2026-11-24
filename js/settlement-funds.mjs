@@ -31,9 +31,14 @@ export function defaultSettlementFundMetadata(slug) {
   };
 }
 
+export function isSettlementFundSlug(value) {
+  return typeof value === 'string' && value.length >= 3 && value.length <= 64 &&
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value);
+}
+
 export function validateSettlementFundSlug(value) {
   const slug = String(value || '').trim().toLowerCase();
-  if (slug.length < 3 || slug.length > 64 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+  if (!isSettlementFundSlug(slug)) {
     throw new Error('Fund slug must be 3–64 lowercase letters/numbers with single hyphens');
   }
   return slug;
@@ -95,6 +100,9 @@ export async function createConfiguredSettlementFund({ router, signer, owner, fu
   if (receipt?.status !== 1) throw new Error('Fund creation was not confirmed successfully');
   const created = await router.funds(fundId);
   if (!(created.exists ?? created[2])) throw new Error('Transaction confirmed but the fund was not found; refresh before retrying');
+  if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('settlement-fund-created', {
+    detail: { routerAddress: router.target, fundId },
+  }));
   return { fundId, alreadyExists: false, txHash: transaction.hash };
 }
 
