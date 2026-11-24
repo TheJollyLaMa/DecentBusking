@@ -2766,6 +2766,29 @@ decent-foot {
 }
 .payroll-btn-secondary:hover { background: rgba(255,255,255,0.1); color: var(--text-primary); }
 
+/* Supporter tokens owed */
+.supporter-payroll { margin-top: 1.1rem; padding: 0.8rem 0.9rem; border-radius: 18px;
+  background: radial-gradient(circle at 12% 0%, rgba(255, 200, 80, 0.1), transparent 60%), rgba(255,255,255,0.03);
+  border: 1px solid rgba(255, 200, 80, 0.18); transition: box-shadow 0.4s ease; }
+.supporter-payroll.is-celebrating { box-shadow: 0 0 22px rgba(255, 200, 80, 0.45); }
+.supporter-payroll-head { display: flex; align-items: center; gap: 0.5rem; }
+.supporter-payroll-head h4 { margin: 0; font-family: var(--font-display); color: var(--gold); font-size: 0.95rem; }
+.supporter-payroll-count { font-size: 0.8rem; color: var(--text-dim); padding: 0.1rem 0.55rem; border-radius: 999px; background: rgba(255,255,255,0.06); }
+.supporter-payroll-info { margin-left: auto; cursor: help; color: var(--teal); }
+.supporter-payroll-list { list-style: none; margin: 0.6rem 0 0; padding: 0; display: grid; gap: 0.4rem; }
+.supporter-payroll-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.8rem; padding: 0.45rem 0.7rem;
+  border-radius: 999px; background: rgba(255,255,255,0.04); }
+.supporter-payroll-row.is-transfer-pending { animation: supporter-pending 1.6s ease-in-out infinite; }
+.supporter-payroll-who { font-weight: 600; }
+.supporter-payroll-what { font-size: 0.85rem; color: var(--text-dim); }
+.supporter-payroll-actions { margin-left: auto; display: flex; gap: 0.35rem; }
+.supporter-payroll-btn { border-radius: 999px; padding: 0.3rem 0.8rem; font-size: 0.82rem; }
+.supporter-payroll-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.supporter-payroll-status { margin: 0.45rem 0 0; }
+.supporter-payroll-status.is-error { color: #ff9999; }
+@keyframes supporter-pending { 50% { background: rgba(255, 200, 80, 0.1); } }
+@media (prefers-reduced-motion: reduce) { .supporter-payroll-row.is-transfer-pending { animation: none; } }
+
 /* Responsive */
 @media (max-width: 600px) {
   #payroll-modal-inner { padding: 1.2rem 1rem; }

@@ -335,3 +335,127 @@ test('gift payment recovery reconciles a journal hash and releases only a confir
   assert.deepEqual(actions[1], { action: 'release-gift-preparation', campaignId: campaign.id, giftId: award.id,
     wallet: award.wallet, confirmNoBroadcast: true, reason: 'Wallet history shows no broadcast' });
 });
+
+test('Supporter payroll sends one #75 from the admin wallet only after a journaled preparation, then settles', async t => {
+  const { createSupporterPayroll } = await import('../js/supporter-payroll.mjs');
+  const previous = global.window;
+  t.after(() => { if (previous === undefined) delete global.window; else global.window = previous; });
+  global.window = { _wallet: { address: owner } };
+  const node = tag => ({ tag, children: [], listeners: [], classList: { add() {}, remove() {}, toggle() {} },
+    append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+    addEventListener(_, fn) { this.listeners.push(fn); } });
+  const doc = { createElement: node };
+  const root = { ...node('section'), ownerDocument: doc };
+  const walk = n => [n, ...(n.children || []).flatMap(walk)];
+  const buttons = () => walk(root).filter(n => n.tag === 'button');
+  const statusText = () => walk(root).find(n => n.className?.includes('supporter-payroll-status')).textContent;
+  const winner = '0x' + '56'.repeat(20);
+  let delivery = null, revision = 4, balance = 1n, sent = null, settleAfter = 2, waits = 0;
+  const entries = new Map();
+  const storage = { getItem: k => entries.get(k) || null, setItem: (k, v) => entries.set(k, v), removeItem: k => entries.delete(k) };
+  const state = () => ({ revision, campaigns: [{ id: 'offer-1', title: 'Spring', curatedReferrerNames: { [winner]: 'Within' },
+    supporterToken: { eligibleWallets: [winner], deliveries: delivery ? [delivery] : [] } }] });
+  const actions = [];
+  const sign = async c => {
+    actions.push(c);
+    assert.equal(c.revision, revision);
+    revision++;
+    if (c.action === 'prepare-supporter') delivery = { wallet: winner, status: 'transfer-pending' };
+    if (c.action === 'reconcile-supporter') delivery = { ...delivery, txHash: c.txHash,
+      status: actions.filter(a => a.action === 'reconcile-supporter').length >= settleAfter ? 'delivered' : 'transfer-pending' };
+    if (c.action === 'release-supporter-preparation') delivery = { ...delivery, status: 'owed' };
+    return state();
+  };
+  const token = { balanceOf: async () => balance };
+  token.safeTransferFrom = async (...args) => {
+    assert.equal(actions.at(-1).action, 'prepare-supporter', 'server preparation must be persisted first');
+    assert.ok(entries.size, 'journal must exist before wallet broadcast');
+    sent = args;
+    return { hash: txHash, wait: async confirmations => { waits++; assert.equal(confirmations, 2); } };
+  };
+  token.safeTransferFrom.staticCall = async () => {};
+  const getWallet = async () => ({ address: owner, signer: {}, check: async () => {}, ethers: { Contract: function () { return token; } } });
+  let answer = 'Wallet history shows nothing sent', promptDefault;
+  const view = createSupporterPayroll({ root, fetchState: async () => state(), sign, getWallet, storage,
+    ask: (_, initial) => { promptDefault = initial; return answer; }, confirmAction: () => true });
+  await view.load();
+  assert.deepEqual(buttons().map(b => b.textContent), ['🎖 Send']);
+
+  balance = 0n;
+  await buttons()[0].listeners[0]();
+  assert.match(statusText(), /holds no Supporter #75/);
+  assert.equal(actions.length, 0);
+
+  balance = 1n;
+  await buttons()[0].listeners[0]();
+  assert.deepEqual(actions.map(a => a.action), ['prepare-supporter', 'reconcile-supporter', 'reconcile-supporter']);
+  assert.deepEqual(sent, [owner, winner, 75n, 1n, '0x']);
+  assert.equal(entries.size, 0);
+  assert.deepEqual(buttons(), []);
+
+  actions.length = 0;
+  delivery = { wallet: winner, status: 'transfer-pending' };
+  await view.load();
+  assert.deepEqual(buttons().map(b => b.textContent), ['🔎 Check', '↩']);
+  await buttons()[1].listeners[0]();
+  assert.deepEqual(actions.map(a => [a.action, a.reason, a.confirmNoBroadcast]),
+    [['release-supporter-preparation', answer, true]]);
+  assert.deepEqual(buttons().map(b => b.textContent), ['🎖 Send']);
+
+  actions.length = 0;
+  delivery = { wallet: winner, status: 'transfer-pending', txHash };
+  entries.set(`decentbusking:supporter-delivery:offer-1:${winner}`, JSON.stringify({ hash: txHash }));
+  const replacementHash = '0x' + 'cd'.repeat(32);
+  answer = replacementHash;
+  await view.load();
+  await buttons()[0].listeners[0]();
+  assert.equal(promptDefault, txHash);
+  assert.equal(actions[0].txHash, replacementHash);
+  assert.equal(JSON.parse([...entries.values()][0]).hash, replacementHash);
+  assert.match(statusText(), /still confirming/);
+
+  actions.length = 0;
+  entries.clear();
+  delivery = null;
+  settleAfter = 1;
+  await view.load();
+  await buttons()[0].listeners[0]();
+  assert.deepEqual(actions.map(action => action.action), ['prepare-supporter', 'reconcile-supporter']);
+  assert.equal(waits, 1, 'an already confirmed first reconciliation must not wait or reconcile again');
+  assert.equal(entries.size, 0);
+  assert.deepEqual(buttons(), []);
+});
+
+test('earned Supporter notifications remain after campaign closure until delivery', async () => {
+  const { activeReferralInvites, renderReferralInviteCard } = await import('../js/profile-inbox.mjs');
+  const wallet = '0x' + '12'.repeat(20);
+  const now = Date.parse('2026-11-15T00:00:00Z');
+  const profile = { wallet, campaignId: 'offer-1', title: 'Referral', status: 'archived',
+    endsAt: '2026-11-10T00:00:00Z', claimDeadline: '2026-11-11T00:00:00Z',
+    supporterToken: { eligible: true, delivery: 'owed' },
+    gifts: [{ trigger: 'participation', amountUnits: '0', supporter: true }],
+    giftAwards: [{ trigger: 'participation', amountUnits: '0', status: 'supporter-only' }] };
+  assert.deepEqual(activeReferralInvites({ participantProfiles: [profile] }, wallet, now), [profile]);
+  const node = tag => ({ tag, children: [], dataset: {}, style: { setProperty() {} },
+    classList: { add() {}, remove() {} }, append(...items) { this.children.push(...items); },
+    setAttribute() {}, addEventListener() {} });
+  const doc = { createElement: node };
+  const walk = n => [n, ...(n.children || []).flatMap(walk)];
+  const card = renderReferralInviteCard(profile, { wallet, doc, now });
+  assert.ok(walk(card).some(n => n.textContent === '🎖 awaiting delivery'));
+  assert.match(walk(card).find(n => n.className?.includes('inbox-gift')).textContent, /🎁$/);
+  profile.supporterToken.delivery = 'delivered';
+  assert.deepEqual(activeReferralInvites({ participantProfiles: [profile] }, wallet, now), []);
+  const deliveredCard = renderReferralInviteCard(profile, { wallet, doc, now });
+  assert.match(walk(deliveredCard).find(n => n.className?.includes('inbox-gift')).textContent, /✅$/);
+});
+
+test('Supporter queue reports blocked browser storage without breaking the payroll panel', async t => {
+  const { loadSupporterPayroll } = await import('../js/supporter-payroll.mjs');
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  t.after(() => previous ? Object.defineProperty(globalThis, 'localStorage', previous) : delete globalThis.localStorage);
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { throw new Error('Storage blocked'); } });
+  const root = { textContent: '' };
+  await loadSupporterPayroll({ getElementById: () => root });
+  assert.match(root.textContent, /Supporter queue unavailable: Storage blocked/);
+});

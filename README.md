@@ -349,6 +349,8 @@ breakdown, vote count and named referrers there. **Run Campaign** funds
 `dbusk-referrals` if needed, signs once, and places a continuous bar across the
 week. Campaigns can run in USDC or ETH, with a ≈ USD estimate shown for ETH, and
 can add 🎁 gifts for participation, completion or the top referrer.
+Earned 🎖 Supporter tokens appear in the Payroll panel's **Supporter tokens
+owed** list and are sent directly from the admin wallet.
 Invited referrers see a live invite card in their profile's **✨ For you**
 inbox. See
 [docs/PROMOTIONS.md](docs/PROMOTIONS.md#running-a-referral-campaign-from-the-calendar).

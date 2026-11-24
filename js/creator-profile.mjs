@@ -20,7 +20,7 @@ import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readC
   summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261023-djuke-v05';
 import { renderTipLedger } from './tip-ledger-ui.mjs?v=20261123-song-splits';
 import { promotionMoney, campaignAsset } from './promotions.mjs?v=20261126-eth-gifts';
-import { createProfileInbox, activeReferralInvites, renderReferralInviteCard } from './profile-inbox.mjs?v=20261126-eth-gifts';
+import { createProfileInbox, activeReferralInvites, renderReferralInviteCard } from './profile-inbox.mjs?v=20261123-supporter-queue';
 import { renderReferredBadge } from './inviter-prompt.mjs?v=20261125-inviter';
 
 import { renderWallet } from './wallet-label.mjs';
@@ -54,7 +54,7 @@ export function renderPromotionProfileSummary(container, state, wallet, ensName 
   target.innerHTML = profiles.map(item => `<strong>${ensName || walletLink(wallet)} · Referral pilot</strong><br>` +
     `${item.qualifiedCount} qualified · pending ${promotionMoney(item.pendingUnits || '0', campaignAsset(item))} · approved ${promotionMoney(item.approvedUnits || '0', campaignAsset(item))} · paid ${promotionMoney(item.paidUnits || '0', campaignAsset(item))} · ` +
     `maximum ${promotionMoney(item.maxEarningsUnits || '0', campaignAsset(item))}<br>${item.referred.map(ref => `${walletLink(ref.wallet)}: ${ref.voteProgress}/10 votes, ${ref.trackState}`).join('<br>')}` +
-    `<br>Supporter token: ${item.supporterToken.eligible ? 'eligible' : 'not yet eligible'}; eligibility only, no configured mint or transfer.`).join('<hr>');
+    `<br>Supporter token: ${item.supporterToken.eligible ? (item.supporterToken.delivery === 'delivered' ? '🎖 delivered' : '🎖 earned, queued for delivery') : 'not yet earned'}.`).join('<hr>');
 }
 
 export const CREATOR_ALBUM_ABI = [

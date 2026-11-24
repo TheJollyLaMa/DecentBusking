@@ -84,8 +84,11 @@ export function createProfileInbox({ doc = document, slots = [], isOwnProfile = 
 export function activeReferralInvites(state, wallet, now = Date.now()) {
   const lower = String(wallet || '').toLowerCase();
   if (!lower) return [];
-  return (state?.participantProfiles || []).filter(item => item.wallet?.toLowerCase() === lower &&
-    ['published', 'paused'].includes(item.status) && now < Date.parse(item.claimDeadline || item.endsAt));
+  return (state?.participantProfiles || []).filter(item => {
+    const active = ['published', 'paused'].includes(item.status) && now < Date.parse(item.claimDeadline || item.endsAt);
+    const owed = item.status !== 'draft' && item.supporterToken?.eligible && item.supporterToken.delivery !== 'delivered';
+    return item.wallet?.toLowerCase() === lower && (active || owed);
+  });
 }
 
 function ring(doc, fraction, label) {
@@ -102,11 +105,14 @@ export function renderReferralInviteCard(stats, { wallet, doc = document, now = 
   const earned = ['pendingUnits', 'approvedUnits', 'paidUnits'].reduce((n, key) => n + BigInt(stats[key] || 0), 0n);
   const possible = earned + BigInt(stats.maxEarningsUnits || 0);
   const ended = now >= Date.parse(stats.endsAt);
+  const claimsOpen = ['published', 'paused'].includes(stats.status) &&
+    now < Date.parse(stats.claimDeadline || stats.endsAt);
+  const supporterOwed = stats.supporterToken?.eligible && stats.supporterToken.delivery !== 'delivered';
   const days = Math.max(0, Math.ceil((Date.parse(stats.endsAt) - now) / 86400000));
   const head = el(doc, 'header', 'inbox-referral-head');
   head.append(el(doc, 'span', 'inbox-badge', '🤝'),
     el(doc, 'strong', 'inbox-referral-title', stats.title || 'Referral Campaign'),
-    el(doc, 'span', 'inbox-chip', ended ? '⏳ claims open' : `⏳ ${days}d`));
+    el(doc, 'span', 'inbox-chip', !claimsOpen && supporterOwed ? '🎖 awaiting delivery' : ended ? '⏳ claims open' : `⏳ ${days}d`));
   const body = el(doc, 'div', 'inbox-referral-body');
   const money = units => formatAssetUnits(units || 0, campaignAsset(stats));
   const legs = stats.legAmounts || {};
@@ -115,12 +121,19 @@ export function renderReferralInviteCard(stats, { wallet, doc = document, now = 
     el(doc, 'span', '', `🎤 ${money(legs.musician)} them`),
     el(doc, 'span', '', `🗳 ${stats.requiredVotes ?? 10} votes`),
     el(doc, 'span', '', `🎯 ${stats.remainingConversions ?? '—'} open`));
-  if (stats.supporterToken?.eligible) facts.append(el(doc, 'span', 'is-glow', '🎖 Supporter'));
+  if (stats.supporterToken?.eligible) {
+    const delivery = stats.supporterToken.delivery;
+    const chip = el(doc, 'span', 'is-glow', delivery === 'delivered' ? '🎖 Supporter ✅' : '🎖 Supporter 🎁');
+    chip.title = delivery === 'delivered' ? 'Supporter token delivered to your wallet' : 'Supporter token earned — on its way to your wallet';
+    facts.append(chip);
+  }
   for (const gift of stats.gifts || []) {
     const mine = (stats.giftAwards || []).filter(award => award.trigger === gift.trigger);
     const amount = mine[0]?.amountUnits ?? gift.amountUnits;
+    const complete = mine.every(a => ['paid', 'supporter-only'].includes(a.status)) &&
+      (!gift.supporter || stats.supporterToken?.delivery === 'delivered');
     const chip = el(doc, 'span', mine.length ? 'is-glow inbox-gift' : 'inbox-gift',
-      `${CAMPAIGN_GIFT_ICONS[gift.trigger]} ${amount !== '0' ? money(amount) : ''}${gift.supporter ? '🎖' : ''}${mine.length ? (mine.every(a => ['paid', 'supporter-only'].includes(a.status)) ? ' ✅' : ' 🎁') : ''}`);
+      `${CAMPAIGN_GIFT_ICONS[gift.trigger]} ${amount !== '0' ? money(amount) : ''}${gift.supporter ? '🎖' : ''}${mine.length ? (complete ? ' ✅' : ' 🎁') : ''}`);
     chip.title = mine.length ? `You won: ${CAMPAIGN_GIFT_LABELS[gift.trigger]}` : `Gift: ${CAMPAIGN_GIFT_LABELS[gift.trigger]}`;
     facts.append(chip);
   }
@@ -154,7 +167,7 @@ export function renderReferralInviteCard(stats, { wallet, doc = document, now = 
   const actions = el(doc, 'footer', 'inbox-actions');
   const copy = el(doc, 'button', 'inbox-action', '🔗 Copy invite');
   copy.type = 'button';
-  copy.disabled = ended;
+  copy.disabled = ended || !['published', 'paused'].includes(stats.status);
   copy.addEventListener('click', async () => {
     try {
       await writeText(promotionLink(stats.campaignId, wallet, site));

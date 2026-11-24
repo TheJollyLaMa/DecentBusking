@@ -30,6 +30,7 @@ import { recordPayrollConfirmation, setPayrollConfirmationStatus } from './payro
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { repositoryWorkReferenceText } from './repository-payroll-status.mjs?v=20261118-verified-backlog';
+import { loadSupporterPayroll } from './supporter-payroll.mjs?v=20261123-supporter-queue';
 
 function _displayTokenAmount(units, currency, decimals) {
   return currency === 'USDC' ? formatUsdcUnits(units) : ethers.formatUnits(units, decimals);
@@ -402,6 +403,7 @@ export async function loadPayrollQueue() {
   const emptyMsg   = document.getElementById('payroll-empty-msg');
 
   if (!tableBody) return;
+  void loadSupporterPayroll();
   tableBody.innerHTML = '<tr><td colspan="5" class="payroll-loading">⏳ Loading payroll queue…</td></tr>';
   if (statusEl) statusEl.textContent = '';
 

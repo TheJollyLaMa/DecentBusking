@@ -963,3 +963,126 @@ test('ETH campaigns fund, reserve gifts and reconcile native gift payouts separa
   assert.equal(profile.asset, 'eth');
   assert.equal(profile.giftAwards.length, 2);
 });
+
+test('earned Supporter tokens queue for admin delivery and settle only on an exact canonical transfer', async () => {
+  const musician = Wallet.createRandom();
+  const playlist = [{ trackId: 'sup-track', title: 'Minted', mintStatus: 'minted', tokenId: '9', mintRecipient: musician.address }];
+  const f = await fixture({ readPlaylist: () => playlist });
+  const { SUPPORTER_REWARD, SUPPORTER_REWARD_ABI, supporterRewardQueue } = f.shared;
+  const legAmounts = { referrer: '1000000', musician: '1000000', 'dbusk-top10': '0', 'dbusk-playback': '0' };
+  const pilot = input({ template: 'musician-referral', title: 'Supporters', legAmounts, requiredVotes: 1,
+    rewardUnits: '2000000', budgetUnits: '2000000', maxAwards: 1,
+    gifts: [{ trigger: 'top', amountUnits: '0', supporter: true }], curatedReferrers: [alice.address, bob.address] });
+  const [campaign] = (await f.exec({ action: 'run', campaign: pilot })).campaigns;
+  await f.join(campaign, alice);
+  await f.exec({ action: 'join', campaignId: campaign.id, referrer: alice.address, trackId: 'sup-track',
+    acceptTerms: true, termsVersion: campaign.version }, musician);
+  await f.exec({ action: 'vote', campaignId: campaign.id, playId: 'sup-song', subjectWallet: musician.address,
+    voterId: 'browser-sup-000000000', vote: 1 }, musician);
+  const conversion = (await f.exec({ action: 'claim', campaignId: campaign.id, musicianWallet: musician.address,
+    evidence: 'Minted playlist evidence' }, alice)).claims[0];
+  await f.exec({ action: 'review', claimId: conversion.id, decision: 'approved', reason: 'Verified' });
+  assert.equal(supporterRewardQueue((await f.service.publicState()).campaigns).length, 0,
+    'top-referrer gifts are not owed until the winners are finalized');
+  const awarded = (await f.exec({ action: 'award-gifts', campaignId: campaign.id })).campaigns[0];
+  assert.equal(awarded.supporterToken.status, 'payroll-queue');
+  assert.deepEqual(supporterRewardQueue([awarded]).map(item => [item.wallet, item.status]),
+    [[alice.address.toLowerCase(), 'owed']]);
+
+  const target = { campaignId: campaign.id, wallet: alice.address };
+  await assert.rejects(f.exec({ action: 'prepare-supporter', campaignId: campaign.id, wallet: bob.address }), /No Supporter token is owed/);
+  await assert.rejects(f.exec({ action: 'prepare-supporter', ...target }, alice), /Only the configured admin/);
+  await f.exec({ action: 'prepare-supporter', ...target });
+  await assert.rejects(f.exec({ action: 'prepare-supporter', ...target }), /already pending or delivered/);
+  await assert.rejects(f.exec({ action: 'release-supporter-preparation', ...target, confirmNoBroadcast: true }), /review reason/);
+  const released = (await f.exec({ action: 'release-supporter-preparation', ...target, confirmNoBroadcast: true,
+    reason: 'Wallet history shows no transfer' })).campaigns[0];
+  assert.equal(supporterRewardQueue([released])[0].status, 'owed');
+
+  await f.exec({ action: 'prepare-supporter', ...target });
+  const iface = new Interface(SUPPORTER_REWARD_ABI);
+  const transfer = (to, tokenId, value, from = owner.address) => ({ address: SUPPORTER_REWARD.contract,
+    ...iface.encodeEventLog('TransferSingle', [owner.address, from, to, tokenId, value]) });
+  const exact = transfer(alice.address, 75n, 1n);
+  f.setReceipt({ status: 1, to: routerAddress, blockNumber: 99, logs: [exact] });
+  await assert.rejects(f.exec({ action: 'reconcile-supporter', ...target, txHash }), /Wrong Supporter transfer target/);
+  for (const log of [transfer(bob.address, 75n, 1n), transfer(alice.address, 74n, 1n), transfer(alice.address, 75n, 2n),
+    transfer(alice.address, 75n, 1n, bob.address)]) {
+    f.setReceipt({ status: 1, to: SUPPORTER_REWARD.contract, blockNumber: 99, logs: [log] });
+    await assert.rejects(f.exec({ action: 'reconcile-supporter', ...target, txHash }), /Missing a transfer of exactly 1 Supporter #75/);
+  }
+  const revertHash = '0x' + 'cd'.repeat(32);
+  f.setReceipt({ status: 0, to: SUPPORTER_REWARD.contract, blockNumber: 99, logs: [] });
+  f.setTransaction({ to: SUPPORTER_REWARD.contract, from: owner.address, value: 0n,
+    data: iface.encodeFunctionData('safeTransferFrom', [owner.address, alice.address, 75n, 1n, '0x']) });
+  const reverted = (await f.exec({ action: 'reconcile-supporter', ...target, txHash: revertHash })).campaigns[0];
+  assert.equal(reverted.supporterToken.deliveries[0].lastRevertedHash, revertHash);
+  assert.equal(supporterRewardQueue([reverted])[0].status, 'owed');
+
+  await f.exec({ action: 'prepare-supporter', ...target });
+  f.setReceipt(null);
+  const pending = (await f.exec({ action: 'reconcile-supporter', ...target, txHash })).campaigns[0];
+  assert.equal(supporterRewardQueue([pending])[0].txHash, txHash);
+  f.setReceipt({ status: 1, to: SUPPORTER_REWARD.contract, blockNumber: 99, logs: [exact] });
+  const delivered = (await f.exec({ action: 'reconcile-supporter', ...target, txHash })).campaigns[0];
+  assert.equal(supporterRewardQueue([delivered])[0].status, 'delivered');
+  await assert.rejects(f.exec({ action: 'reconcile-supporter', ...target, txHash }), /does not need transfer reconciliation/);
+  await assert.rejects(f.exec({ action: 'reconcile', claimId: conversion.id, legId: 'referrer', txHash }), /already assigned/);
+  const profile = (await f.service.publicState()).participantProfiles.find(p => p.wallet === alice.address.toLowerCase());
+  assert.equal(profile.supporterToken.delivery, 'delivered');
+  const restarted = (await import('../discord-bot/promotions.js')).createPromotions(f.cfg);
+  assert.equal(supporterRewardQueue((await restarted.publicState()).campaigns)[0].status, 'delivered');
+});
+
+test('approved Supporter gifts enter payroll immediately, deduplicate, and survive preparation', async () => {
+  const musicians = [Wallet.createRandom(), Wallet.createRandom(), Wallet.createRandom()];
+  const playlist = musicians.map((musician, index) => ({ trackId: `early-${index}`, title: 'Minted',
+    mintStatus: 'minted', tokenId: String(index + 1), mintRecipient: musician.address }));
+  const f = await fixture({ readPlaylist: () => playlist });
+  const { supporterRewardQueue } = f.shared;
+  const legAmounts = { referrer: '1000000', musician: '1000000', 'dbusk-top10': '0', 'dbusk-playback': '0' };
+  const pilot = input({ template: 'musician-referral', title: 'Early gifts', legAmounts, requiredVotes: 1,
+    rewardUnits: '2000000', budgetUnits: '4000000', maxAwards: 2, curatedReferrers: [alice.address],
+    gifts: ['participation', 'completion', 'top'].map(trigger => ({ trigger, amountUnits: '0', supporter: true })) });
+  const [campaign] = (await f.exec({ action: 'run', campaign: pilot })).campaigns;
+  await f.join(campaign, alice);
+  const submit = async index => {
+    const musician = musicians[index];
+    await f.exec({ action: 'join', campaignId: campaign.id, referrer: alice.address, trackId: `early-${index}`,
+      acceptTerms: true, termsVersion: campaign.version }, musician);
+    await f.exec({ action: 'vote', campaignId: campaign.id, playId: `early-song-${index}`, subjectWallet: musician.address,
+      voterId: `browser-early-00000${index}`, vote: 1 }, musician);
+    const result = await f.exec({ action: 'claim', campaignId: campaign.id, musicianWallet: musician.address,
+      evidence: 'Minted playlist evidence' }, alice);
+    return result.claims.find(claim => claim.subjectWallet === musician.address.toLowerCase());
+  };
+  const first = await submit(0), second = await submit(1);
+  assert.equal(supporterRewardQueue((await f.service.publicState()).campaigns).length, 0);
+  const review = (claim, decision) => f.exec({ action: 'review', claimId: claim.id, decision, reason: 'Reviewed evidence' });
+  await review(first, 'approved');
+  let state = await f.service.publicState();
+  assert.deepEqual(supporterRewardQueue(state.campaigns).map(entry => [entry.wallet, entry.status]),
+    [[alice.address.toLowerCase(), 'owed']]);
+  assert.deepEqual(f.stored().campaigns[0].supporterToken.eligibleWallets, []);
+  const restarted = (await import('../discord-bot/promotions.js')).createPromotions(f.cfg);
+  assert.equal(supporterRewardQueue((await restarted.publicState()).campaigns).length, 1);
+  await review(second, 'approved');
+  assert.equal(supporterRewardQueue((await f.service.publicState()).campaigns).length, 1);
+  await review(second, 'rejected');
+  assert.equal(supporterRewardQueue((await f.service.publicState()).campaigns).length, 1);
+  await review(first, 'rejected');
+  assert.equal(supporterRewardQueue((await f.service.publicState()).campaigns).length, 0);
+
+  const third = await submit(2);
+  await review(third, 'approved');
+  await f.exec({ action: 'prepare-supporter', campaignId: campaign.id, wallet: alice.address });
+  assert.deepEqual(f.stored().campaigns[0].supporterToken.eligibleWallets, [alice.address.toLowerCase()]);
+  await f.exec({ action: 'release-supporter-preparation', campaignId: campaign.id, wallet: alice.address,
+    confirmNoBroadcast: true, reason: 'Wallet history shows no transfer' });
+  await review(third, 'rejected');
+  await f.exec({ action: 'status', campaignId: campaign.id, status: 'closed' });
+  await f.exec({ action: 'status', campaignId: campaign.id, status: 'archived' });
+  state = await f.service.publicState();
+  assert.equal(supporterRewardQueue(state.campaigns)[0].status, 'owed');
+  assert.equal(state.participantProfiles.find(profile => profile.wallet === alice.address.toLowerCase()).supporterToken.delivery, 'owed');
+});

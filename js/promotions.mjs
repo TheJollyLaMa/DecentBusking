@@ -28,6 +28,23 @@ export function parseAssetAmount(value, asset = CAMPAIGN_ASSETS.usdc) {
   const scale = 10n ** BigInt(asset.decimals);
   return (BigInt(match[1]) * scale + BigInt((match[2] || '').padEnd(asset.decimals, '0'))).toString();
 }
+// Earned Supporter tokens are owed one per wallet per campaign and sent directly by the admin wallet from the
+// dev payroll panel; the v2.1 Settlements Router cannot hold ERC-1155 tokens.
+export const SUPPORTER_REWARD = Object.freeze({ chainId: 8453, contract: '0xe63ec9f8228720baac2fd528c0a6d06b3dc5439b',
+  tokenId: '75', quantity: 1 });
+export const SUPPORTER_REWARD_ABI = Object.freeze([
+  'function balanceOf(address account,uint256 id) view returns (uint256)',
+  'function safeTransferFrom(address from,address to,uint256 id,uint256 value,bytes data)',
+  'event TransferSingle(address indexed operator,address indexed from,address indexed to,uint256 id,uint256 value)',
+]);
+export function supporterRewardQueue(campaigns = []) {
+  return campaigns.flatMap(campaign => (campaign.supporterToken?.eligibleWallets || []).map(wallet => {
+    const delivery = (campaign.supporterToken.deliveries || []).find(item => item.wallet === wallet);
+    return { campaignId: campaign.id, title: campaign.title, wallet,
+      name: campaign.curatedReferrerNames?.[wallet] || '', status: delivery?.status || 'owed',
+      txHash: delivery?.txHash || '', deliveredAt: delivery?.deliveredAt || '', earnedAt: campaign.supporterToken.evaluatedAt || '' };
+  }));
+}
 export const CAMPAIGN_GIFT_TRIGGERS = Object.freeze(['participation', 'completion', 'top']);
 export const CAMPAIGN_GIFT_ICONS = Object.freeze({ participation: '🎟', completion: '🏁', top: '🥇' });
 export const CAMPAIGN_GIFT_LABELS = Object.freeze({ participation: 'Every referrer who converts a musician',
@@ -121,7 +138,7 @@ export const MUSICIAN_REFERRAL_PILOT = Object.freeze({
     Object.freeze({ id: 'dbusk-playback', kind: 'funding-needed', fund: 'dbusk-playback', amountUnits: '5000000' }),
   ]),
 });
-export const MUSICIAN_REFERRAL_TERMS = 'Six conversions maximum at $25 each. Every conversion requires all four legs and a referred musician with a verified minted DecentBusking playlist track plus 10 distinct campaign-signed song votes. The $5 Top10 and $5 Playback legs remain funding-needed settlement obligations; this UI does not transfer them. Supporter-token outcome is eligibility only, and no NFT is minted or transferred. No self-referrals, guaranteed payout, or silent term changes.';
+export const MUSICIAN_REFERRAL_TERMS = 'Six conversions maximum at $25 each. Every conversion requires all four legs and a referred musician with a verified minted DecentBusking playlist track plus 10 distinct campaign-signed song votes. The $5 Top10 and $5 Playback legs remain funding-needed settlement obligations; this UI does not transfer them. An earned Supporter token joins the dev payroll queue and is sent from the admin wallet’s existing inventory; it is not escrowed or minted. No self-referrals, guaranteed payout, or silent term changes.';
 const UNIT = /^(?:0|[1-9]\d{0,29})$/;
 // Campaigns saved before custom breakdowns existed fall back to the $150 pilot terms.
 export function musicianReferralConfig(campaign = {}) {
