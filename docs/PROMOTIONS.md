@@ -102,6 +102,43 @@ dragged onto new dates.
 On the week view each published campaign is one continuous bar across the
 days it runs, stacked above the time grid like iCal all-day events.
 
+### ETH campaigns and gifts
+
+**💱 Currency** switches a campaign between 💵 USDC and Ξ ETH. Switching
+converts the current amounts at the Coinbase ETH-USD spot price (the same
+quote as the tip modal), rounded to 0.000001 ETH or one cent. ETH amounts show
+an approximate USD value in brackets, which is an estimate only. ETH campaigns
+hold native ETH in `dbusk-referrals` (the router's `fundNative` and
+`fundBalances(fund, 0x0)`) and pay each completed leg in ETH. USDC and ETH
+balances are separate: a campaign is only checked against, and funded from,
+its own currency. No Settlements Router change is needed.
+
+**🎁 Gifts** are optional, one per trigger, each with an amount, a
+🎖 Supporter token flag, or both:
+
+| Gift | Who wins |
+| --- | --- |
+| 🎟 Participation | Every curated referrer with at least one conversion |
+| 🏁 Completion | Every converting referrer, only if the campaign fills |
+| 🥇 Top referrer | Most conversions; ties break on registered referrals, then split evenly |
+
+Gifts are paid in the campaign currency from `dbusk-referrals`. Run sets aside
+the most gifts could pay: participation and completion amounts are multiplied
+by the number of curated referrers, and the top-referrer gift is counted once.
+That reserve is added to the budget, so Run stays blocked until both are funded.
+
+Once the campaign fills or its claims close, and every claim has been reviewed,
+the admin presses **🎁 Award** on the campaign bar. That signed `award-gifts`
+command freezes the winners and adds 🎖 winners to the Supporter eligibility
+list (eligibility only, nothing is minted). Each money award then has its own
+**🎁 Send** button: one router payout with work reference
+`…:<campaign>:<wallet>:gift-<trigger>`, reconciled like a claim payment.
+If a wallet transaction is interrupted, **↻** reconciles its hash; **↩** can
+release a prepared gift only after the admin checks wallet history, confirms
+there was no broadcast, and records why. Winners see their gift glow in
+**✨ For you**. Gifts in other ERC-20 tokens are not supported yet; the router
+would allow them once the asset is approved.
+
 ### Profile "For you" inbox
 
 The user's own profile has a permanent **✨ For you** carousel (‹ › arrows)

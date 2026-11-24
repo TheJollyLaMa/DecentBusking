@@ -3,7 +3,8 @@ import { Contract, Interface, id, verifyMessage, isAddress } from 'ethers';
 import { PAYMENT_EVENT_ABI } from './payment-ledger.js';
 import { currentPayrollPeriod } from '../js/payroll-week.mjs';
 import { PROMOTIONS_FUND, REFERRALS_FUND, referralCampaignTitle, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS,
-  MUSICIAN_REFERRAL_PILOT, isMusicianReferralCampaign, musicianReferralLegs, musicianReferralConfig,
+  MUSICIAN_REFERRAL_PILOT, isMusicianReferralCampaign, CAMPAIGN_ASSETS, campaignAsset, campaignGifts, campaignGiftReserveUnits,
+  campaignGiftWinners, musicianReferralLegs, musicianReferralConfig,
   isPromotionsFund, promotionAnnouncementDraft, promotionAuthorization, promotionWorkReference } from '../js/promotions.mjs';
 
 const address = value => {
@@ -15,7 +16,7 @@ const text = (value, label, max = 2000) => {
   return value.trim();
 };
 const units = value => {
-  if (!/^[1-9]\d{0,14}$/.test(String(value))) throw new Error('Invalid positive USDC units');
+  if (!/^[1-9]\d{0,29}$/.test(String(value))) throw new Error('Invalid positive reward units');
   return String(value);
 };
 const timestamp = (value, label) => {
@@ -77,6 +78,7 @@ export function validatePromotionCheckpoint(value) {
       !['campaigns', 'claims', 'members', 'votes'].every(key => Array.isArray(value[key])) ||
       value.campaigns.length > 1000 || value.claims.length > 10000 || value.members.length > 10000 || value.votes.length > 30000) fail();
   const campaigns = new Map(), claims = new Set(), members = new Map(), votes = new Set(), browsers = new Map();
+  const transactionHashes = new Set();
   for (const c of value.campaigns) {
     if (!c || !validId(c.id) || campaigns.has(c.id) || !statuses.has(c.status) ||
         c.version !== 1 || !isPromotionsFund(c.fund) || !PROMOTION_TEMPLATES.some(t => t.id === c.template) ||
@@ -106,6 +108,32 @@ export function validatePromotionCheckpoint(value) {
         !Array.isArray(c.supporterToken.eligibleWallets) ||
         c.supporterToken.eligibleWallets.some(w => !validWallet(w)))) fail();
     if (c.curatedReferrers && c.curatedReferrers.some(w => !validWallet(w))) fail();
+    if (c.asset !== undefined && (!['usdc', 'eth'].includes(c.asset) || c.asset === 'eth' && !isMusicianReferralCampaign(c))) fail();
+    if (c.gifts !== undefined && (!isMusicianReferralCampaign(c) || JSON.stringify(campaignGifts(c.gifts)) !== JSON.stringify(c.gifts))) fail();
+    if (c.giftAwards !== undefined) {
+      if (!Array.isArray(c.giftAwards) || c.giftAwards.length > 200 || !validDate(c.giftsAwardedAt)) fail();
+      const awarded = new Set();
+      for (const award of c.giftAwards) {
+        const gift = c.gifts?.find(item => item.trigger === award?.trigger);
+        if (!award || !gift || award.id !== `gift-${award.trigger}` || !validWallet(award.wallet) ||
+            !c.curatedReferrers.includes(award.wallet) || awarded.has(`${award.id}:${award.wallet}`) ||
+            !/^(?:0|[1-9]\d{0,29})$/.test(award.amountUnits || '') || BigInt(award.amountUnits) > BigInt(gift.amountUnits) ||
+            !['approved', 'payment-pending', 'paid', 'supporter-only'].includes(award.status) ||
+            (award.status === 'supporter-only') !== (award.amountUnits === '0') ||
+            award.txHash && (!/^0x[0-9a-f]{64}$/.test(award.txHash) || transactionHashes.has(award.txHash)) ||
+            award.status === 'paid' && (!award.txHash || !Number.isSafeInteger(award.paymentBlockNumber) ||
+              !/^0x[0-9a-f]{64}$/i.test(award.paymentBlockHash || '') || !validDate(award.paidAt))) fail();
+        if (award.txHash) transactionHashes.add(award.txHash);
+        if (award.paymentHistory !== undefined) {
+          if (!Array.isArray(award.paymentHistory)) fail();
+          for (const h of award.paymentHistory) {
+            if (!h || !validDate(h.at) || !validWallet(h.reviewer) || h.action !== 'no-broadcast-confirmed') fail();
+            text(h.reason, 'Checkpoint gift payment review reason');
+          }
+        }
+        awarded.add(`${award.id}:${award.wallet}`);
+      }
+    }
     for (const curation of c.curationHistory || []) {
       if (!curation || !validId(curation.id) || !validWallet(curation.wallet) ||
           !validWallet(curation.reviewer) || !validDate(curation.at) ||
@@ -173,7 +201,7 @@ export function validatePromotionCheckpoint(value) {
     }
     if (value.inviters.some(i => inviterCycle(invited, i.wallet))) fail();
   }
-  const participantClaims = new Set(), heldWallets = new Set(), heldSubjects = new Set(), transactionHashes = new Set();
+  const participantClaims = new Set(), heldWallets = new Set(), heldSubjects = new Set();
   const reservations = new Map();
   const voteKey = (campaignId, wallet, week, playId, at) => JSON.stringify([campaignId, wallet, week, playId, at]);
   const recordedVotes = new Set(value.votes.map(v => voteKey(v?.campaignId, v?.wallet, v?.week, v?.playId, v?.at)));
@@ -362,6 +390,8 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       .reduce((n, leg) => n + BigInt(leg.amountUnits), 0n);
     const special = isMusicianReferralCampaign(campaign);
     return { ...offer, ...(admin && announcement ? { announcement } : {}),
+      ...(isMusicianReferralCampaign(campaign) ? { giftReserveUnits: giftReserve(campaign).toString(),
+        giftPaidUnits: giftPaid(campaign).toString() } : {}),
       committedUnits: committed.toString(), approvedUnits: special ? legTotal('approved').toString() : total('approved').toString(),
       paymentPendingUnits: special ? legTotal('payment-pending').toString() : total('payment-pending').toString(),
       paidUnits: special ? legTotal('paid').toString() : total('paid').toString(),
@@ -376,19 +406,39 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       } : {}) };
   }
   const open = campaign => campaign.status === 'published' && Date.parse(campaign.startsAt) <= now() && now() < Date.parse(campaign.endsAt);
+  // Each fund holds one balance per asset, so commitments only compete within the same fund and asset.
+  const sameBucket = (a, b) => a.fund === b.fund && campaignAsset(a).id === campaignAsset(b).id;
+  const giftReserve = c => c.giftAwards ? c.giftAwards.reduce((n, a) => n + BigInt(a.amountUnits), 0n) : campaignGiftReserveUnits(c);
+  const giftPaid = c => (c.giftAwards || []).filter(a => a.status === 'paid').reduce((n, a) => n + BigInt(a.amountUnits), 0n);
+  const reservedIn = (next, campaign) => next.claims.filter(c => held(c) &&
+      sameBucket(next.campaigns.find(item => item.id === c.campaignId) || {}, campaign))
+    .reduce((n, c) => n + unpaidReservedUnits(c), 0n) +
+    next.campaigns.filter(c => sameBucket(c, campaign)).flatMap(c => c.giftAwards || [])
+      .filter(a => a.status !== 'paid').reduce((n, a) => n + BigInt(a.amountUnits), 0n);
   async function assertPublishable(next, campaign) {
     if (campaign.template === 'sponsor-match') throw new Error('Sponsor matching is draft-only until fund-to-fund settlement is implemented and verified');
     if (now() >= Date.parse(campaign.endsAt)) throw new Error('Offer has expired');
-    const balance = await funding(campaign.fund);
-    const paid = id => next.claims.filter(q => q.campaignId === id && q.status === 'paid').reduce((sum, q) => sum + BigInt(q.amountUnits), 0n);
-    const otherBudgets = next.campaigns.filter(c => c.id !== campaign.id && c.fund === campaign.fund && ['published', 'paused', 'closed'].includes(c.status))
-      .reduce((n, c) => n + BigInt(c.budgetUnits) - paid(c.id), 0n);
-    if (balance < otherBudgets + BigInt(campaign.budgetUnits) - paid(campaign.id)) throw new Error('Fund balance cannot cover campaign budgets already earmarked');
+    const balance = await funding(campaign.fund, campaignAsset(campaign));
+    const paid = c => next.claims.filter(q => q.campaignId === c.id && q.status === 'paid').reduce((sum, q) => sum + BigInt(q.amountUnits), 0n) + giftPaid(c);
+    const otherBudgets = next.campaigns.filter(c => c.id !== campaign.id && sameBucket(c, campaign) && ['published', 'paused', 'closed'].includes(c.status))
+      .reduce((n, c) => n + BigInt(c.budgetUnits) + giftReserve(c) - paid(c), 0n);
+    if (balance < otherBudgets + BigInt(campaign.budgetUnits) + giftReserve(campaign) - paid(campaign)) throw new Error('Fund balance cannot cover campaign budgets and gifts already earmarked');
   }
-  async function funding(fundSlug = PROMOTIONS_FUND) {
+  async function funding(fundSlug = PROMOTIONS_FUND, asset = CAMPAIGN_ASSETS.usdc) {
     if (!isPromotionsFund(fundSlug)) throw new Error('A dedicated Promotionals fund is required');
-    if (readFunding) return readFunding(fundSlug);
+    if (readFunding) return readFunding(fundSlug, asset.id);
     if (Number((await provider.getNetwork()).chainId) !== 8453) throw new Error('Promotions require Base');
+    if (asset.id === 'eth') {
+      const fundId = id(fundSlug);
+      const [fund, balance, actual, paused, role] = await Promise.all([
+        router.funds(fundId), router.fundBalances(fundId, asset.address), provider.getBalance(routerAddress),
+        router.paused(), router.hasRole(await router.DEFAULT_ADMIN_ROLE(), owner),
+      ]);
+      if (!fund.exists || !fund.active || paused || !role) {
+        throw new Error('Create and activate the fund in Settlements Router; verify owner role and unpaused router');
+      }
+      return balance < actual ? balance : actual;
+    }
     const token = new Contract(PROMOTIONS_USDC, ['function balanceOf(address) view returns (uint256)', 'function decimals() view returns (uint8)'], provider);
     const fundId = id(fundSlug);
     const [fund, balance, actual, paused, role, decimals] = await Promise.all([
@@ -532,6 +582,8 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
         referrers: campaign.curatedReferrers,
         attributedMusicians: state.members.filter(m => m.campaignId === campaign.id && m.referrer === wallet).map(m => m.wallet),
         referred, curated: campaign.curatedReferrers.includes(wallet),
+        asset: campaignAsset(campaign).id, gifts: campaign.gifts || [],
+        giftAwards: (campaign.giftAwards || []).filter(award => award.wallet === wallet),
         supporterToken: { status: campaign.supporterToken?.status || 'eligibility-only', eligible: !!campaign.supporterToken?.eligibleWallets?.includes(wallet),
           note: 'Eligibility only. No token is minted or transferred unless an exact edition and authority are separately configured.' } });
     }
@@ -544,7 +596,8 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
         Date.parse(leg.paidAt) < Date.parse(campaign.endsAt)));
     if (qualifyingClaims.length !== musicianReferralConfig(campaign).maxConversions) return;
     campaign.supporterToken ||= { status: 'eligibility-only', eligibleWallets: [] };
-    campaign.supporterToken.eligibleWallets = [...new Set(qualifyingClaims.map(item => item.wallet))];
+    campaign.supporterToken.eligibleWallets = [...new Set([...campaign.supporterToken.eligibleWallets,
+      ...qualifyingClaims.map(item => item.wallet)])];
     campaign.supporterToken.evaluatedAt = new Date(now()).toISOString();
   }
   async function snapshot(wallet, admin) {
@@ -590,8 +643,10 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
     const paymentTarget = leg || claim;
     const paymentWallet = leg?.recipient || claim.wallet;
     const paymentUnits = leg?.amountUnits || claim.amountUnits;
+    const asset = campaignAsset(next.campaigns.find(item => item.id === claim.campaignId));
     if (next.claims.some(c => c.id !== claim.id && (c.txHash === lower(hash) ||
-        c.legs?.some(item => item.txHash === lower(hash))))) throw new Error('Transaction already assigned');
+        c.legs?.some(item => item.txHash === lower(hash)))) ||
+        next.campaigns.some(c => (c.giftAwards || []).some(item => item !== leg && item.txHash === lower(hash)))) throw new Error('Transaction already assigned');
     if (claim.legs?.some(item => item.id !== leg?.id && item.txHash === lower(hash))) throw new Error('Transaction already assigned');
     const receipt = await provider.getTransactionReceipt(hash);
     if (paymentTarget.txHash && paymentTarget.txHash !== lower(hash) && (!receipt || Number(receipt.status) !== 1)) {
@@ -612,7 +667,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       try { parsed = tx && routerInterface.parseTransaction({ data: tx.data, value: tx.value || 0 }); } catch {}
       const args = parsed?.args;
       if (!tx || lower(tx.to) !== lower(routerAddress) || lower(tx.from) !== owner || parsed?.name !== 'payout' ||
-          args[0] !== id(claim.fund) || lower(args[1]) !== lower(PROMOTIONS_USDC) ||
+          args[0] !== id(claim.fund) || lower(args[1]) !== lower(asset.address) ||
           lower(args[2]) !== paymentWallet || args[3] !== BigInt(paymentUnits) ||
           args[4] !== id(promotionWorkReference(claim, leg?.id))) {
         throw new Error('Reverted transaction does not prove this exact owner-authorized reward attempt');
@@ -624,16 +679,17 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       return;
     }
     const events = receipt.logs.flatMap(log => {
-      if (![lower(routerAddress), lower(PROMOTIONS_USDC)].includes(lower(log.address))) return [];
+      if (![lower(routerAddress), lower(asset.address)].includes(lower(log.address))) return [];
       try { return [{ emitter: lower(log.address), parsed: paymentInterface.parseLog(log) }]; } catch { return []; }
     });
     const reference = id(promotionWorkReference(claim, leg?.id));
     const match = events.some(({ emitter, parsed: e }) => emitter === lower(routerAddress) && e?.name === 'PayrollPaid' &&
-      e.args.fundId === id(claim.fund) && lower(e.args.asset) === lower(PROMOTIONS_USDC) &&
+      e.args.fundId === id(claim.fund) && lower(e.args.asset) === lower(asset.address) &&
       lower(e.args.recipient) === paymentWallet && e.args.amount === BigInt(paymentUnits) && e.args.workReference === reference);
-    const transfer = events.some(({ emitter, parsed: e }) => emitter === lower(PROMOTIONS_USDC) && e?.name === 'Transfer' &&
+    // The router reverts unless a native ETH send succeeds, so PayrollPaid alone proves an ETH payout.
+    const transfer = asset.id === 'eth' || events.some(({ emitter, parsed: e }) => emitter === lower(asset.address) && e?.name === 'Transfer' &&
       lower(e.args.from) === lower(routerAddress) && lower(e.args.to) === paymentWallet && e.args.value === BigInt(paymentUnits));
-    if (!match || !transfer) throw new Error('Missing matching Promotionals payout and USDC transfer proofs');
+    if (!match || !transfer) throw new Error(`Missing matching Promotionals payout and ${asset.symbol} transfer proofs`);
     paymentTarget.status = 'paid';
     paymentTarget.txHash = lower(hash);
     paymentTarget.paymentBlockNumber = receipt.blockNumber;
@@ -701,7 +757,8 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
         const at = new Date(now()).toISOString();
         let campaign = next.campaigns.find(c => c.id === command.campaignId);
         const adminActions = ['save', 'run', 'amend', 'curate-referrer', 'correct-inviter', 'status', 'review', 'correct-attribution', 'prepare-payment', 'release-payment-preparation',
-          'reconcile', 'reconcile-funding-leg', 'preview-discord', 'send-discord', 'reconcile-discord'];
+          'reconcile', 'reconcile-funding-leg', 'preview-discord', 'send-discord', 'reconcile-discord',
+          'award-gifts', 'prepare-gift', 'reconcile-gift', 'release-gift-preparation'];
         if (adminActions.includes(command.action)) {
           if (!admin) throw new Error('Only the configured admin may manage promotions');
           if (command.revision !== state.revision) throw new Error('Promotions changed; refresh before retrying');
@@ -809,7 +866,11 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
               .map(([w, name]) => [isAddress(w) ? w.toLowerCase() : w, String(name ?? '').trim()])
               .filter(([w, name]) => name && curatedReferrers.includes(w)));
             if (Object.values(curatedReferrerNames).some(name => name.length > 40)) throw new Error('Referrer names are 40 characters max');
-            qualification = { campaignConfigId: MUSICIAN_REFERRAL_PILOT.id,
+            const asset = input.asset === undefined ? campaign?.asset || 'usdc' : input.asset;
+            if (!['usdc', 'eth'].includes(asset)) throw new Error('Campaign currency must be USDC or ETH');
+            const gifts = campaignGifts(input.gifts === undefined ? campaign?.gifts || [] : input.gifts);
+            if (!gifts) throw new Error('Gifts need one entry per trigger with an amount or a Supporter token');
+            qualification = { campaignConfigId: MUSICIAN_REFERRAL_PILOT.id, asset, gifts,
               legAmounts: config.amounts, baseBudgetUnits: config.baseBudgetUnits, requiredVotes: config.requiredVotes,
               curatedReferrerNames, curatedReferrers, amendments: campaign?.amendments || [],
               supporterToken: campaign?.supporterToken || { status: 'eligibility-only', eligibleWallets: [],
@@ -855,16 +916,16 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           }
           const nextBudget = BigInt(campaign.budgetUnits) + BigInt(budgetIncreaseUnits);
           if (['published', 'paused', 'closed'].includes(campaign.status)) {
-            const balance = await funding(campaign.fund);
+            const balance = await funding(campaign.fund, campaignAsset(campaign));
             const paidCampaignUnits = item => next.claims.filter(claim => claim.campaignId === item.id)
               .reduce((total, claim) => total + (claim.legs
                 ? claim.legs.filter(leg => leg.status === 'paid').reduce((sum, leg) => sum + BigInt(leg.amountUnits), 0n)
-                : claim.status === 'paid' ? BigInt(claim.amountUnits) : 0n), 0n);
+                : claim.status === 'paid' ? BigInt(claim.amountUnits) : 0n), 0n) + giftPaid(item);
             const otherOutstanding = next.campaigns.filter(item => item.id !== campaign.id &&
-                item.fund === campaign.fund && ['published', 'paused', 'closed'].includes(item.status))
-              .reduce((total, item) => total + BigInt(item.budgetUnits) - paidCampaignUnits(item), 0n);
+                sameBucket(item, campaign) && ['published', 'paused', 'closed'].includes(item.status))
+              .reduce((total, item) => total + BigInt(item.budgetUnits) + giftReserve(item) - paidCampaignUnits(item), 0n);
             const amendedPaid = paidCampaignUnits(campaign);
-            if (balance < otherOutstanding + nextBudget - amendedPaid) {
+            if (balance < otherOutstanding + nextBudget + giftReserve(campaign) - amendedPaid) {
               throw new Error('Promotionals balance cannot cover this amendment plus other campaign commitments');
             }
           }
@@ -1034,9 +1095,9 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
               if (lower(log.address) !== lower(routerAddress)) return null;
               try { return fundInterface.parseLog(log); } catch { return null; }
             }).find(parsed => parsed?.name === 'FundFunded' && parsed.args.fundId === id(leg.fund) &&
-              lower(parsed.args.asset) === lower(PROMOTIONS_USDC) &&
+              lower(parsed.args.asset) === lower(campaignAsset(campaign).address) &&
               lower(parsed.args.funder) === owner && parsed.args.amount === BigInt(leg.amountUnits));
-            if (!event) throw new Error('Transaction does not fund this exact allocation leg with native Base USDC');
+            if (!event) throw new Error(`Transaction does not fund this exact allocation leg with ${campaignAsset(campaign).symbol}`);
             if (next.claims.some(item => item.id !== claim.id && item.legs?.some(existing => lower(existing.txHash) === hash)) ||
                 claim.legs.some(item => item.id !== leg.id && lower(item.txHash) === hash)) throw new Error('Funding transaction was already assigned');
             Object.assign(leg, { status: 'paid', txHash: hash, paymentBlockNumber: Number(receipt.blockNumber),
@@ -1066,9 +1127,8 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
               }
               const s = summary(campaign);
               if (!s.remainingAwards || BigInt(s.remainingUnits) < BigInt(claim.amountUnits)) throw new Error('Campaign reward capacity exhausted');
-              const balance = await funding(campaign.fund);
-              const reserved = next.claims.filter(c => c.fund === campaign.fund && held(c))
-                .reduce((n, c) => n + unpaidReservedUnits(c), 0n);
+              const balance = await funding(campaign.fund, campaignAsset(campaign));
+              const reserved = reservedIn(next, campaign);
               if (balance < reserved + BigInt(claim.amountUnits)) throw new Error('Promotionals balance cannot cover reward commitments');
               // No automatic stacking of the same participant's promotional rewards.
               if (!isMusicianReferralCampaign(campaign) &&
@@ -1100,9 +1160,8 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
               if (command.confirmRefundAndDisputeReview !== true) throw new Error('Recheck refund and dispute eligibility before preparing payment');
               claim.qualification = await sponsorEvidence(claim, campaign);
             }
-            const balance = await funding(campaign.fund);
-            const reserved = next.claims.filter(c => c.fund === campaign.fund && held(c))
-              .reduce((n, c) => n + unpaidReservedUnits(c), 0n);
+            const balance = await funding(campaign.fund, campaignAsset(campaign));
+            const reserved = reservedIn(next, campaign);
             if (balance < reserved) throw new Error('Promotionals balance cannot cover existing reward commitments');
             if (leg) {
               leg.status = 'payment-pending';
@@ -1136,6 +1195,47 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
             if (!leg && !['approved', 'payment-pending'].includes(claim.status) ||
                 leg && !['approved', 'payment-pending'].includes(leg.status)) throw new Error('Claim or leg does not need payment reconciliation');
             await reconcile(next, claim, command.txHash, leg);
+          }
+        } else if (command.action === 'award-gifts') {
+          if (!campaign || !isMusicianReferralCampaign(campaign) || !campaign.gifts?.length) throw new Error('This campaign has no gifts');
+          if (campaign.giftAwards) throw new Error('Gifts are already awarded');
+          const campaignClaims = next.claims.filter(c => c.campaignId === campaign.id);
+          if (now() < Date.parse(campaign.claimDeadline) && campaignClaims.filter(held).length < campaign.maxAwards) {
+            throw new Error('Gifts are awarded once the campaign fills or its claim window closes');
+          }
+          if (campaignClaims.some(c => ['submitted', 'needs-evidence'].includes(c.status))) throw new Error('Review open claims before awarding gifts');
+          const winners = campaignGiftWinners(campaign, next.claims, next.members);
+          campaign.giftAwards = winners.map(({ supporter, ...award }) => ({ ...award,
+            status: award.amountUnits === '0' ? 'supporter-only' : 'approved' }));
+          campaign.giftsAwardedAt = at;
+          const supporters = winners.filter(award => award.supporter).map(award => award.wallet);
+          if (supporters.length) {
+            campaign.supporterToken.eligibleWallets = [...new Set([...campaign.supporterToken.eligibleWallets, ...supporters])];
+            campaign.supporterToken.evaluatedAt = at;
+          }
+          campaign.updatedAt = at;
+        } else if (['prepare-gift', 'reconcile-gift', 'release-gift-preparation'].includes(command.action)) {
+          const award = campaign?.giftAwards?.find(item => item.id === command.giftId && item.wallet === lower(command.wallet));
+          if (!award) throw new Error('Gift award not found');
+          if (command.action === 'prepare-gift') {
+            if (award.status !== 'approved') throw new Error('Gift is not ready to send');
+            if (await funding(campaign.fund, campaignAsset(campaign)) < reservedIn(next, campaign)) {
+              throw new Error('Fund balance cannot cover existing reward and gift commitments');
+            }
+            award.status = 'payment-pending';
+            award.paymentPreparedAt = at;
+          } else if (command.action === 'release-gift-preparation') {
+            if (award.status !== 'payment-pending' || award.txHash || command.confirmNoBroadcast !== true) {
+              throw new Error('Only an unbroadcast gift preparation can be released after wallet-history review');
+            }
+            const reason = text(command.reason, 'Wallet-history review reason');
+            award.paymentHistory ||= [];
+            award.paymentHistory.push({ at, reviewer: owner, action: 'no-broadcast-confirmed', reason });
+            award.status = 'approved';
+          } else {
+            if (!['approved', 'payment-pending'].includes(award.status)) throw new Error('Gift does not need payment reconciliation');
+            await reconcile(next, { id: `gift:${campaign.id}`, campaignId: campaign.id, wallet: award.wallet,
+              fund: campaign.fund, legs: [award] }, command.txHash, award);
           }
         } else if (command.action === 'evidence') {
           const claim = next.claims.find(c => c.id === command.claimId && c.wallet === wallet);

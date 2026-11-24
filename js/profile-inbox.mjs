@@ -1,6 +1,5 @@
-import { promotionLink } from './promotions.mjs?v=20261124-referral-week';
+import { promotionLink, campaignAsset, formatAssetUnits, CAMPAIGN_GIFT_ICONS, CAMPAIGN_GIFT_LABELS } from './promotions.mjs?v=20261126-eth-gifts';
 
-const money = units => `$${(Number(BigInt(units || 0)) / 1e6).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
 const short = wallet => `${wallet.slice(0, 6)}…${wallet.slice(-4)}`;
 
 function el(doc, tag, className, text) {
@@ -109,6 +108,7 @@ export function renderReferralInviteCard(stats, { wallet, doc = document, now = 
     el(doc, 'strong', 'inbox-referral-title', stats.title || 'Referral Campaign'),
     el(doc, 'span', 'inbox-chip', ended ? '⏳ claims open' : `⏳ ${days}d`));
   const body = el(doc, 'div', 'inbox-referral-body');
+  const money = units => formatAssetUnits(units || 0, campaignAsset(stats));
   const legs = stats.legAmounts || {};
   const facts = el(doc, 'div', 'inbox-facts');
   facts.append(el(doc, 'span', '', `🤝 ${money(legs.referrer)} each`),
@@ -116,6 +116,14 @@ export function renderReferralInviteCard(stats, { wallet, doc = document, now = 
     el(doc, 'span', '', `🗳 ${stats.requiredVotes ?? 10} votes`),
     el(doc, 'span', '', `🎯 ${stats.remainingConversions ?? '—'} open`));
   if (stats.supporterToken?.eligible) facts.append(el(doc, 'span', 'is-glow', '🎖 Supporter'));
+  for (const gift of stats.gifts || []) {
+    const mine = (stats.giftAwards || []).filter(award => award.trigger === gift.trigger);
+    const amount = mine[0]?.amountUnits ?? gift.amountUnits;
+    const chip = el(doc, 'span', mine.length ? 'is-glow inbox-gift' : 'inbox-gift',
+      `${CAMPAIGN_GIFT_ICONS[gift.trigger]} ${amount !== '0' ? money(amount) : ''}${gift.supporter ? '🎖' : ''}${mine.length ? (mine.every(a => ['paid', 'supporter-only'].includes(a.status)) ? ' ✅' : ' 🎁') : ''}`);
+    chip.title = mine.length ? `You won: ${CAMPAIGN_GIFT_LABELS[gift.trigger]}` : `Gift: ${CAMPAIGN_GIFT_LABELS[gift.trigger]}`;
+    facts.append(chip);
+  }
   body.append(ring(doc, possible > 0n ? Number(earned) / Number(possible) : 0, `${money(earned)}`),
     el(doc, 'div', 'inbox-ring-label', `of ${money(possible)} possible`), facts);
   const aliens = el(doc, 'div', 'inbox-aliens');

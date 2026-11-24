@@ -147,8 +147,28 @@
 .rc-run:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
 .radio-calendar-presets .radio-calendar-chip.is-template { background: #3e2d57; border-style: dashed; }
 .rc-money { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 999px; background: #ffffff10; border: 1px solid #ffffff1f; }
-.rc-money input { width: 5ch; padding: 2px 0; border: 0; background: transparent; text-align: right; }
-.rc-money input[type=number] { width: 4ch; }
+.rc-money input, .rc-edit .rc-money input:not([type=checkbox]) { width: 5ch; padding: 2px 0; border: 0; border-radius: 0; background: transparent; text-align: right; }
+.rc-edit .rc-money.is-eth input:not([type=checkbox]) { width: 8ch; }
+.rc-money input:focus-visible { outline: none; }
+.rc-money:focus-within { border-color: #d5a8ff; box-shadow: 0 0 0 2px #d5a8ff44; }
+.rc-edit .rc-votes input:not([type=checkbox]) { width: 5ch; padding: 2px 2px 2px 6px; font-size: 1rem; font-weight: 700; text-align: center; }
+.rc-usd { color: var(--rc-soft); font-size: .72rem; white-space: nowrap; }
+.rc-edit > .rc-pill.is-on { background: linear-gradient(135deg, #b98cf055, #6fd0c455); border-color: #d5a8ff; font-weight: 700; }
+.rc-gift { display: flex; align-items: center; gap: 4px; flex-basis: 100%; min-width: 0; }
+.rc-gift .rc-check { flex: none; gap: 4px; padding: 4px; }
+.rc-gift .rc-money { min-width: 0; padding: 4px 8px; }
+.rc-gift-on { padding: 4px 6px; }
+.rc-gift-on .rc-icon { font-size: 1.15rem; }
+.rc-supporter span { filter: grayscale(1); opacity: .55; transition: filter .2s, opacity .2s, transform .2s; }
+.rc-supporter input:checked + span { filter: none; opacity: 1; transform: scale(1.15); }
+.rc-gift-awards { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; font-size: .82rem; }
+.rc-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px; background: #ffffff10; }
+.rc-chip a { text-decoration: none; }
+.rc-award .rc-pill { height: 26px; min-width: 0; padding: 0 10px; font-size: .78rem; }
+.rc-award .rc-gift-hash { width: 11ch; min-width: 0; flex: 1 1 11ch; padding: 5px 8px; border: 1px solid #ffffff33; border-radius: 999px; background: #0b1220; color: inherit; color-scheme: dark; font-size: .72rem; }
+.rc-gift-awards.is-pop .rc-chip { animation: rc-gift-pop .5s ease both; }
+@keyframes rc-gift-pop { 40% { transform: scale(1.08); box-shadow: 0 0 14px #ffd98a88; } }
+@media (prefers-reduced-motion: reduce) { .rc-gift-awards.is-pop .rc-chip { animation: none; } }
 .rc-money input.is-bad { color: #ffb4b4; }
 .rc-money .rc-dollar { color: var(--rc-soft); }
 .rc-total input { width: 6ch; font-weight: 700; }

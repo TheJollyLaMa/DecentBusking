@@ -197,7 +197,7 @@ export async function openInviterPrompt({ source = 'profile', record = true, doc
         if (referrer === wallet) throw new Error('That’s you 🙂');
         if (record) {
           status.textContent = '✍️';
-          const { signedPromotionCommand } = await import('./promotions-ui.mjs?v=20261122-musician-referral');
+          const { signedPromotionCommand } = await import('./promotions-ui.mjs?v=20261126-eth-gifts');
           await signedPromotionCommand({ action: 'set-inviter', referrer, source });
           stateRequest = null;
         }

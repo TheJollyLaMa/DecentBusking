@@ -19,7 +19,8 @@ import { groupWatchlistByArtist } from './djuke-playlists.mjs?v=20261030-ad-cuto
 import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readContractEarnings, scanLogEarnings,
   summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261023-djuke-v05';
 import { renderTipLedger } from './tip-ledger-ui.mjs?v=20261123-song-splits';
-import { createProfileInbox, activeReferralInvites, renderReferralInviteCard } from './profile-inbox.mjs?v=20261124-profile-inbox';
+import { promotionMoney, campaignAsset } from './promotions.mjs?v=20261126-eth-gifts';
+import { createProfileInbox, activeReferralInvites, renderReferralInviteCard } from './profile-inbox.mjs?v=20261126-eth-gifts';
 import { renderReferredBadge } from './inviter-prompt.mjs?v=20261125-inviter';
 
 import { renderWallet } from './wallet-label.mjs';
@@ -51,8 +52,8 @@ export function renderPromotionProfileSummary(container, state, wallet, ensName 
   }
   const walletLink = address => `<a href="https://basescan.org/address/${address}" target="_blank" rel="noopener">${address.slice(0, 6)}…${address.slice(-4)}</a>`;
   target.innerHTML = profiles.map(item => `<strong>${ensName || walletLink(wallet)} · Referral pilot</strong><br>` +
-    `${item.qualifiedCount} qualified · pending ${Number(item.pendingUnits) / 1e6} USDC · approved ${Number(item.approvedUnits) / 1e6} USDC · paid ${Number(item.paidUnits) / 1e6} USDC · ` +
-    `maximum ${Number(item.maxEarningsUnits) / 1e6} USDC<br>${item.referred.map(ref => `${walletLink(ref.wallet)}: ${ref.voteProgress}/10 votes, ${ref.trackState}`).join('<br>')}` +
+    `${item.qualifiedCount} qualified · pending ${promotionMoney(item.pendingUnits || '0', campaignAsset(item))} · approved ${promotionMoney(item.approvedUnits || '0', campaignAsset(item))} · paid ${promotionMoney(item.paidUnits || '0', campaignAsset(item))} · ` +
+    `maximum ${promotionMoney(item.maxEarningsUnits || '0', campaignAsset(item))}<br>${item.referred.map(ref => `${walletLink(ref.wallet)}: ${ref.voteProgress}/10 votes, ${ref.trackState}`).join('<br>')}` +
     `<br>Supporter token: ${item.supporterToken.eligible ? 'eligible' : 'not yet eligible'}; eligibility only, no configured mint or transfer.`).join('<hr>');
 }
 

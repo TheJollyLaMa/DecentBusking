@@ -1,7 +1,7 @@
 import { radioCalendarOccurrences, utcToNewYorkInput, newYorkInputToUtc } from './radio-calendar.mjs?v=20261024-programming-calendar';
 import { RADIO_PLAYLISTS } from './radio-playlists.mjs?v=20261116-longform';
 import { upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, validateRadioProgrammingConflicts } from './radio-schedule.mjs?v=20261116-longform';
-import { openReferralCampaignEditor, referralTemplateFrom } from './referral-campaign-editor.mjs?v=20261124-referral-week';
+import { openReferralCampaignEditor, referralTemplateFrom } from './referral-campaign-editor.mjs?v=20261126-eth-gifts';
 
 const zone = 'America/New_York';
 const dateLabel = new Intl.DateTimeFormat('en-US', { timeZone: zone, weekday: 'short', month: 'short', day: 'numeric' });
