@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DBusk DCal · fixture preview</title>
+  <link rel="stylesheet" href="../../css/dbusk-calendar.css">
+  <style>
+    body { color: #eef4fb; background: #090d18; font: 16px system-ui; margin: 12px; }
+    dialog { color: inherit; background: #090d18; border: 1px solid #8bd5ff; border-radius: 20px; }
+    button { padding: 10px; margin: 3px; }
+    #fixture-controls { display: flex; flex-wrap: wrap; gap: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Fixture preview · no live wallet, requests or transactions</h1>
+  <button id="open">Open DBusk DCal</button>
+  <dialog id="radio-schedule-dialog" aria-labelledby="title">
+    <h2 id="title">☿ DBusk DCal · fixtures</h2>
+    <div id="fixture-controls">
+      <button id="connect-a">Fixture wallet A</button>
+      <button id="connect-b">Switch to fixture wallet B</button>
+      <button id="disconnect">Disconnect fixture wallet</button>
+      <button id="fail-source">Campaign source offline</button>
+      <button id="radio-schedule-refresh">Refresh</button>
+      <button id="radio-schedule-close">Close</button>
+    </div>
+    <p id="radio-schedule-status" role="status" aria-live="polite"></p>
+    <section id="calendar"></section>
+  </dialog>
+  <script type="module">
+    import { mountDBuskCalendar } from '../../js/dbusk-calendar.mjs';
+    const A = '0x' + 'a'.repeat(40);
+    const B = '0x' + 'b'.repeat(40);
+    const clock = Date.parse('2026-11-24T15:00:00Z');
+    let wallet = '';
+    let offline = false;
+    const providerListeners = new Map();
+    window.ethereum = {
+      on(name, handler) { providerListeners.set(name, handler); },
+      removeListener(name) { providerListeners.delete(name); },
+      emit(name, value) { providerListeners.get(name)?.(value); },
+    };
+    const bookings = [
+      { id: 'invited-friday', eventId: 'public-friday', title: 'Your Friday set', wallet: A, mode: 'phase1', stewardApproved: true,
+        payoutPolicy: 'pilot-guaranteed-v1', amountUnits: '20000000', status: 'draft', startUtc: '2026-11-28T02:00:00Z', endUtc: '2026-11-28T03:00:00Z' },
+      { id: 'booked-sunday', title: 'Your Sunday set', wallet: A, mode: 'phase1', stewardApproved: true,
+        payoutPolicy: 'pilot-guaranteed-v1', amountUnits: '20000000', status: 'funded', acknowledged: true, startUtc: '2026-11-30T02:00:00Z',
+        endUtc: '2026-11-30T03:00:00Z', transactions: { BookingFunded: { status: 'confirmed', hash: '0x' + '1'.repeat(64) } } },
+      { id: 'other-secret', title: 'Other wallet’s private invitation', wallet: B, mode: 'phase1', stewardApproved: true,
+        status: 'draft', startUtc: '2026-11-27T22:00:00Z', endUtc: '2026-11-27T23:00:00Z' },
+    ];
+    const fetchImpl = async url => {
+      if (offline && url.endsWith('/promotions')) return { ok: false, status: 503, json: async () => ({ error: 'Fixture campaign source offline' }) };
+      const data = url.endsWith('/schedule') ? {
+        ready: true,
+        schedule: [
+          { id: 'friday-top10', label: 'Top 10 Hype', type: 'top10', weekday: 5, startHourLocal: 20, endHourLocal: 21 },
+          { id: 'friday-live', label: 'Friday live radio', type: 'live_performance', weekday: 5, startHourLocal: 21, endHourLocal: 22 },
+          { id: 'sunday-finale', label: 'Sunday Finish Line', type: 'top10', window: 'final-payroll-hour' },
+        ],
+        events: [
+          { id: 'public-friday', title: 'Community Friday concert', startUtc: '2026-11-28T02:00:00Z', endUtc: '2026-11-28T03:00:00Z' },
+          { id: 'archived', title: 'Recorded spring concert', startUtc: '2024-03-09T01:00:00Z', endUtc: '2024-03-09T02:00:00Z' },
+          { id: 'cancelled', title: 'Cancelled Tuesday concert', status: 'cancelled', cancellationReason: 'Fixture cancellation',
+            startUtc: '2026-11-25T00:00:00Z', endUtc: '2026-11-25T01:00:00Z' },
+        ],
+      } : url.endsWith('/promotions') ? {
+        campaigns: [
+          { id: 'winter-referrals', title: 'Winter musician referrals', status: 'published',
+            startsAt: '2026-11-23T05:00:00Z', endsAt: '2026-12-06T05:00:00Z', curatedReferrers: [A] },
+          { id: 'secret-draft', title: 'Unpublished privileged draft', status: 'draft',
+            startsAt: '2026-11-23T05:00:00Z', endsAt: '2026-12-06T05:00:00Z' },
+        ], members: [],
+      } : url.endsWith('/live-bookings') ? { bookings }
+        : url.endsWith('/devert') ? { chainId: 8453, snapshotAt: '2026-11-24T14:00:00Z', campaigns: [
+          { campaignId: '17', title: 'Your album advert', advertiser: A, startedAt: '2026-11-22T05:00:00Z', expiresAt: '2026-11-29T05:00:00Z' },
+        ] } : { ready: true, through: 40000000, entries: [
+          { recipient: A, kind: 'payroll', txHash: '0x' + '2'.repeat(64), timestamp: Date.parse('2026-11-23T17:00:00Z') / 1000,
+            blockNumber: 39999999, logIndex: 0, units: '20000000', asset: 'USDC' },
+        ] };
+      return { ok: true, json: async () => data };
+    };
+    const calendar = mountDBuskCalendar(document.getElementById('calendar'), {
+      dialog: document.getElementById('radio-schedule-dialog'), status: document.getElementById('radio-schedule-status'),
+      serviceUrl: 'https://fixture.invalid', getWallet: () => wallet, now: () => clock, fetchImpl,
+    });
+    document.getElementById('open').onclick = calendar.open;
+    for (const [id, value] of [['connect-a', A], ['connect-b', B], ['disconnect', '']]) {
+      document.getElementById(id).onclick = () => {
+        wallet = value;
+        document.dispatchEvent(new CustomEvent(value ? 'wallet-connected' : 'wallet-disconnected'));
+      };
+    }
+    document.getElementById('fail-source').onclick = () => { offline = !offline; calendar.refresh(true); };
+    calendar.open();
+  </script>
+</body>
+</html>

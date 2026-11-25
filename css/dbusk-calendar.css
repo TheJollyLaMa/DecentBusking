@@ -1,0 +1,62 @@
+#radio-schedule-dialog { box-sizing: border-box; width: min(1200px, 96vw); max-width: 96vw; max-height: 94dvh; padding: clamp(12px, 2vw, 24px); }
+.dbusk-calendar { color: #eef4fb; background: #131d2c; border: 1px solid #40536b; border-radius: 22px; padding: 16px; margin: 16px 0; font: .88rem/1.4 system-ui, sans-serif; }
+.dbcal-controls, .dbcal-options { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin-bottom: 12px; }
+.dbcal-controls h3 { flex: 1 1 250px; margin: 0; font-size: 1.2rem; }
+.dbusk-calendar button, .dbusk-calendar input[type=month], .dbusk-calendar select, .dbcal-detail a { box-sizing: border-box; padding: 9px 12px; border: 1px solid #60728b; border-radius: 12px; color: #f3f7fc; background: #2d4058; font: inherit; cursor: pointer; }
+.dbusk-calendar button:hover, .dbcal-detail a:hover { background: #3c526e; }
+.dbusk-calendar button:focus-visible, .dbusk-calendar input:focus-visible, .dbusk-calendar select:focus-visible, .dbusk-calendar a:focus-visible, .dbcal-scroll:focus-visible { outline: 3px solid #f4d380; outline-offset: 2px; z-index: 5; }
+.dbcal-controls [aria-pressed=true] { background: #315e5a; border-color: #91e0d4; }
+.dbcal-options { justify-content: space-between; color: #c3d0df; font-size: .8rem; }
+.dbcal-options label { display: flex; gap: 7px; align-items: center; }
+.dbcal-scroll { overflow: auto; max-height: 58dvh; border: 1px solid #425268; border-radius: 16px; background: #182435; }
+.dbcal-headings, .dbcal-days, .dbcal-bars { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.dbcal-headings { position: sticky; top: 0; z-index: 4; background: #26354a; }
+.dbcal-headings h4 { font-size: .8rem; margin: 0; padding: 12px 4px; text-align: center; border-right: 1px solid #425268; }
+.dbcal-headings .is-today { background: #315e5a; color: #e3fff2; }
+.dbcal-day { min-width: 0; border-right: 1px solid #425268; border-bottom: 1px solid #425268; }
+.dbcal-timeline { position: relative; height: 1152px; background: repeating-linear-gradient(to bottom, transparent 0 47px, #425268 47px 48px); }
+.dbcal-hour { position: absolute; left: 3px; color: #c3d0df; font-size: .6rem; }
+.dbusk-calendar .dbcal-event { display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 5px; min-width: 0; border: 1px solid #72bbb4; border-left: 3px solid #91e0d4; background: #31585e; font-size: .72rem; overflow: hidden; overflow-wrap: anywhere; }
+.dbcal-timeline .dbcal-event { position: absolute; }
+.dbcal-timeline .dbcal-event { padding: 3px; gap: 0; line-height: 1.2; }
+.dbcal-event strong { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.dbcal-event.is-personal { border-color: #d5a8ff; background: #4b3b67; }
+.dbcal-personal-badge, .dbcal-action-badge { font-size: .65rem; font-weight: 700; }
+.dbcal-event.is-cancelled { opacity: .7; text-decoration: line-through; border-color: #ffb5ae; }
+.dbcal-event.is-projection { opacity: .65; border-style: dashed; }
+.dbcal-bars { gap: 4px 0; padding: 5px 0; }
+.dbusk-calendar[data-mode=week] .dbcal-bars { position: sticky; top: 42px; z-index: 3; background: #182435; }
+.dbusk-calendar .dbcal-event.is-interval { flex-direction: row; align-items: center; gap: 8px; margin: 0 3px; padding: 6px 10px; border-radius: 999px; background: linear-gradient(90deg, #5a3a80, #24606a); }
+.dbcal-bars .continues-before { border-left-style: dashed; border-top-left-radius: 4px !important; border-bottom-left-radius: 4px !important; }
+.dbcal-bars .continues-after { border-right-style: dashed; border-top-right-radius: 4px !important; border-bottom-right-radius: 4px !important; }
+.dbcal-event.needs-action { animation: dbcal-glow 4s ease-in-out infinite; }
+@keyframes dbcal-glow { 50% { box-shadow: 0 0 12px #d5a8ff88; } }
+@media(prefers-reduced-motion: reduce) { .dbcal-event.needs-action { animation: none; box-shadow: 0 0 0 1px #d5a8ff; } }
+.dbcal-detail { margin-top: 14px; padding: 16px; border: 1px solid #60728b; border-radius: 16px; background: #202c3c; }
+.dbcal-detail h4 { margin: 6px 0; font-size: 1.1rem; }
+.dbcal-detail > button:first-child { float: right; }
+.dbcal-detail a, .dbcal-detail button { display: inline-block; margin: 6px 8px 0 0; }
+.dbcal-detail small, .dbcal-coverage { color: #c3d0df; }
+.dbcal-sources { padding-left: 20px; font-size: .75rem; color: #b9ddc5; }
+.dbcal-sources .is-unavailable { color: #ffcf9c; }
+.dbcal-coverage { font-size: .75rem; line-height: 1.6; }
+.dbcal-day-picker { display: none; }
+.dbusk-calendar[data-mode=month] .dbcal-week { min-width: 700px; }
+.dbusk-calendar[data-mode=month] .dbcal-day { min-height: 110px; padding: 4px; }
+.dbusk-calendar[data-mode=month] .dbcal-day .dbcal-event { width: 100%; margin: 3px 0; }
+.dbusk-calendar[data-mode=month] .is-outside { background: #090d1833; }
+@media(max-width: 700px) {
+  .dbusk-calendar { padding: 9px; border-radius: 16px; }
+  .dbcal-controls h3 { flex-basis: 100%; font-size: 1rem; }
+  .dbcal-controls button { min-height: 44px; }
+  .dbcal-controls input[type=month] { width: 100%; }
+  .dbcal-options label { line-height: 1.6; }
+  .dbcal-day-picker { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+  .dbcal-day-picker select { flex: 1; }
+  .dbusk-calendar[data-mode=week] .dbcal-headings, .dbusk-calendar[data-mode=week] .dbcal-days, .dbusk-calendar[data-mode=week] .dbcal-bars { grid-template-columns: minmax(0, 1fr); }
+  .dbusk-calendar[data-mode=week] .dbcal-headings h4:not(.is-selected), .dbusk-calendar[data-mode=week] .dbcal-day:not(.is-selected) { display: none; }
+  .dbusk-calendar[data-mode=week] .dbcal-bars .dbcal-event { grid-column: 1 / -1 !important; grid-row: auto !important; }
+  .dbusk-calendar[data-mode=week] .dbcal-bars .is-off-day { display: none; }
+  .dbcal-detail a, .dbcal-detail button { min-height: 44px; }
+}
+[hidden].dbcal-bars, [hidden].dbcal-detail, [hidden].dbcal-day-picker { display: none; }

@@ -67,7 +67,7 @@ test('public schedule link opens the existing calendar and subscription controls
     let renders = 0;
     const document = {
       getElementById: id => {
-        if (!nodes.has(id)) nodes.set(id, { open: false, addEventListener() {},
+        if (!nodes.has(id)) nodes.set(id, { open: false, dataset: {}, addEventListener() {},
           showModal() { this.open = true; } });
         return nodes.get(id);
       },
@@ -76,7 +76,7 @@ test('public schedule link opens the existing calendar and subscription controls
     const context = vm.createContext({
       document, window: { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.example' }, location: { search } },
       URLSearchParams, AbortSignal, setInterval() {},
-      renderSchedule: () => { renders++; },
+      mountDBuskCalendar: (root, { dialog }) => ({ open() { dialog.showModal(); renders++; } }),
       fetch: async () => ({ ok: true, json: async () => ({ ready: true, schedule: [], events: [] }) }),
     });
     const start = source.indexOf('export function initRadioScheduleBoard()');
