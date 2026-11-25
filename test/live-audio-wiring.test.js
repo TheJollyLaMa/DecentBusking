@@ -913,8 +913,8 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /live-performance-admin\.mjs\?v=20261121-typed-review/);
   assert.match(html, /live-booking-notifications\.mjs\?v=20261117-booking-assets/);
-  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261121-payment-first"/);
-  assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261115-afterparty"/);
+  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261123-supporter-queue"/);
+  assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261124-public-personal"/);
   assert.match(html, /live-performance\.css\?v=20261121-action-status/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
   assert.equal(map.imports['./js/live-performance-profile.mjs?v=20261115-afterparty'],
@@ -928,13 +928,13 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
   assert.equal(map.imports['./js/live-booking-notifications.mjs?v=20261113-one-action-release'],
     './js/live-booking-notifications.mjs?v=20261117-booking-assets');
   assert.equal(map.imports['./js/radio-schedule-ui.mjs?v=20261025-community-reminder'],
-    './js/radio-schedule-ui.mjs?v=20261115-afterparty');
+    './js/radio-schedule-ui.mjs?v=20261124-public-personal');
   assert.equal(map.imports['./js/fund-display.mjs?v=20261024-djuke-labels'],
-    './js/fund-display.mjs?v=20261108-live-audio-pilot');
-  for (const file of ['radio-schedule-ui.mjs']) {
-    assert.match(fs.readFileSync(path.join(__dirname, '../js', file), 'utf8'),
-      /live-performance-profile\.mjs\?v=20261115-afterparty/);
-  }
+    './js/fund-display.mjs?v=20261124-visible-payments');
+  assert.match(fs.readFileSync(path.join(__dirname, '../js/radio-schedule-ui.mjs'), 'utf8'),
+    /dbusk-calendar\.mjs/);
+  assert.match(fs.readFileSync(path.join(__dirname, '../js/dbusk-calendar.mjs'), 'utf8'),
+    /open-creator-profile/);
   assert.match(fs.readFileSync(path.join(__dirname, '../js/creator-profile.mjs'), 'utf8'),
     /live-performance-profile\.mjs\?v=20261115-afterparty/);
   assert.match(fs.readFileSync(path.join(__dirname, '../js/live-performance-admin.mjs'), 'utf8'),

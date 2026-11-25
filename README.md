@@ -355,6 +355,55 @@ Invited referrers see a live invite card in their profile's **✨ For you**
 inbox. See
 [docs/PROMOTIONS.md](docs/PROMOTIONS.md#running-a-referral-campaign-from-the-calendar).
 
+**Right ankh → Public Schedule → ☿ DBusk DCal** is a read-only weekly/monthly
+calendar with a month picker for past dates. Published radio hours and campaigns
+are readable without a wallet. Your connected wallet adds its own invitations,
+soundchecks/shows, referral involvement, indexed payroll/music/tip receipts and
+DVert campaign terms. **◈ For you** marks personal entries; **✦** marks an
+available next step. Select an event for the existing Profile acceptance/payment,
+performer-room, campaign or DVert portal. There are no public edit, drag, cancel,
+programming or admin controls—even for the owner wallet. Browsing never signs or
+moves funds; explicit actions in the destination portal keep their existing terms.
+
+An ended schedule is not labelled completed or paid. Past **recorded** entries
+are distinct from the optional **Show past projections of today’s rules**
+checkbox; those projections are not historical evidence. Empty old months do
+not establish complete historical coverage. The schedule currently retains
+limited dated events, the earnings index covers its configured contracts/blocks,
+and each configured tip router supplies only its newest 25 incoming receipts
+(older pages remain in Profile). Outgoing wallet activity and arbitrary contract
+history are not exhaustively indexed here. Failed/restoring sources are marked
+unavailable/partial, not silently treated as successful empty results.
+
+**Storage:** this UI makes read-only projections. Payroll/music/tip events use
+existing Base contract-log/receipt provenance, and DVert terms use its contract
+snapshot. Live fees and NFT gifts show separate indexed proof/status; promises,
+pending verification, escrow funding and payment received are not equivalent.
+Radio schedules, invitations and promotion ledgers/checkpoints are off-chain
+(including IPFS), **not on-chain calendar storage**. No calendar contract is
+deployed or written by this change. Literal new on-chain calendar persistence
+requires an explicitly approved contract/authority/migration design before a
+future deployment; no new authority, transaction or fund movement is implied.
+
+Implementation boundary: `js/dbusk-calendar-core.mjs` projects allowlisted event
+records (`id`, UTC interval, audience/owner, type/status, provenance, details,
+proofs and portal). `dbusk-calendar-store.mjs` supplies bounded concurrent indexed
+reads with abort/generation and wallet guards; `dbusk-calendar.mjs` renders the
+public/personal overlay. Future repo-dev/pinning campaigns need real sources
+before adding adapters; none are fabricated. This is Busking-first, not a claimed
+completed reusable DecentCalendar extraction.
+
+Reuse decision: adapted Busking `radio-calendar.mjs` (`radioCalendarOccurrences`,
+NY time conversion) and `radio-programming-calendar.mjs` (`programmingWeek` /
+continuous-bar layout) at `3230c38`, plus the existing `performerRoomUrl`,
+`formatLiveAsset`, earnings and tip indexes. DecentCalendar
+`decent-calendar-vanilla/js/calendar-layers.js:createLayerStore` at `08e60c4`
+(Apache-2.0) provided generation/partial-state prior art, not a bundled dependency:
+its Base appointment registry, global FullCalendar and wallet hooks differ.
+Scope checked: Canopy's curated DecentCalendar lead, the receiving sources and
+relevant local worktrees; no finished public weekly/monthly widget was found
+within those checks. Admin rendering/actions remain in their existing overlay.
+
 First-time voters, uploaders and Discord uploaders are asked once, skippably,
 **👽 Who brought you here?** The answer is a public, one-per-wallet inviter
 record, shown as a subtle **🛸 via …** pill on the profile banner. See
@@ -390,10 +439,16 @@ start-of-show announcements, create Discord Scheduled Events, or send reminders.
 
 ### Cancelling a live slot
 
-Open the community radio schedule with the owner wallet connected and choose **Cancel event** on the dated occurrence. Enter a public reason, confirm, and sign the calendar update. The occurrence remains visible with a red **Canceled** stamp for seven days; future recurring Fridays are unchanged. The shared worker calendar persists the cancellation across restarts, and open calendars refresh every 15 seconds. Cancellation does not approve, refund, or settle performer payments.
+Use **Left ankh → Radio Programming** with the authorized owner wallet for
+existing cancellation/edit actions; the right-ankh public calendar has no
+cancellation controls. Cancel only the dated occurrence with a public reason.
+Future recurring Fridays remain unchanged. The shared worker persists
+cancellations across restarts; the public calendar refreshes at most every five
+minutes while open and visible (or via Refresh). Cancellation does not approve,
+refund, or settle performer payments.
 
-Listeners can choose **Set reminder** for the next weekly show or a scheduled
-live event. Apple/Outlook `.ics` downloads include a 15-minute display alarm.
+Listeners can select a future public radio event for its **🔔 reminder** links.
+Apple/Outlook `.ics` downloads include a 15-minute display alarm.
 Google Calendar opens a prefilled event; select a 15-minute notification before
 saving (Google's event-template URL does not set notification preferences).
 Save into an account synced across devices; imported individual events do not

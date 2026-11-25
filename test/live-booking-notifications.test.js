@@ -94,7 +94,7 @@ test('booking and mint notification timers use five-minute checks, with no fifte
  assert.equal(LIVE_BOOKING_POLL_MS, 300000);
  const source = file => fs.readFileSync(new URL(`../${file}`, `file://${__filename}`), 'utf8');
  assert.doesNotMatch(source('js/live-performance-admin.mjs'), /15_000|15000|setInterval/);
- assert.match(source('js/radio-schedule-ui.mjs'), /setInterval\([^]*5 \* 60 \* 1000\)/);
+ assert.match(source('js/dbusk-calendar.mjs'), /setInterval\([^]*5 \* 60 \* 1000\)/);
  assert.match(source('js/components/header-admin-inject.js'), /setInterval\([^]*5 \* 60 \* 1000\)/);
 });
 
