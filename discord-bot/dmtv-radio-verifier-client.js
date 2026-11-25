@@ -6,11 +6,12 @@ import { chromium } from 'playwright-core';
 
 const probeOrigin = 'http://127.0.0.1:46931';
 
-export async function createRadioProofBrowser(executablePath) {
+export async function createRadioProofBrowser(executablePath, libraryPath = process.env.DMTV_CHROME_LIBRARY_PATH) {
   const browser = await chromium.launch({ executablePath, timeout: 15_000,
-    args: ['--autoplay-policy=no-user-gesture-required'],
-    env: Object.fromEntries(['HOME', 'PATH', 'TMPDIR', 'LANG', 'DISPLAY']
-      .filter(name => process.env[name] != null).map(name => [name, process.env[name]])) });
+    args: ['--autoplay-policy=no-user-gesture-required', '--disable-dev-shm-usage'],
+    env: { ...Object.fromEntries(['HOME', 'PATH', 'TMPDIR', 'LANG', 'DISPLAY']
+      .filter(name => process.env[name] != null).map(name => [name, process.env[name]])),
+    ...(libraryPath ? { LD_LIBRARY_PATH: libraryPath } : {}) } });
   try {
     const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
     page.on('console', message => {
@@ -50,8 +51,8 @@ async function main() {
   if (base.protocol !== 'https:' || base.username || base.password || base.origin !== base.href.replace(/\/$/, '')) {
     throw new Error('DMTv verifier requires the public HTTPS worker origin');
   }
-  const secret = process.env.CHECKPOINT_MIRROR_SECRET;
-  if (!secret || Buffer.byteLength(secret) < 32) throw new Error('DMTv verifier requires the checkpoint mirror secret');
+  const secret = process.env.DMTV_VERIFIER_SECRET || process.env.CHECKPOINT_MIRROR_SECRET;
+  if (!secret || Buffer.byteLength(secret) < 32) throw new Error('DMTv verifier requires DMTV_VERIFIER_SECRET');
   const executablePath = process.env.DMTV_CHROME_EXECUTABLE;
   if (!executablePath) throw new Error('Set DMTV_CHROME_EXECUTABLE to the installed Chrome executable');
   let stopping = false;

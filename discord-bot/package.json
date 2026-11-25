@@ -6,6 +6,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "postinstall": "node dmtv-verifier-chrome.js",
     "dev": "node --watch index.js",
     "checkpoint-mirror": "node checkpoint-mirror-client.js",
     "dmtv-radio-verifier": "node dmtv-radio-verifier-client.js",

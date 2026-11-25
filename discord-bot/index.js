@@ -76,6 +76,8 @@ import { supportsDjukeAlbumsAndGas } from '../js/djuke-version.mjs';
 import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, verifyDjukePlaylistWorker, DJUKE_ABI, DJUKE_PLAYLIST_WORKER_ABI } from './djuke.js';
 import { createDevertQueueReader, createDevertQueueRuntime, createDevertQueueCatalogSync, combinePaidQueues } from './devert-queue.js';
 import { attachDmtvRadioVerification, createDmtvRadioVerification } from './dmtv-radio-verification.js';
+import { startInServiceRadioVerifier } from './dmtv-radio-verifier-service.js';
+import { createServiceAuthorization } from './service-authorization.js';
 import { devertQueueAbi } from '../js/devert-queue.mjs';
 import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, normalizeDevertCampaign,
   resolveDevertSchedulerPrivateKey } from './devert.js';
@@ -2110,6 +2112,8 @@ async function main() {
     alchemyWebhook,
     checkpointMirror,
     dmtvRadioVerification,
+    authorizeDmtvRadioVerifier: dmtvRadioVerification && createServiceAuthorization({ name: 'DMTV_VERIFIER_SECRET',
+      secret: process.env.DMTV_VERIFIER_SECRET, legacySecret: process.env.CHECKPOINT_MIRROR_SECRET }),
     creatorProfiles,
     getDjukeState: readDjukeState ? async () => {
       const state = await readDjukeState();
@@ -2300,10 +2304,8 @@ async function main() {
         return { ready: recorder.deploymentState().ready &&
           !(current?.armed && ['preflight', 'live'].includes(current.phase)) };
       } }),
-    authorizeRadioDeployment: authorization => {
-      if (!checkpointMirror) throw new Error('Radio deployment authorization unavailable');
-      checkpointMirror.authorize(authorization);
-    },
+    authorizeRadioDeployment: createServiceAuthorization({ name: 'RADIO_DEPLOY_SECRET',
+      secret: process.env.RADIO_DEPLOY_SECRET, legacySecret: process.env.CHECKPOINT_MIRROR_SECRET }),
     getRadioState: readPublicRadioState,
     getRadioMediaUrl: async cid => {
       const session = getActiveJukeLoopSession();
@@ -2470,6 +2472,9 @@ async function main() {
   const port = process.env.PORT || 10000;
   http.createServer(requestHandler).listen(port, () => {
     console.log(`Health check and IPFS worker listening on port ${port}`);
+    if (dmtvRadioVerification) {
+      startInServiceRadioVerifier().catch(error => console.error(`[dmtv-verifier] ${error.message}`));
+    }
   });
 
   // Restore durable state before Discord backfill or JukeLoop starts.

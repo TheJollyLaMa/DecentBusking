@@ -201,19 +201,28 @@ and settlement replay through a worker restart before enabling
 disabling the worker flag when suspending purchases: the browser flag alone
 cannot prevent direct on-chain reservations.
 
-The $3 main-radio lane uses a separate Chrome verifier on the checkpoint
-mirror host. It plays the same public HLS audio and synchronized MP4 picture
+The $3 main-radio lane uses a Chrome verifier that runs inside the hosted
+worker on Render. It plays the same public HLS audio and synchronized MP4 picture
 as a listener. Only unique intervals with advancing audio, decoded video
 frames and a shared program clock count. At 50% verified synchronized
 playback, the worker journals fulfillment and settles; failure below 50%
 returns the full $3. Audio-only completion never settles this lane.
 The $2 DMTv station keeps its complete-publication requirement.
 
-Install the worker dependencies on the mirror host, set
-`DMTV_CHROME_EXECUTABLE` to an installed Chrome with AAC/H.264 support, and
-run `npm run dmtv-radio-verifier` alongside (not instead of) the checkpoint
-mirror, with the same `PUBLIC_WORKER_URL` and `CHECKPOINT_MIRROR_SECRET`.
-The browser receives no signing keys or mirror secret. It monitors only the
+On Render, set `DMTV_RADIO_VERIFIER_IN_SERVICE=true` and a dedicated
+`DMTV_VERIFIER_SECRET` (32+ bytes). The `npm install` postinstall step then
+installs Chrome Headless Shell into `discord-bot/.dmtv-browsers/` (extracting any
+missing Debian libraries without root), and the worker supervises
+`dmtv-radio-verifier-client.js` as a restarted child process. It uses
+`PUBLIC_WORKER_URL`, or Render's `RENDER_EXTERNAL_URL`. If Chrome fails to
+install or launch, the verifier stays unready and paid radio-video starts stay
+gated; the bot keeps running. To run it elsewhere instead, set
+`DMTV_CHROME_EXECUTABLE` and run `npm run dmtv-radio-verifier` with
+`PUBLIC_WORKER_URL` and `DMTV_VERIFIER_SECRET`. `CHECKPOINT_MIRROR_SECRET` is
+accepted only until `DMTV_VERIFIER_SECRET` is set on the worker; likewise
+`RADIO_DEPLOY_SECRET` replaces it for the radio pre-deploy hand-off.
+The verifier process receives only its own secret, and the browser receives no
+secrets or signing keys. It monitors only the
 requested public play, not listener tabs. Set `DMTV_RADIO_VIDEO_ENABLED=true`
 on the hosted worker only after the verifier has passed playback testing.
 Verifier heartbeats expire after 12 seconds; missing verification prevents

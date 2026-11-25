@@ -170,3 +170,39 @@ test('real Chrome verifies half a public HLS play with decoded video and rejects
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('in-service verifier passes only its own secret and restarts with backoff', async () => {
+  const { EventEmitter } = require('node:events');
+  const { startInServiceRadioVerifier } = await import('../discord-bot/dmtv-radio-verifier-service.js');
+  const log = { info() {}, error() {} };
+  const env = { DMTV_RADIO_VERIFIER_IN_SERVICE: 'true', RENDER_EXTERNAL_URL: 'https://busk.example',
+    DMTV_VERIFIER_SECRET: 'v'.repeat(32), CHECKPOINT_MIRROR_SECRET: 'm'.repeat(32), PINATA_JWT: 'jwt', PATH: '/bin' };
+  const chrome = async () => ({ executablePath: '/chrome', libraryPath: '/libs' });
+  assert.equal(await startInServiceRadioVerifier({ env: { ...env, DMTV_RADIO_VERIFIER_IN_SERVICE: 'false' }, log }), null);
+  assert.equal(await startInServiceRadioVerifier({ env, log, readChrome: async () => { throw new Error('missing'); } }), null);
+
+  const children = [];
+  const spawnChild = (command, args, options) => {
+    const child = Object.assign(new EventEmitter(), { options, kill() {} });
+    children.push(child);
+    return child;
+  };
+  const service = await startInServiceRadioVerifier({ env, log, spawnChild, readChrome: chrome, minDelayMs: 1, maxDelayMs: 4 });
+  assert.deepEqual(children[0].options.env, { PATH: '/bin', PUBLIC_WORKER_URL: 'https://busk.example',
+    DMTV_VERIFIER_SECRET: 'v'.repeat(32), DMTV_CHROME_EXECUTABLE: '/chrome', DMTV_CHROME_LIBRARY_PATH: '/libs' });
+  children[0].emit('exit', 1, null);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(children.length, 2);
+  service.stop();
+  children[1].emit('exit', null, 'SIGTERM');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(children.length, 2);
+});
+
+test('verifier Chrome installer maps missing shared libraries to Debian packages', async () => {
+  const { missingLibraries, packagesForLibraries } = await import('../discord-bot/dmtv-verifier-chrome.js');
+  const missing = missingLibraries('\tlibnss3.so => not found\n\tlibc.so.6 => /lib/libc.so.6\n\tlibnssutil3.so => not found\n');
+  assert.deepEqual(missing, ['libnss3.so', 'libnssutil3.so']);
+  assert.deepEqual(packagesForLibraries(missing), ['libnss3']);
+  assert.throws(() => packagesForLibraries(['libunknown.so.9']), /No Debian package/);
+});
