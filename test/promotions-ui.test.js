@@ -241,7 +241,7 @@ test('referral campaign blob titles, reuses templates and checks the referrals f
   assert.throws(() => referralCampaignPayload({ title: '', startsAt, endsAt, claimDeadline, referrers: [], legAmounts, budgetUnits: '210000000' }), /exact multiple/);
   assert.deepEqual(referralTemplateFrom({ ...custom, curatedReferrers: [wallet.toUpperCase().replace('0X', '0x')] }),
     { title: 'Jose', durationMs: 14 * 86400000, claimGraceMs: 7 * 86400000, referrers: [wallet], names: { [wallet]: 'Jose' },
-      legAmounts, budgetUnits: '200000000', requiredVotes: 5, asset: 'usdc', gifts: [] });
+      legAmounts, budgetUnits: '200000000', requiredVotes: 5, asset: 'usdc', gifts: [], supporterRewards: custom.supporterRewards });
   assert.equal(dollarsToUnits('$12.5'), '12500000');
   assert.equal(dollarsToUnits('150'), '150000000');
   assert.equal(dollarsToUnits('1.234'), null);
@@ -264,9 +264,10 @@ test('ETH campaigns keep their own fund bucket, reserve gifts and convert amount
   const claimDeadline = new Date(Date.now() + 22 * 86400000).toISOString();
   const wallet = '0x' + '12'.repeat(20);
   const legAmounts = { referrer: '3000000000000000', musician: '1000000000000000', 'dbusk-top10': '1000000000000000', 'dbusk-playback': '0' };
-  const gifts = [{ trigger: 'top', amountUnits: '10000000000000000', supporter: true }, { trigger: 'participation', amountUnits: '0', supporter: true }];
+  const gifts = [{ trigger: 'top', amountUnits: '0', supporter: true }, { trigger: 'participation', amountUnits: '0', supporter: true }];
   const payload = referralCampaignPayload({ title: 'Ether', startsAt, endsAt, claimDeadline, referrers: [wallet], legAmounts,
-    budgetUnits: '50000000000000000', asset: 'eth', gifts });
+    budgetUnits: '50000000000000000', asset: 'eth', gifts,
+    fundMatchQuote: { ethUsdMicros: '4000000000', quotedAt: new Date().toISOString() } });
   assert.equal(payload.asset, 'eth');
   assert.equal(payload.maxAwards, 10);
   assert.deepEqual(payload.gifts.map(g => g.trigger), ['participation', 'top']);
@@ -279,6 +280,84 @@ test('ETH campaigns keep their own fund bucket, reserve gifts and convert amount
   assert.equal(convertCampaignUnits('10000000', 'usdc', 'eth', 4000), '2500000000000000');
   assert.equal(convertCampaignUnits('2500000000000000', 'eth', 'usdc', 4000), '10000000');
   assert.equal(convertCampaignUnits('10000000', 'usdc', 'eth', null), null);
+});
+test('publication match rounding is integer-exact and basket identities reject malformed or repeated tokens', async () => {
+  const { referralFundMatchUnits, campaignSupporterRewards, SUPPORTER_REWARD } = await import('../js/promotions.mjs');
+  const quote = { ethUsdMicros: '4025000000', quotedAt: new Date().toISOString() };
+  assert.equal(referralFundMatchUnits('200000000000000', quote), '810000', 'half cent rounds upward');
+  assert.equal(referralFundMatchUnits('199999999999999', quote), '800000', 'just below half rounds downward');
+  assert.throws(() => referralFundMatchUnits('200000000000000', { ...quote, ethUsdMicros: '0' }), /fixed publication/);
+  assert.throws(() => referralFundMatchUnits('-1', quote), /Invalid ETH share/);
+  assert.equal(campaignSupporterRewards([{ ...SUPPORTER_REWARD, tokenId: 75 }]), null);
+  assert.equal(campaignSupporterRewards([{ ...SUPPORTER_REWARD, quantity: 2 }]), null);
+  assert.equal(campaignSupporterRewards([SUPPORTER_REWARD, { ...SUPPORTER_REWARD, contract: SUPPORTER_REWARD.contract.toUpperCase().replace('0X', '0x') }]), null);
+  const { referralCampaignPayload } = await import('../js/referral-campaign-editor.mjs');
+  const config = { startsAt: new Date(Date.now() + 86400000).toISOString(),
+    endsAt: new Date(Date.now() + 2 * 86400000).toISOString(), claimDeadline: new Date(Date.now() + 3 * 86400000).toISOString(), referrers: [] };
+  assert.throws(() => referralCampaignPayload({ ...config, gifts: [{ trigger: 'top', amountUnits: '1000000', supporter: true }] }), /DNFTs only/);
+});
+
+test('Payroll resumes the USDC phase without re-paying the source and never treats approval as a deposit', async t => {
+  const { createReferralMatchPayroll } = await import('../js/referral-match-payroll.mjs');
+  const { REFERRAL_SETTLEMENT_VERSION } = await import('../js/promotions.mjs');
+  const previous = global.window;
+  t.after(() => { if (previous === undefined) delete global.window; else global.window = previous; });
+  global.window = { _wallet: { address: owner } };
+  const node = tag => ({ tag, children: [], listeners: [], classList: { toggle() {} },
+    append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+    addEventListener(_, fn) { this.listeners.push(fn); }, setAttribute() {} });
+  const root = { ...node('section'), ownerDocument: { createElement: node } };
+  const walk = n => [n, ...(n.children || []).flatMap(walk)];
+  const button = label => walk(root).find(n => n.tag === 'button' && n.textContent === label);
+  const leg = { id: 'dbusk-top10', fund: 'dbusk-top10', kind: 'funding-needed', amountUnits: '200000000000000',
+    status: 'funding-needed', match: { usdcUnits: '800000', source: { status: 'approved', recipient: owner.toLowerCase() }, deposit: { status: 'owed' } } };
+  const claim = { id: 'claim-match', campaignId: 'campaign-match', subjectWallet: '0x' + '12'.repeat(20), status: 'approved', legs: [leg] };
+  let state = { revision: 1, routerAddress, claims: [claim], campaigns: [{
+    id: claim.campaignId, title: 'Trial', settlementVersion: REFERRAL_SETTLEMENT_VERSION, asset: 'eth', status: 'closed',
+    maxAwards: 1, endsAt: new Date(Date.now() - 1000).toISOString() }] };
+  const entries = new Map(), actions = [];
+  const storage = { getItem: k => entries.get(k) || null, setItem: (k, v) => entries.set(k, v), removeItem: k => entries.delete(k) };
+  const sign = async command => {
+    actions.push(command.action);
+    assert.equal(command.revision, state.revision); state.revision++;
+    if (command.action === 'prepare-fund-match-deposit') leg.match.deposit.status = 'deposit-pending';
+    if (command.action === 'release-fund-match-preparation') leg.match.deposit.status = 'owed';
+    if (command.action === 'reconcile-fund-match-deposit') {
+      assert.equal(command.txHash, txHash);
+      leg.match.deposit.txHash = txHash;
+      if (actions.filter(a => a === command.action).length === 2) { leg.match.deposit.status = 'paid'; leg.status = 'paid'; claim.status = 'paid'; }
+    }
+    return state;
+  };
+  let sourceSends = 0, deposits = 0, acceptDeposit = false, failDeposit = true, locked = false;
+  const view = createReferralMatchPayroll({ root, fetchState: async () => state, sign, storage,
+    setBusy: value => { locked = value; }, isBusy: () => locked,
+    confirmAction: () => acceptDeposit, ask: () => 'Wallet history shows approval only; no deposit sent',
+    getWallet: async () => ({ address: owner, signer: {}, check: async () => {},
+      ethers: { id, Contract: function () { return {}; } } }),
+    paySource: async () => { sourceSends++; leg.match.source.status = 'paid'; leg.match.source.txHash = '0x' + '34'.repeat(32); },
+    deposit: async config => {
+      deposits++; assert.equal(config.amountUnits, 800000n); assert.equal(config.confirmations, 2);
+      assert.equal(config.fundId, id('dbusk-top10'));
+      await config.onBroadcast({ stage: 'approval', txHash: '0x' + '56'.repeat(32) });
+      if (failDeposit) throw new Error('Wallet refused deposit');
+      await config.onBroadcast({ stage: 'deposit', txHash });
+      return { txHash };
+    } });
+  await view.load();
+  await button('Release & match').listeners[0]();
+  assert.equal(sourceSends, 1); assert.equal(deposits, 0); assert.ok(button('Deposit USDC')); assert.equal(locked, false);
+  acceptDeposit = true;
+  await button('Deposit USDC').listeners[0]();
+  assert.equal(sourceSends, 1); assert.equal(leg.match.deposit.status, 'deposit-pending');
+  assert.equal(JSON.parse([...entries.values()][0]).hash, undefined, 'approval hash is never a deposit hash');
+  assert.ok(button('Review unsent'));
+  await button('Review unsent').listeners[0]();
+  assert.equal(entries.size, 0); assert.equal(leg.match.source.status, 'paid');
+  failDeposit = false;
+  await button('Deposit USDC').listeners[0]();
+  assert.equal(sourceSends, 1); assert.equal(deposits, 2); assert.equal(claim.status, 'paid');
+  assert.equal(entries.size, 0); assert.equal(locked, false);
 });
 test('campaign gifts pay native ETH from the campaign fund with their own work reference', async t => {
   const { sendCampaignGift } = await import('../js/promotions-ui.mjs');

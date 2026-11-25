@@ -61,18 +61,26 @@
       "./js/performer-room.mjs?v=20261114-allocated-stage":"./js/performer-room.mjs?v=20261117-booking-assets",
       "./js/performer-room.mjs?v=20261116-curtain":"./js/performer-room.mjs?v=20261117-booking-assets",
       "./js/radio-schedule-ui.mjs?v=20261025-community-reminder":"./js/radio-schedule-ui.mjs?v=20261122-musician-referral",
-      "./js/promotions-ui.mjs?v=20261116-promotions":"./js/promotions-ui.mjs?v=20261123-supporter-queue",
-      "./js/promotions-ui.mjs?v=20261122-musician-referral":"./js/promotions-ui.mjs?v=20261123-supporter-queue",
-      "./js/promotions-ui.mjs?v=20261126-eth-gifts":"./js/promotions-ui.mjs?v=20261123-supporter-queue",
-      "./js/promotions.mjs?v=20261126-eth-gifts":"./js/promotions.mjs?v=20261123-supporter-queue",
+      "./js/promotions-ui.mjs?v=20261116-promotions":"./js/promotions-ui.mjs?v=20261126-referral-match",
+      "./js/promotions-ui.mjs?v=20261122-musician-referral":"./js/promotions-ui.mjs?v=20261126-referral-match",
+      "./js/promotions-ui.mjs?v=20261126-eth-gifts":"./js/promotions-ui.mjs?v=20261126-referral-match",
+      "./js/promotions-ui.mjs?v=20261123-supporter-queue":"./js/promotions-ui.mjs?v=20261126-referral-match",
+      "./js/promotions-ui.mjs":"./js/promotions-ui.mjs?v=20261126-referral-match",
+      "./js/promotions.mjs?v=20261126-eth-gifts":"./js/promotions.mjs?v=20261126-referral-match",
+      "./js/promotions.mjs?v=20261123-supporter-queue":"./js/promotions.mjs?v=20261126-referral-match",
+      "./js/promotions.mjs":"./js/promotions.mjs?v=20261126-referral-match",
+      "./js/supporter-payroll.mjs?v=20261123-supporter-queue":"./js/supporter-payroll.mjs?v=20261126-referral-match",
+      "./js/eth-usd-quote.mjs?v=20261126-eth-gifts":"./js/eth-usd-quote.mjs?v=20261126-referral-match",
       "./js/mint.js?v=20261030-ad-cutoff":"./js/mint.js?v=20261125-inviter",
       "./js/fund-display.mjs?v=20261024-djuke-labels":"./js/fund-display.mjs?v=20261124-visible-payments",
       "./js/fund-display.mjs?v=20261124-lazy-funds":"./js/fund-display.mjs?v=20261124-visible-payments",
       "./js/fund-display.mjs":"./js/fund-display.mjs?v=20261124-visible-payments",
-      "./js/settlement-funds.mjs":"./js/settlement-funds.mjs?v=20261124-admin-funds",
-      "./js/settlement-funds.mjs?v=20261124-fund-bunny":"./js/settlement-funds.mjs?v=20261124-admin-funds",
-      "./js/settlement-funds.mjs?v=20261116-promotions":"./js/settlement-funds.mjs?v=20261124-admin-funds",
-      "./js/referral-campaign-editor.mjs?v=20261126-eth-gifts":"./js/referral-campaign-editor.mjs?v=20261124-admin-funds",
+      "./js/settlement-funds.mjs":"./js/settlement-funds.mjs?v=20261126-referral-match",
+      "./js/settlement-funds.mjs?v=20261124-fund-bunny":"./js/settlement-funds.mjs?v=20261126-referral-match",
+      "./js/settlement-funds.mjs?v=20261116-promotions":"./js/settlement-funds.mjs?v=20261126-referral-match",
+      "./js/settlement-funds.mjs?v=20261124-admin-funds":"./js/settlement-funds.mjs?v=20261126-referral-match",
+      "./js/referral-campaign-editor.mjs?v=20261126-eth-gifts":"./js/referral-campaign-editor.mjs?v=20261126-referral-match",
+      "./js/referral-campaign-editor.mjs?v=20261124-admin-funds":"./js/referral-campaign-editor.mjs?v=20261126-referral-match",
       "./js/fund-header.mjs?v=20261124-visible-payments":"./js/fund-header.mjs?v=20261124-fund-bunny-keys",
       "./js/fund-contribution.mjs":"./js/fund-contribution.mjs?v=20261124-admin-funds",
       "./js/fund-contribution.mjs?v=20261124-verified-funds":"./js/fund-contribution.mjs?v=20261124-admin-funds",
@@ -80,7 +88,7 @@
       "./js/fund-contribution.mjs?v=20261124-fund-bunny-keys":"./js/fund-contribution.mjs?v=20261124-admin-funds"
     }}
   </script>
-  <link rel="stylesheet" href="css/radio-programming.css?v=20261126-eth-gifts" />
+  <link rel="stylesheet" href="css/radio-programming.css?v=20261126-referral-match" />
   <link rel="stylesheet" href="css/fund-admin.css?v=20261124-admin-funds" />
   <link rel="stylesheet" href="css/profile-inbox.css?v=20261126-eth-gifts" />
   <link rel="stylesheet" href="css/inviter-prompt.css?v=20261125-inviter" />
@@ -1274,6 +1282,7 @@
           </button>
         </div>
         <section id="payroll-supporter-queue" class="supporter-payroll" aria-label="Supporter tokens owed"></section>
+        <section id="payroll-referral-match-queue" class="supporter-payroll" aria-label="Referral fund matches owed"></section>
       </div>
     </div>
   </div>
@@ -1312,7 +1321,7 @@
   <script type="module" src="js/content-review-ui.mjs?v=20261107-flags"></script>
 
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
-  <script type="module" src="js/payroll.js?v=20261124-admin-funds"></script>
+  <script type="module" src="js/payroll.js?v=20261126-referral-match"></script>
   <script type="module" src="js/radio-history.js?v=20261029-tally-sections"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261122-musician-referral"></script>
   <link rel="stylesheet" href="css/fund-tour.css?v=20261124-fund-bunny">
@@ -1330,7 +1339,7 @@
   <script type="module" src="js/panel-equalizers.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/top-ten-live-meter.mjs?v=20261025-seamless-handoff"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261124-admin-funds';
+    import { initPayroll } from './js/payroll.js?v=20261126-referral-match';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
   <script type="module">

@@ -31,6 +31,7 @@ import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { repositoryWorkReferenceText } from './repository-payroll-status.mjs?v=20261118-verified-backlog';
 import { loadSupporterPayroll } from './supporter-payroll.mjs?v=20261123-supporter-queue';
+import { loadReferralMatchPayroll } from './referral-match-payroll.mjs?v=20261126-referral-match';
 import { FUND_ADMIN_ABI, SETTLEMENT_ROUTER_ADDRESS, verifyFundAdmin, confirmFundAction, mountFundAdmin } from './fund-admin.mjs?v=20261124-admin-funds';
 
 function _displayTokenAmount(units, currency, decimals) {
@@ -444,7 +445,9 @@ export async function loadPayrollQueue() {
   const emptyMsg   = document.getElementById('payroll-empty-msg');
 
   if (!tableBody) return;
-  void loadSupporterPayroll();
+  const referralOptions = { isBusy: () => _settling, setBusy: value => { _settling = value; } };
+  void loadSupporterPayroll(document, referralOptions);
+  void loadReferralMatchPayroll(document, referralOptions);
   tableBody.innerHTML = '<tr><td colspan="5" class="payroll-loading">⏳ Loading payroll queue…</td></tr>';
   if (statusEl) statusEl.textContent = '';
 

@@ -1,5 +1,5 @@
 import { PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS, MUSICIAN_REFERRAL_PILOT, MUSICIAN_REFERRAL_TERMS, PROMOTIONS_FUND, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, isPromotionsFund,
-  promotionAuthorization, promotionWorkReference, promotionMoney, promotionUnits, promotionLink, campaignAsset } from './promotions.mjs?v=20261126-eth-gifts';
+  promotionAuthorization, promotionWorkReference, promotionMoney, promotionUnits, promotionLink, campaignAsset, musicianReferralConfig } from './promotions.mjs?v=20261126-eth-gifts';
 import { newYorkInputToUtc, utcToNewYorkInput } from './radio-calendar.mjs';
 import { radioListenerId } from './radio-client.mjs';
 import { getAudibleBroadcast } from './public-broadcast-client.mjs?v=20261120-boundary-sync';
@@ -105,7 +105,9 @@ function campaignCard(c) {
     ${c.template === 'album' ? `<p>Minimum original tracks: ${c.minOriginalTracks}</p>` : ''}
     ${c.template === 'referral' ? `<p>Required referrals: ${c.requiredReferrals} · activity: ${escape(PROMOTION_ACTIVITY_WINDOWS.find(w => w.id === c.activityWindow)?.label || 'unavailable')}</p>` : ''}
     ${c.template === 'sponsor' ? `<p>Minimum confirmed DVert purchase: ${money(c.minPurchaseUnits)}</p>` : ''}
-    ${c.template === 'musician-referral' ? `<p>Conversion: verified minted playlist track + 10 distinct signed song votes. Allocation: $10 referrer + $5 musician + $5 Top10 funding-needed + $5 Playback funding-needed.</p>
+    ${c.template === 'musician-referral' ? `<p>${c.settlementVersion
+      ? `Conversion: verified minted playlist track + ${musicianReferralConfig(c).requiredVotes} distinct signed song votes. ${Object.entries(musicianReferralConfig(c).amounts).map(([id, amount]) => `${escape(id)} ${money(amount, campaignAsset(c))}`).join(' · ')}. Fund shares use the two-stage Payroll USDC match.`
+      : 'Conversion: verified minted playlist track + 10 distinct signed song votes. Allocation: $10 referrer + $5 musician + $5 Top10 funding-needed + $5 Playback funding-needed.'}</p>
       <p>Curated referrers: ${(c.curatedReferrers || []).map(escape).join(', ') || 'none'}</p>
       <p>Supporter token: ${c.supporterToken?.eligibleWallets?.length ? `🎖 ${c.supporterToken.eligibleWallets.length} earned, ${(c.supporterToken.deliveries || []).filter(d => d.status === 'delivered').length} delivered` : 'none earned yet'} · sent from the dev payroll queue.</p>` : ''}
     <p>${escape(c.criteria)}</p><p class="promotion-terms">${escape(c.terms)}</p>
@@ -117,15 +119,16 @@ export function publicPromotionRecords(state, campaignId) {
   const claims = (state.claims || []).filter(c => c.campaignId === campaignId);
   const members = (state.members || []).filter(m => m.campaignId === campaignId);
   const votes = (state.votes || []).filter(v => v.campaignId === campaignId);
+  const asset = campaignAsset(state.campaigns.find(c => c.id === campaignId));
   const uri = state.checkpointUri;
   const checkpoint = /^ipfs:\/\/[a-zA-Z0-9]+$/.test(uri || '')
     ? `<a href="https://dweb.link/ipfs/${escape(uri.slice(7))}" target="_blank" rel="noopener">Public IPFS recovery snapshot</a>` : '';
   return `<section aria-label="Public promotion records"><h3>Public records</h3>
     <p>${members.length} registered participants · ${claims.length} claims. ${checkpoint}</p>
     ${claims.map(c => `<article class="promotion-card">
-      <p>${escape(c.wallet)} · ${money(c.amountUnits)} · <strong>${escape(c.status)}</strong></p>
+      <p>${escape(c.wallet)} · ${money(c.amountUnits, asset)} · <strong>${escape(c.status)}</strong></p>
       <p class="promotion-terms">${escape(c.evidence)}</p>
-      ${(c.legs || []).map(leg => `<p>${escape(leg.id)} · ${money(leg.amountUnits)} · ${escape(leg.status)}${leg.recipient ? ` · ${escape(leg.recipient)}` : ` · ${escape(leg.fund)} (funding needed; not paid)`}${leg.txHash ? ` · <a href="https://basescan.org/tx/${escape(leg.txHash)}" target="_blank" rel="noopener">receipt</a>` : ''}</p>`).join('')}
+      ${(c.legs || []).map(leg => `<p>${escape(leg.id)} · ${money(leg.amountUnits, asset)} · ${escape(leg.status)}${leg.recipient ? ` · ${escape(leg.recipient)}` : ` · ${escape(leg.fund)}`}${leg.match ? ` · ${money(leg.match.usdcUnits)} USDC match (${escape(leg.match.deposit.status)})${leg.match.source.txHash ? ` · <a href="https://basescan.org/tx/${escape(leg.match.source.txHash)}" target="_blank" rel="noopener">source receipt</a>` : ''}` : ''}${leg.txHash ? ` · <a href="https://basescan.org/tx/${escape(leg.txHash)}" target="_blank" rel="noopener">deposit/payment receipt</a>` : ''}</p>`).join('')}
       ${(c.history || []).map(h => `<p>${escape(h.at)} · ${escape(h.reviewer)} · ${escape(h.action)}: ${escape(h.reason)}</p>`).join('')}
       ${c.status === 'paid' && /^0x[0-9a-f]{64}$/i.test(c.txHash || '') ? `<a href="https://basescan.org/tx/${escape(c.txHash)}" target="_blank" rel="noopener">Confirmed payment receipt</a>` : ''}
     </article>`).join('') || '<p>No claims submitted.</p>'}
@@ -134,7 +137,7 @@ export function publicPromotionRecords(state, campaignId) {
     </details></section>`;
 }
 async function routerPayout({ w, routerAddress, fund, asset, recipientWallet, amountUnits, reference, key, storage, status,
-  prepare, reconcile, isPaid }) {
+  prepare, reconcile, isPaid, confirmationTimeout }) {
   if (storage.getItem(key)) throw new Error('A payment is unresolved. Reconcile its wallet transaction before retrying; do not clear browser storage.');
   const router = new w.ethers.Contract(routerAddress, PROMOTIONS_ROUTER_ABI, w.signer);
   const ref = w.ethers.id(reference);
@@ -165,7 +168,7 @@ async function routerPayout({ w, routerAddress, fund, asset, recipientWallet, am
   catch (error) { throw new Error(`Payment was sent as ${tx.hash}, but its browser journal failed: ${error.message}. Reconcile this hash; do not send again.`); }
   status.textContent = `Payment pending: ${tx.hash}. Do not send again; reconcile after two confirmations.`;
   await reconcile(tx.hash);
-  await tx.wait(2);
+  await tx.wait(2, confirmationTimeout);
   await w.check();
   if (isPaid(await reconcile(tx.hash))) storage.removeItem(key);
 }
@@ -183,6 +186,20 @@ export async function payPromotion({ claim, snapshot, command, status, storage =
       const updated = next.claims.find(c => c.id === claim.id);
       return leg ? updated?.legs.find(item => item.id === leg.id)?.status === 'paid' : updated?.status === 'paid';
     } });
+}
+export async function payReferralFundMatchSource({ claim, leg, snapshot, command, status, storage = localStorage }) {
+  const w = await wallet();
+  if (!isAdminWallet(w.address) || leg.match?.source.recipient !== w.address.toLowerCase()) throw new Error('Connect the configured settlement admin wallet');
+  const campaign = snapshot.campaigns.find(item => item.id === claim.campaignId);
+  await enablePromotionRecipient({ claim: { wallet: w.address, status: 'approved' }, snapshot, status });
+  await routerPayout({ w, routerAddress: snapshot.routerAddress, fund: campaign.fund, asset: campaignAsset(campaign),
+    confirmationTimeout: 120000,
+    recipientWallet: leg.match.source.recipient, amountUnits: leg.amountUnits,
+    reference: promotionWorkReference(claim, leg.id), storage, status,
+    key: `decentbusking:referral-match:${claim.id}:${leg.id}:source`,
+    prepare: () => command({ action: 'prepare-fund-match-source', claimId: claim.id, legId: leg.id }),
+    reconcile: txHash => command({ action: 'reconcile-fund-match-source', claimId: claim.id, legId: leg.id, txHash }),
+    isPaid: next => next.claims.find(item => item.id === claim.id)?.legs.find(item => item.id === leg.id)?.match?.source.status === 'paid' });
 }
 // Sends one frozen gift award (campaign.giftAwards entry) from the campaign's fund in its currency.
 export async function sendCampaignGift({ campaign, award, snapshot, command, status, storage = localStorage }) {
@@ -396,13 +413,14 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     root.querySelector('[data-promo-claims]').innerHTML = state.claims
       .filter(c => !calendarOptions.campaignId || c.campaignId === calendarOptions.campaignId).map(c => `<article class="promotion-card" data-claim="${c.id}">
       <h4>${escape(state.campaigns.find(p => p.id === c.campaignId)?.title || c.campaignId)}</h4>
-      <p>${escape(c.wallet)} · ${money(c.amountUnits)} · ${escape(c.fund)} · <strong>${escape(c.status)}</strong></p>
+      <p>${escape(c.wallet)} · ${money(c.amountUnits, campaignAsset(state.campaigns.find(p => p.id === c.campaignId)))} · ${escape(c.fund)} · <strong>${escape(c.status)}</strong></p>
       <p class="promotion-terms">${escape(c.evidence)}</p>
       ${c.subjectWallet ? `<p>Musician helped: ${escape(c.subjectWallet)}</p>` : ''}
-      ${c.legs ? `<ul>${c.legs.map(leg => `<li>${escape(leg.id)} · ${money(leg.amountUnits)} · ${escape(leg.status)}${leg.recipient ? ` · ${escape(leg.recipient)}` : ` · ${escape(leg.fund)}`}${leg.txHash ? ` · <a href="https://basescan.org/tx/${escape(leg.txHash)}" target="_blank" rel="noopener">receipt</a>` : ''}
+      ${c.legs ? `<ul>${c.legs.map(leg => `<li>${escape(leg.id)} · ${money(leg.amountUnits, campaignAsset(state.campaigns.find(p => p.id === c.campaignId)))} · ${escape(leg.status)}${leg.recipient ? ` · ${escape(leg.recipient)}` : ` · ${escape(leg.fund)}`}${leg.txHash ? ` · <a href="https://basescan.org/tx/${escape(leg.txHash)}" target="_blank" rel="noopener">receipt</a>` : ''}
         ${leg.kind === 'wallet' && leg.status === 'approved' ? `<button type="button" data-promo-leg-enable="${escape(leg.id)}">Enable recipient</button><button type="button" data-promo-leg-pay="${escape(leg.id)}">Pay this leg</button>` : ''}
         ${leg.kind === 'wallet' && leg.status === 'payment-pending' ? `<label>Leg transaction hash<input data-promo-leg-hash="${escape(leg.id)}" value="${escape(leg.txHash || '')}"></label><button type="button" data-promo-leg-reconcile="${escape(leg.id)}">Reconcile this leg</button><button type="button" data-promo-leg-release="${escape(leg.id)}">Review unbroadcast leg preparation</button>` : ''}
-        ${leg.kind === 'funding-needed' && leg.status !== 'paid' ? `<span> · Funding needed; transfer this exact $5 allocation separately.</span><label>Fund deposit transaction hash<input data-promo-leg-hash="${escape(leg.id)}" value="${escape(leg.txHash || '')}"></label><button type="button" data-promo-leg-funding="${escape(leg.id)}">Verify fund deposit</button>` : ''}</li>`).join('')}</ul>` : ''}
+        ${leg.match ? `<span> · ${money(leg.match.usdcUnits)} USDC match · source ${escape(leg.match.source.status)} · deposit ${escape(leg.match.deposit.status)}. Settle in Payroll after campaign completion.</span>` :
+          leg.kind === 'funding-needed' && leg.status !== 'paid' ? `<span> · Funding needed; transfer this exact ${money(leg.amountUnits, campaignAsset(state.campaigns.find(p => p.id === c.campaignId)))} allocation separately.</span><label>Fund deposit transaction hash<input data-promo-leg-hash="${escape(leg.id)}" value="${escape(leg.txHash || '')}"></label><button type="button" data-promo-leg-funding="${escape(leg.id)}">Verify fund deposit</button>` : ''}</li>`).join('')}</ul>` : ''}
       ${c.qualification?.activity ? `<p>Referral evidence · ${escape(c.qualification.window)} · assessment week ${escape(c.qualification.week)}</p><ul>
         ${c.qualification.activity.map(v => `<li>${escape(v.wallet)} · play ${escape(v.playId)} · ${escape(v.at)} · ${escape(v.week)}</li>`).join('')}</ul>`
       : c.qualification ? `<p>${escape(JSON.stringify(c.qualification))}</p>` : ''}
