@@ -924,6 +924,8 @@ review before activating the no-refund payment model.
   local `discord-bot` directory. It polls over HTTPS every five seconds, imports
   only CID-verified playlist bytes, verifies the recursive pin and acknowledges
   it. It does not expose ports or modify Desktop source files.
+  On the operator Mac it runs under launchd from a stable `main` checkout; see
+  [operator mirror (launchd)](PINNER-NETWORK.md#operator-mirror-launchd).
 4. Once the client can poll the deployed endpoints, set
   `DBUSK_IMPORT_REVIEWED_ALBUMS=true` and restart the bot. It waits up to 30
   seconds for the mirror client, rechecks current titles/artist attribution,
