@@ -10,6 +10,7 @@ import { validatePromotionCheckpoint } from './promotions.js';
 import { validateCalendarRewardCheckpoint } from './calendar-rewards.js';
 import { isDmtvRadioCheckpoint } from './dmtv-queue.js';
 import { validDmtvEvidence } from './dmtv-escrow.js';
+import { validateTipLedgerCheckpoint } from './tip-ledger.js';
 
 export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiUrl = 'http://127.0.0.1:5001', fetchImpl = fetch }) {
   const remote = new URL(serviceUrl);
@@ -41,6 +42,9 @@ export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiU
     const expectedCid = CID.parse(job.expectedCid).toV1().toString();
     if (await checkpointContentCid(bytes) !== expectedCid) throw new Error('Checkpoint payload CID mismatch');
     const snapshot = JSON.parse(bytes.toString('utf8'));
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+      throw new Error('Unsupported checkpoint snapshot (expected a JSON object)');
+    }
     const playbackJournal = Array.isArray(snapshot.records) && snapshot.records.every(record =>
       record && typeof record.requestId === 'string' && record.requestId.length > 0 &&
       ['pending', 'playing', 'played', 'fulfilled'].includes(record.state));
@@ -55,6 +59,11 @@ export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiU
     if (snapshot.schema === 1 && Array.isArray(snapshot.entries)) {
       validateCalendarRewardCheckpoint(snapshot);
       scheduledCheckpoint = true;
+    }
+    let tipLedgerCheckpoint = false;
+    if (snapshot.schemaVersion === 1 && 'anchorHash' in snapshot) {
+      validateTipLedgerCheckpoint(snapshot);
+      tipLedgerCheckpoint = true;
     }
     if (snapshot.schemaVersion === 1) {
       if (Array.isArray(snapshot.campaigns)) {
@@ -77,8 +86,9 @@ export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiU
       }
     }
     if (!(snapshot.schemaVersion === 1 && (Array.isArray(snapshot.playlist) || playbackJournal)) &&
-        !batchJournal && !scheduledCheckpoint && !isDmtvRadioCheckpoint(snapshot) && !validDmtvEvidence(snapshot)) {
-      throw new Error('Only supported playlist, playback, playlist-batch or scheduled-production checkpoints may be mirrored');
+        !batchJournal && !scheduledCheckpoint && !tipLedgerCheckpoint &&
+        !isDmtvRadioCheckpoint(snapshot) && !validDmtvEvidence(snapshot)) {
+      throw new Error(unsupportedCheckpointSummary(snapshot));
     }
     const form = new FormData();
     form.append('file', new Blob([bytes], { type: 'application/json' }), 'decentbusking-jukeloop-state.json');
@@ -91,6 +101,13 @@ export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiU
     await post('ack', { jobId: job.jobId, cid: expectedCid, recursivePinned: true });
     return { idle: false, cid: expectedCid, bytes: bytes.length };
   };
+}
+
+function unsupportedCheckpointSummary(snapshot) {
+  const keys = Object.keys(snapshot).sort().slice(0, 20);
+  const schema = Number.isSafeInteger(snapshot.schema) ? `schema=${snapshot.schema}` : null;
+  const version = Number.isSafeInteger(snapshot.schemaVersion) ? `schemaVersion=${snapshot.schemaVersion}` : null;
+  return `Unsupported checkpoint snapshot (${[schema, version].filter(Boolean).join(' ') || 'unversioned'}; keys=${keys.join(',') || 'none'})`;
 }
 
 async function main() {
