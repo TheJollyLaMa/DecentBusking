@@ -44,7 +44,7 @@ required saves that block when that single Mac is offline.
   `CHECKPOINT_MIRROR_SECRET` stays the **operator** credential and is never
   shared, because it also authorizes radio deployment and DMTv verification.
 - Status: `pending` (owner approval), `active`, `suspended`, `retired`.
-  Owner approval is the Phase 2 default (see decisions).
+  Pinners are admin-approved (see decisions).
 - `peerId` is proven by the first challenge (the node must serve the challenge
   blocks over Bitswap from that peer).
 
@@ -183,25 +183,32 @@ score by adding peers that serve the same blocks.
 Each phase needs owner approval before deployment; no contract changes are
 anticipated (the settlement router already supports per-reference payouts).
 
-## Owner decisions needed
+## Owner decisions (2026-11-25)
 
-1. **Admission:** open registration, or owner-approved pinners only (recommended
-   for Phases 2–3)?
-2. **Required-save policy:** value of K, which pinners count toward K, and
-   whether any store may fall back to "Pinata-only + alert" when fewer than K
-   mirrors are healthy.
-3. **Public vs operator-only checkpoints:** which stores may be mirrored to
-   community pinners.
-4. **Weekly budget rule** for `dbusk-pinners`: fixed amount or % of unreserved
-   balance; minimum payout; whether the operator's own wallet is eligible.
-5. **Eligibility thresholds:** keep 20 checks / 90 % / 24 h, or change them;
-   challenge frequency.
-6. **Sybil limits:** per-wallet and per-ASN caps; whether to require distinct
-   peerIds/IPs.
-7. **IPFS Cluster:** run a trusted cluster core now, later, or not at all.
-8. **Data retention** for challenger-observed IPs and challenge journals.
-9. **Credential split:** approve moving radio deployment and DMTv verification
-   to their own secrets before any pinner token exists.
+1. **Admission:** pinners must be admin-approved.
+2. **Required saves:** Pinata plus at least **1** approved pinner (K = 1). If no
+   pinner is healthy for about 5 minutes, save to Pinata only and alert the
+   admin; the platform never freezes on pinner availability.
+3. **Mirror scope:** everything that is not a secret.
+4. **Budget:** a percentage of the weekly `dbusk-pinners` fund; the operator's
+   wallet is eligible.
+5. **Eligibility:** as proposed (at least 20 checks, 90 % availability, a check
+   within 24 h).
+6. **Sybil rule:** one wallet = one Discord musician = one possible pinner.
+7. **IPFS Cluster:** not now. Start with manifest pinners and our own
+   challenges; revisit at about 5+ pinners or when the dataset is too large for
+   one person to hold.
+8. **Retention:** media (audio, video, artwork, NFT metadata, albums) is kept
+   forever. Checkpoints keep the latest per store, one per day for 90 days and
+   one per month forever; superseded versions are archived (CAR + CID manifest,
+   verified) before unpinning. Implementation: #499. At decision time the
+   operator node held 22.2 of 25 GB and checkpoint churn was about 190 MB/day.
+   Challenge journals and challenger-observed IPs: proposed to follow the same
+   90-day detail window, with weekly reward summaries kept permanently
+   (pending owner confirmation).
+9. **Credential split:** approved. Radio deployment and DMTv verification get
+   their own secrets, done with the verifier's move to Render (#496), before any
+   pinner credential exists.
 
 ## Operator mirror (launchd)
 
