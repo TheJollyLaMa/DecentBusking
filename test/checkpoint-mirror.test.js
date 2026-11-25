@@ -152,9 +152,27 @@ test('Mac client rejects unsupported or invalid playback journals before importi
         assert.ok(url.endsWith('/claim'), 'invalid checkpoints must not reach Kubo or acknowledgment');
         return new Response(JSON.stringify({ job: { jobId: 'invalid', expectedCid: cid, contentBase64: bytes.toString('base64') } }));
       } });
-    await assert.rejects(poll(), /Only supported|Invalid|Unknown radio playlist/);
+    await assert.rejects(poll(), /Unsupported checkpoint snapshot|Invalid|Unknown radio playlist/);
   }
 });
+
+test('unsupported checkpoint diagnostics include shape metadata but never payload values', async () => {
+  const { createLocalCheckpointMirrorClient } = await import('../discord-bot/checkpoint-mirror-client.js');
+  const { checkpointContentCid } = await import('../discord-bot/checkpoint-mirror.js');
+  const bytes = Buffer.from(JSON.stringify({ schemaVersion: 7, credential: 'not-to-log', rows: [] }));
+  const cid = await checkpointContentCid(bytes);
+  const poll = createLocalCheckpointMirrorClient({ serviceUrl: 'https://worker.example', secret,
+    fetchImpl: async url => {
+      assert.ok(url.endsWith('/claim'));
+      return new Response(JSON.stringify({ job: { jobId: 'invalid', expectedCid: cid, contentBase64: bytes.toString('base64') } }));
+    } });
+  await assert.rejects(poll(), error => {
+    assert.match(error.message, /schemaVersion=7; keys=credential,rows,schemaVersion/);
+    assert.doesNotMatch(error.message, /not-to-log/);
+    return true;
+  });
+});
+
 test('required journal checkpoints are offered first and never fail because best-effort mirrors filled the queue', async () => {
   const { createCheckpointMirror } = await import('../discord-bot/checkpoint-mirror.js');
   const bridge = createCheckpointMirror({ secret, maxOptionalJobs: 2 });
