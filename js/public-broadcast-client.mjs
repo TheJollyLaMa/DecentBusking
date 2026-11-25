@@ -32,14 +32,19 @@ export function broadcastProgramAt(history, at) {
   return history?.findLast(entry => Number.isFinite(entry.at) && entry.at <= at) || null;
 }
 
-export function catchUpAtBroadcastGap({ hls, audio, program, latencyLimitSeconds = 8 }) {
+export function catchUpAtBroadcastGap({ hls, audio, program, history, at, latencyLimitSeconds = 8 }) {
   if (!hls || !audio || !String(program?.playId || '').startsWith('gap:')) return false;
+  const end = history?.find(entry => Number.isFinite(entry.at) && entry.at > program.at)?.at;
+  // Unknown gap ends are not permission to jump into music. Allow for timestamp rounding.
+  if (!Number.isFinite(at) || !Number.isFinite(end) || at < program.at + 250 || at >= end) return false;
   const latency = Number(hls.latency);
   const livePosition = Number(hls.liveSyncPosition);
   if (!Number.isFinite(latency) || !Number.isFinite(livePosition) ||
       latency <= latencyLimitSeconds || !Number.isFinite(audio.currentTime) ||
       livePosition <= audio.currentTime) return false;
-  audio.currentTime = livePosition;
+  const target = Math.min(livePosition, audio.currentTime + (end - at - 250) / 1000);
+  if (target <= audio.currentTime + 0.25) return false;
+  audio.currentTime = target;
   return true;
 }
 
@@ -104,7 +109,10 @@ export function createPublicBroadcastListener({ audio, serviceUrl, onStatus, onP
     const program = broadcastProgramAt(state?.programHistory, origin);
     if (!program) audibleBroadcast = null;
     if (program) {
-      catchUpAtBroadcastGap({ hls, audio, program });
+      if (catchUpAtBroadcastGap({ hls, audio, program, history: state?.programHistory, at: origin })) {
+        audibleBroadcast = null;
+        return;
+      }
       audibleBroadcast = !audio.paused && audio.readyState >= 2 && !blocked
         ? { program, at: origin, observedAt: now(), mediaTime: audio.currentTime } : null;
       if (currentProgram?.playId !== program.playId) {
@@ -133,7 +141,7 @@ export function createPublicBroadcastListener({ audio, serviceUrl, onStatus, onP
         if (!Hls.isSupported()) throw new Error('This browser does not support the broadcast player');
         // Stay at normal speed and never cut an active song. The bounded
         // HLS gap metadata is the only place where a listener can rejoin live.
-        hls = new Hls({ liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 24,
+        hls = new Hls({ liveSyncDurationCount: 3, liveMaxLatencyDurationCount: Infinity,
           maxLiveSyncPlaybackRate: 1, maxBufferLength: 30, backBufferLength: 10 });
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (current !== generation) return;

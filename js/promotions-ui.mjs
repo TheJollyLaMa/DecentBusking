@@ -2,7 +2,7 @@ import { PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS, MUSICIAN_REFERRAL_PILO
   promotionAuthorization, promotionWorkReference, promotionMoney, promotionUnits, promotionLink, campaignAsset, musicianReferralConfig } from './promotions.mjs?v=20261126-eth-gifts';
 import { newYorkInputToUtc, utcToNewYorkInput } from './radio-calendar.mjs';
 import { radioListenerId } from './radio-client.mjs';
-import { getAudibleBroadcast } from './public-broadcast-client.mjs?v=20261120-boundary-sync';
+import { getAudibleBroadcast } from './public-broadcast-client.mjs?v=20261125-song-tail';
 import { isAdminWallet } from './admin-access.mjs';
 import { escapeLive as escape } from './live-bookings.mjs';
 
