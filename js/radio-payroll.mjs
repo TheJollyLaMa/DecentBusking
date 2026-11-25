@@ -250,7 +250,8 @@ export function finalizeRadioAllocation({ report, category, budgetUnits, minimum
         ...(songPrizes ? { trackId: entry.trackId } : {}) }) })) };
 }
 
-export async function settleRadioAllocation({ allocation, metadataUri, metadataHash, report, router, signer, owner, hashReference, onStep = () => {}, onConfirmed = async () => {}, onTransaction }) {
+export async function settleRadioAllocation(options) {
+  const { allocation, metadataUri, metadataHash, report, router, hashReference } = options;
   if (!allocation || allocation.chainId !== 8453 || allocation.routerAddress?.toLowerCase() !== router.target.toLowerCase()) throw new Error('Finalized allocation does not match this Base router');
   if (!/^ipfs:\/\/[^/\s]+$/.test(metadataUri || '') || !/^0x[0-9a-fA-F]{64}$/.test(metadataHash || '')) throw new Error('An immutable IPFS allocation receipt is required');
   if (allocation.assetAddress?.toLowerCase() !== BASE_USDC_ADDRESS.toLowerCase()) throw new Error('Radio settlement supports native Base USDC only');
@@ -262,6 +263,27 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
     fundSlug: allocation.fundSlug, routerAddress: allocation.routerAddress, assetAddress: allocation.assetAddress });
   if (validated.week !== allocation.week) throw new Error('Invalid completed week');
   if (isSongPrizeAllocation(allocation) && !radioAllocationMatchesReport(frozenReport(report, allocation), allocation)) throw new Error('Song prizes do not match the frozen chart allocation; load the full closed-week report including forfeited positions');
+  return settleReviewedFundAllocation({ ...options, identityPrefix: 'radio-artist',
+    paymentLabel: allocation.category === 'playback' ? 'Playback' : 'Top 10', entryLabel: 'song prizes',
+    workReferenceFor: entry => radioWorkReferenceText({ week: allocation.week, category: allocation.category, wallet: entry.wallet,
+      ...(isSongPrizeAllocation(allocation) ? { trackId: entry.trackId } : {}) }),
+    checkUnpaid: async entry => {
+      if (isSongPrizeAllocation(allocation) && await router.completedWorkReferences(hashReference(radioWorkReferenceText({ week: allocation.week, category: allocation.category, wallet: entry.wallet })))) throw new Error('An artist-based prize was already paid for this week; manual reconciliation required');
+      if (allocation.schemaVersion >= 3 && String(allocation.week).startsWith('NY-')) {
+        for (const legacyWeek of overlappingUtcWeeks(payrollPeriodFromKey(allocation.week))) {
+          const legacy = radioWorkReferenceText({ week: legacyWeek, category: allocation.category, wallet: entry.wallet });
+          if (await router.completedWorkReferences(hashReference(legacy))) throw new Error('A paid legacy UTC receipt overlaps this New York period; manual reconciliation required');
+        }
+      }
+    } });
+}
+
+export async function settleReviewedFundAllocation({ allocation, metadataUri, metadataHash, router, signer, owner,
+  hashReference, workReferenceFor, identityPrefix, paymentLabel, entryLabel = 'entries',
+  checkUnpaid = async () => {}, onStep = () => {}, onConfirmed = async () => {}, onTransaction }) {
+  if (allocation.chainId !== 8453 || allocation.routerAddress?.toLowerCase() !== router.target.toLowerCase() ||
+    allocation.assetAddress?.toLowerCase() !== BASE_USDC_ADDRESS.toLowerCase()) throw new Error('Allocation does not match this Base USDC router');
+  if (!/^ipfs:\/\/[^/\s]+$/.test(metadataUri || '') || !/^0x[0-9a-fA-F]{64}$/.test(metadataHash || '')) throw new Error('An immutable IPFS allocation receipt is required');
   if (Number((await signer.provider.getNetwork()).chainId) !== 8453 || (await signer.getAddress()).toLowerCase() !== owner?.toLowerCase()) throw new Error('Connect the Base owner wallet');
   const waitForTransaction = async (transaction, detail) => {
     let receipt;
@@ -287,20 +309,13 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
   let reviewedTotal = 0n;
   const identities = new Set();
   for (const entry of allocation.entries) {
-    const identity = radioWorkReferenceText({ week: allocation.week, category: allocation.category, wallet: entry.wallet,
-      ...(isSongPrizeAllocation(allocation) ? { trackId: entry.trackId } : {}) });
+    const identity = workReferenceFor(entry);
     if (identity !== entry.workReferenceText || identities.has(identity) || BigInt(entry.amountUnits) <= 0n) throw new Error('Invalid or duplicate allocation entry');
     identities.add(identity);
     reviewedTotal += BigInt(entry.amountUnits);
     const workReference = hashReference(identity);
     if (await router.completedWorkReferences(workReference)) continue;
-    if (isSongPrizeAllocation(allocation) && await router.completedWorkReferences(hashReference(radioWorkReferenceText({ week: allocation.week, category: allocation.category, wallet: entry.wallet })))) throw new Error('An artist-based prize was already paid for this week; manual reconciliation required');
-    if (allocation.schemaVersion >= 3 && String(allocation.week).startsWith('NY-')) {
-      for (const legacyWeek of overlappingUtcWeeks(payrollPeriodFromKey(allocation.week))) {
-        const legacy = radioWorkReferenceText({ week: legacyWeek, category: allocation.category, wallet: entry.wallet });
-        if (await router.completedWorkReferences(hashReference(legacy))) throw new Error('A paid legacy UTC receipt overlaps this New York period; manual reconciliation required');
-      }
-    }
+    await checkUnpaid(entry);
     const recipient = await router.contributors(entry.wallet);
     if (!(recipient.approved ?? recipient[1])) recipientsToApprove.set(entry.wallet.toLowerCase(), entry.wallet);
     unpaid.push({ ...entry, workReference });
@@ -315,7 +330,7 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
       if (recipient.approved ?? recipient[1]) continue;
       const existingHash = recipient.githubIdHash ?? recipient[0];
       const identityHash = existingHash && !/^0x0{64}$/i.test(existingHash)
-        ? existingHash : hashReference(`radio-artist:${wallet.toLowerCase()}`);
+        ? existingHash : hashReference(`${identityPrefix}:${wallet.toLowerCase()}`);
       onStep(`Confirm one-time payroll wallet approval for ${wallet}. This enables payment; it does not transfer USDC.`);
       const transaction = await router.setContributorApproved(wallet, identityHash, true);
       const receipt = await waitForTransaction(transaction, { kind: 'approval', wallet, amountUnits: '0', entries: 0 });
@@ -340,7 +355,7 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
     const wallet = remaining[0].wallet;
     const amount = remaining.reduce((sum, entry) => sum + BigInt(entry.amountUnits), 0n);
     const repositoryHash = hashReference('TheJollyLaMa/DecentBusking');
-    const contributorHash = hashReference(`radio-artist:${wallet.toLowerCase()}`);
+    const contributorHash = hashReference(`${identityPrefix}:${wallet.toLowerCase()}`);
     const multiple = remaining.length > 1;
     const args = multiple
       ? [fundId, allocation.assetAddress, wallet, remaining.map(entry => BigInt(entry.amountUnits)),
@@ -350,16 +365,16 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
         repositoryHash, contributorHash, metadataUri, metadataHash];
     const payout = multiple ? router.payoutBatch : router.payout;
     await payout.staticCall(...args);
-    onStep(`Confirm ${formatUsdc(amount)} USDC to ${wallet}${multiple ? ` for ${remaining.length} song prizes in one payment` : ''}`);
+    onStep(`Confirm ${formatUsdc(amount)} USDC to ${wallet}${multiple ? ` for ${remaining.length} ${entryLabel} in one payment` : ''}`);
     const transaction = await payout(...args);
     const receipt = await waitForTransaction(transaction, { kind: 'payout', wallet, amountUnits: amount.toString(), entries: remaining.length });
-    if (receipt?.status !== 1) throw new Error('Radio payout did not confirm; refresh before retrying');
+    if (receipt?.status !== 1) throw new Error(`${paymentLabel} payout did not confirm; refresh before retrying`);
     if (!onTransaction) announcePaymentCelebration({
       chainId: 8453,
       txHash: transaction.hash,
       amountText: formatUsdc(amount),
       assetText: 'USDC',
-      summary: `${allocation.category === 'playback' ? 'Playback' : 'Top 10'} payout confirmed`,
+      summary: `${paymentLabel} payout confirmed`,
       txLabel: `Paid ${wallet.slice(0, 6)}…`,
     });
     for (const entry of remaining) {

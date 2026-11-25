@@ -83,6 +83,11 @@ test('a rejected required checkpoint cannot starve another required paid journal
 
 for (const snapshot of [
   { schemaVersion: 1, playlist: [] },
+  { schema: 'pinner-network/v1', revision: 0, routerAddress: `0x${'1'.repeat(40)}`,
+    startedAt: '2026-11-23T05:00:00.000Z', nextWeekStartAt: '2026-11-23T05:00:00.000Z',
+    pinners: [], checks: [], receipts: [], nonces: [] },
+  { schema: 'pinner-checks/v1', week: 'NY-2026-11-23', timeZone: 'America/New_York',
+    startAt: '2026-11-23T05:00:00.000Z', endAt: '2026-11-30T05:00:00.000Z', checks: [] },
   { schemaVersion: 1, playlist: [{ trackId: 'live:show:release',
     liveRecording: { bookingId: 'show', radioRelease: {
       firstPlayId: 'first-play', firstStartedAt: 1000, playId: 'retry-play', startedAt: 2000,
@@ -136,6 +141,8 @@ test('Mac client rejects unsupported or invalid playback journals before importi
   const { createLocalCheckpointMirrorClient } = await import('../discord-bot/checkpoint-mirror-client.js');
   const { checkpointContentCid } = await import('../discord-bot/checkpoint-mirror.js');
   for (const snapshot of [{ schemaVersion: 2, records: [] }, { schemaVersion: 1, records: [{}] },
+    { schema: 'pinner-network/v1', revision: -1 },
+    { schema: 'pinner-checks/v1', week: 'NY-2026-11-23', checks: [{}] },
     { version: 1, requests: [{ kind: 'dmtv', state: 'pending' }] },
     { schemaVersion: 1, records: [{ requestId: 'request', state: 'unknown' }] }, { schemaVersion: 1, other: [] },
     { schemaVersion: 2, nextBlock: -1, batches: [] },

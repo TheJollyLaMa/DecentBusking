@@ -338,10 +338,11 @@ test('a newly discovered fund retains uncertain ETH receipt recovery across relo
   assert.deepEqual(value.calls, []);
 });
 
-test('bunny copy distinguishes inactive rewards and unpublished rules; chart identities and labels remain escaped', async () => {
+test('bunny copy distinguishes verified pinner rewards and unpublished rules; chart identities and labels remain escaped', async () => {
   const { fundGuideCopy } = await import('../js/fund-guide.mjs');
   const { renderFundBalanceChart } = await import('../js/fund-visual.mjs');
-  assert.match(fundGuideCopy({ slug: 'dbusk-pinners' }).earning, /not active/);
+  assert.match(fundGuideCopy({ slug: 'dbusk-pinners' }).earning, /independent checks/);
+  assert.match(fundGuideCopy({ slug: 'dbusk-pinners' }).earning, /pin click alone does not qualify/);
   assert.match(fundGuideCopy({ slug: 'dbusk-new' }).earning, /No earning schedule/);
   assert.equal(fundGuideCopy({ slug: 'dbusk-new', description: 'Purpose', earningRules: 'Published terms' }).earning, 'Published terms');
   const html = renderFundBalanceChart([{ slug: 'dbusk-new', label: '<img onerror=alert(1)>', units: '1', amountText: '$0.01' }]);

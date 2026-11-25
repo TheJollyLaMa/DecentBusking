@@ -11,6 +11,7 @@ import { validateCalendarRewardCheckpoint } from './calendar-rewards.js';
 import { isDmtvRadioCheckpoint } from './dmtv-queue.js';
 import { validDmtvEvidence } from './dmtv-escrow.js';
 import { validateTipLedgerCheckpoint } from './tip-ledger.js';
+import { validatePinnerCheckpoint, validatePinnerReceipt, validatePinnerChecks } from '../js/pinner-rewards.mjs';
 
 export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiUrl = 'http://127.0.0.1:5001', fetchImpl = fetch }) {
   const remote = new URL(serviceUrl);
@@ -56,6 +57,16 @@ export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiU
         Array.isArray(batch.laneIds) && batch.laneIds.length === batch.songIds.length &&
         batch.laneIds.every(id => typeof id === 'string' && /^\d+$/.test(id)));
     let scheduledCheckpoint = false;
+    if (snapshot.schema === 'pinner-network/v1') {
+      validatePinnerCheckpoint(snapshot);
+      scheduledCheckpoint = true;
+    } else if (snapshot.schema === 'pinner-rewards/v1') {
+      validatePinnerReceipt(snapshot, snapshot.routerAddress);
+      scheduledCheckpoint = true;
+    } else if (snapshot.schema === 'pinner-checks/v1') {
+      validatePinnerChecks(snapshot);
+      scheduledCheckpoint = true;
+    }
     if (snapshot.schema === 1 && Array.isArray(snapshot.entries)) {
       validateCalendarRewardCheckpoint(snapshot);
       scheduledCheckpoint = true;

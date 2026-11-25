@@ -103,6 +103,8 @@ import { createDmtvStation } from './dmtv-station.js';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
 import { createCheckpointMirror } from './checkpoint-mirror.js';
 import { buildCommunityPinManifest } from '../js/pinner-rewards.mjs';
+import { createPinnerNetwork } from './pinner-network.js';
+import { createPinnerProbe } from './pinner-probe.js';
 import { createCreatorProfiles } from './creator-profiles.js';
 import { createArtworkUpdateQueue } from './artwork-updates.js';
 import { createDjukeGasQuoteReader, createDjukePlaylistGasQuoteReader, DJUKE_GAS_ABI, DJUKE_PLAYLIST_GAS_ABI } from './djuke-gas.js';
@@ -1224,6 +1226,60 @@ async function main() {
   };
   setInterval(budgetPaced(refreshPayflow), 15_000).unref();
 
+  let pinnerNetwork = null;
+  const getCommunityManifest = () => {
+    if (!playlistReady) throw new Error('Playlist is restoring');
+    return buildCommunityPinManifest({ checkpointCid: playlistStateStore?.getLatestSnapshotUri()?.slice(7) || '',
+      tracks: getPlaylist().filter(track => track.ipfsCid && track.pinStatus === 'pinned'),
+      albumRoots: payrollAssets.communityAlbumRoots || [],
+      rewardStatus: pinnerNetwork?.getState().rewardStatus || 'not-active' });
+  };
+  if (process.env.PINNER_REWARDS_ENABLED === 'true') {
+    if (!config.pinataJwt || !config.mintOwnerWallet) throw new Error('Pinner rewards require durable Pinata storage and the configured owner wallet');
+    const pinnerStore = createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
+      uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+      name: 'decentbusking-pinner-network.json', tags: { app: 'decentbusking', kind: 'pinner-network', schema: '1' },
+      restoreLatestOnly: true, serialize: value => value, deserialize: value => value,
+      beforeUpload: checkpointMirror ? (bytes, options) => checkpointMirror.mirror(bytes, options) : undefined });
+    const pinnerUpload = createIpfsUploader({ provider: 'pinata', pinataJwt: config.pinataJwt,
+      pinataApiUrl: config.pinataApiUrl, ipfsApiUrl: config.ipfsApiUrl });
+    pinnerNetwork = createPinnerNetwork({ restore: pinnerStore.restore, save: pinnerStore.save,
+      upload: async (...args) => {
+        const uri = await pinnerUpload(...args);
+        if (checkpointMirror) {
+          try { await checkpointMirror.mirror(args[0], { required: false }); }
+          catch (error) { console.warn('[pinner-rewards] Independent evidence mirror unavailable:', error.message); }
+        }
+        return uri;
+      },
+      router: payflowRouter, ownerWallet: config.mintOwnerWallet, getManifest: getCommunityManifest,
+      getClosingBalance, probe: createPinnerProbe(),
+      verifyMember: async wallet => {
+        if (!creatorProfilesReady) throw new Error('Wallet-linked profiles are restoring');
+        const profile = creatorProfiles.get(wallet);
+        if (!profile.discord?.id) throw new Error('Link your Discord account in Profile before joining pinner rewards');
+        if (!config.announceChannelId) throw new Error('Community Discord channel is not configured');
+        const channel = await client.channels.fetch(config.announceChannelId);
+        if (!channel?.guild) throw new Error('Community Discord server is unavailable');
+        await channel.guild.members.fetch(profile.discord.id);
+        return id(`discord-member:${profile.discord.id}`);
+      } });
+    let pinnerReady = false, pinnerTask = null;
+    const refreshPinners = () => {
+      if (!playlistReady || !creatorProfilesReady || !client.isReady()) return Promise.resolve();
+      if (!pinnerTask) pinnerTask = (pinnerReady ? pinnerNetwork.tick() : pinnerNetwork.initialize())
+        .then(() => {
+          if (!pinnerReady) console.info('[pinner-rewards] Enrollment and independently verified weekly rewards are active');
+          pinnerReady = true;
+        })
+        .catch(error => console.error('[pinner-rewards]', error.message))
+        .finally(() => { pinnerTask = null; });
+      return pinnerTask;
+    };
+    setInterval(budgetPaced(refreshPinners), 60000).unref();
+    void refreshPinners();
+  }
+
   const payrollReportStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage,
     pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl,
     gateway: config.ipfsGateway, name: 'decentbusking-weekly-payroll-reports.json',
@@ -2165,12 +2221,8 @@ async function main() {
       liveWeeklySchedule = weeklySchedule;
       updateJukeLoopRadioSchedule({ events, schedule: defaultRadioSchedule(weeklySchedule) });
     },
-    getPinnerManifest: () => {
-      if (!playlistReady) throw new Error('Playlist is restoring');
-      return buildCommunityPinManifest({ checkpointCid: playlistStateStore?.getLatestSnapshotUri()?.slice(7) || '',
-        tracks: getPlaylist().filter(track => track.ipfsCid && track.pinStatus === 'pinned'),
-        albumRoots: payrollAssets.communityAlbumRoots || [] });
-    },
+    getPinnerManifest: getCommunityManifest,
+    pinnerNetwork,
     getDjukeGasQuote,
     onReviewedAlbumImport: async () => {
       if (!playlistReady) throw new Error('Playlist is restoring; retry shortly');

@@ -301,6 +301,7 @@ export function createWorkerRequestHandler({
   getDevertLoopState,
   onDevertLoopVote,
   getPinnerManifest,
+  pinnerNetwork,
   checkpointMirror,
   dmtvRadioVerification,
   authorizeDmtvRadioVerifier,
@@ -370,6 +371,7 @@ export function createWorkerRequestHandler({
   }
   const artistLimits = new Map();
   const splitProposalLimits = new Map();
+  const pinnerLimits = new Map();
   const paymentLimits = new Map();
   function limitWalletOperation(limits, address, message) {
     const time = now();
@@ -1225,6 +1227,19 @@ export function createWorkerRequestHandler({
       if (request.method === 'GET' && requestUrl.pathname === '/api/pinners/manifest') {
         if (!getPinnerManifest) { sendJson(response, 404, { error: 'Pin manifest is not configured' }, '*'); return; }
         sendJson(response, 200, await getPinnerManifest(), '*');
+        return;
+      }
+      if (requestUrl.pathname === '/api/pinners' && ['GET', 'POST'].includes(request.method)) {
+        if (!pinnerNetwork) { sendJson(response, 503, { error: 'Pinner rewards are not configured' }, '*', 'no-store'); return; }
+        if (request.method === 'GET') {
+          sendJson(response, 200, pinnerNetwork.getState(), '*', 'no-store');
+        } else {
+          if (!corsOrigin) throw new Error('Origin is not allowed');
+          const body = await readJson(request);
+          if (!/^0x[0-9a-fA-F]{40}$/.test(body.address || '')) throw new Error('Invalid pinner signing wallet');
+          limitWalletOperation(pinnerLimits, body.address, 'Pinner command limit reached; try again later');
+          sendJson(response, 200, await pinnerNetwork.command(body, origin), corsOrigin, 'no-store');
+        }
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/djuke/playlist-readiness') {

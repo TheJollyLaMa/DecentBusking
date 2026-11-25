@@ -6,9 +6,10 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "postinstall": "node dmtv-verifier-chrome.js",
+    "postinstall": "node -e \"require('kubo').path()\" && node dmtv-verifier-chrome.js",
     "dev": "node --watch index.js",
     "checkpoint-mirror": "node checkpoint-mirror-client.js",
+    "community-pinner": "node community-pinner-client.js --watch",
     "dmtv-radio-verifier": "node dmtv-radio-verifier-client.js",
     "djuke-songs": "node djuke-songs.js",
     "mint-queue": "node mint-queue.js"
@@ -29,6 +30,7 @@
     "ffmpeg-static": "^5.3.0",
     "hls.js": "^1.7.4",
     "ipfs-unixfs-importer": "^17.1.1",
+    "kubo": "0.43.2",
     "livekit-client": "2.23.0",
     "livekit-server-sdk": "2.19.2",
     "multiformats": "^13.4.2",

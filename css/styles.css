@@ -1471,7 +1471,7 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 .community-pin-actions { display: flex; gap: 8px; margin-top: 12px; }
 .community-pin-providers { display: grid; gap: 8px; margin: 12px 0; padding: 10px; border: 1px solid #425349; }
 .community-pin-providers label { display: flex; align-items: center; gap: 8px; font-size: .8rem; }
-#community-pin-dialog { max-width: min(390px, calc(100vw - 32px)); margin: auto; padding: 18px; color: #edf4ef; background: #101918; border: 2px solid #73d8b8; border-radius: 10px; }
+#community-pin-dialog { max-width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow-y: auto; box-sizing: border-box; margin: auto; padding: 18px; color: #edf4ef; background: #101918; border: 2px solid #73d8b8; border-radius: 10px; }
 #community-pin-dialog::backdrop { background: #0009; }
 #community-pin-dialog h3 { margin: 0 0 8px; color: #b9f49b; }
 #community-pin-dialog p { font-size: .76rem; line-height: 1.45; }
@@ -1480,6 +1480,18 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 .community-pin-actions button { flex: 1; min-height: 38px; border: 1px solid #69776d; border-radius: 4px; font: inherit; font-size: .76rem; }
 #community-pin-start { color: #15221c; background: linear-gradient(#d2dbd5, #8e9e94 46%, #63756a 51%, #a6b7ac); }
 #community-pin-cancel { color: #edf4ef; background: #243634; }
+.pinner-rewards { margin-top: 20px; padding-top: 16px; border-top: 1px solid #52675a; }
+.pinner-rewards h4, .pinner-rewards h5 { color: #b9f49b; margin: 0 0 12px; }
+.pinner-help { color: #bfd0c5; line-height: 1.55; }
+.pinner-fund, .pinner-personal { padding: 12px; border-radius: 8px; background: #172d29; }
+.pinner-steps { display: grid; gap: 12px; padding-left: 24px; line-height: 1.5; }
+.pinner-row { display: grid; gap: 10px; margin: 14px 0; padding: 14px; border: 1px solid #52675a; border-radius: 8px; }
+.pinner-row code { overflow-wrap: anywhere; font-size: .72rem; }
+.pinner-row p { margin: 0; }
+.pinner-rewards button { min-height: 44px; white-space: normal; margin: 8px 8px 8px 0; }
+.pinner-rewards a { display: inline-block; color: #8ae8d0; margin: 8px 0; overflow-wrap: anywhere; }
+.pinner-status { min-height: 1.5em; line-height: 1.5; }
+.pinner-status.is-error { color: #ffb9a9; }
 @media (max-width: 600px) {
   :root { --djuke-width: min(340px, var(--left-drawer-space)); }
   :root { --devert-width: min(340px, var(--left-drawer-space)); }

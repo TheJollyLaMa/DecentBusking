@@ -69,3 +69,40 @@ test('community pinning supports local Kubo and a visitor Pinata key only for th
   assert.equal(unsafeLocal.successes.length, 0);
   assert.match(unsafeLocal.failures[0].error, /loopback/);
 });
+
+test('pinner awards reject duplicate wallets and never qualify future verification times', async () => {
+  const { allocatePinnerRewards } = await import(moduleUrl);
+  const pinner = { wallet: `0x${'1'.repeat(40)}`, successfulChecks: 20, failedChecks: 0,
+    lastVerifiedAt: new Date(100001).toISOString() };
+  assert.equal(allocatePinnerRewards({ fundBalanceUnits: 100n, pinners: [pinner], now: 100000 }).distributedUnits, 0n);
+  assert.throws(() => allocatePinnerRewards({ fundBalanceUnits: 100n,
+    pinners: [pinner, { ...pinner, wallet: pinner.wallet.toUpperCase().replace('0X', '0x') }], now: 100002 }), /Duplicate wallet/);
+});
+
+test('node ownership bytes stay local and a mismatched marker CID fails setup', async () => {
+  const { pinPinnerOwnership, readLocalPinnerPeer } = await import(moduleUrl);
+  const requests = [];
+  const ownership = { cid: root, contentBase64: Buffer.from('unique ownership marker').toString('base64') };
+  const fetchImpl = async (url, options) => {
+    requests.push(String(url));
+    if (String(url).endsWith('/id')) return new Response(JSON.stringify({ ID: 'Qm' + '1'.repeat(44) }));
+    assert.equal(options.headers, undefined);
+    assert.equal(await options.body.get('file').text(), 'unique ownership marker');
+    return new Response(JSON.stringify({ Hash: root }));
+  };
+  await readLocalPinnerPeer({ fetchImpl });
+  await pinPinnerOwnership({ ownership, fetchImpl });
+  assert.ok(requests.every(url => url.startsWith('http://127.0.0.1:5001/api/v0/')));
+  await assert.rejects(pinPinnerOwnership({ ownership, fetchImpl: async () => new Response('{"Hash":"wrong"}') }), /different ownership marker CID/);
+});
+
+test('the community sync helper pins new manifest content and fails explicitly when the manifest is unavailable', async () => {
+  const { createCommunityPinnerClient } = await import('../discord-bot/community-pinner-client.js');
+  const poll = createCommunityPinnerClient({ fetchImpl: async url => {
+    if (url.endsWith('/manifest')) return new Response(JSON.stringify({ schemaVersion: 1, entries: [{ cid: root }] }));
+    if (url.includes('/pin/ls')) return new Response(JSON.stringify({ Keys: { [root]: { Type: 'recursive' } } }));
+    return new Response('{}');
+  } });
+  assert.deepEqual((await poll()).successes, [root]);
+  await assert.rejects(createCommunityPinnerClient({ fetchImpl: async () => new Response('', { status: 503 }) })(), /manifest unavailable/);
+});
