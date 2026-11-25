@@ -18,6 +18,31 @@ async function withServer(handler, callback) {
   }
 }
 
+test('pinner enrollment status is public but mutations require an allowed origin and surface service failures', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const wallet = Wallet.createRandom().address;
+  let calls = 0;
+  const handler = createWorkerRequestHandler({ allowedOrigins: ['https://busking.example'],
+    ownerWallet: wallet, pinnerNetwork: {
+      getState: () => ({ ready: true, rewardStatus: 'active' }),
+      command: async () => { calls++; throw new Error('Node ownership could not be verified'); },
+    } });
+  await withServer(handler, async base => {
+    const status = await fetch(`${base}/api/pinners`);
+    assert.equal(status.status, 200);
+    assert.equal(status.headers.get('cache-control'), 'no-store');
+    assert.equal((await status.json()).rewardStatus, 'active');
+    const post = page => fetch(`${base}/api/pinners`, { method: 'POST',
+      headers: { origin: page, 'content-type': 'application/json' }, body: JSON.stringify({ address: wallet }) });
+    assert.equal((await post('https://wrong.example')).status, 400);
+    assert.equal(calls, 0);
+    const failed = await post('https://busking.example');
+    assert.equal(failed.status, 400);
+    assert.match((await failed.json()).error, /ownership could not be verified/);
+    assert.equal(calls, 1);
+  });
+});
+
 test('DMTv video verification accepts only authenticated mirror-host reports', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   let exchanges = 0;

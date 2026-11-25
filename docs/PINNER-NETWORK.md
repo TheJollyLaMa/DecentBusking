@@ -1,7 +1,10 @@
-# Community Pinner Network (design, Phase 1)
+# Community Pinner Network
 
-Status: **design only**. Rewards stay off. Nothing here changes code behavior,
-moves funds or alters contracts. Tracking issue: #497.
+Status: **manifest-pinner rewards implemented, deployment-gated**. Set
+`PINNER_REWARDS_ENABLED=true` on the hosted worker to open enrollment after the
+matching code is deployed. The header reports the actual service state. No
+unattended transfers or contract changes are introduced. Wider checkpoint
+fan-out and K-of-N durability remain future work in #497.
 
 ## Where we are today
 
@@ -11,15 +14,117 @@ moves funds or alters contracts. Tracking issue: #497.
 | HTTP routes | `discord-bot/ipfs-worker.js` `POST /api/checkpoint-mirror/claim\|ack` | Bearer auth with one shared `CHECKPOINT_MIRROR_SECRET`. |
 | Mirror client | `discord-bot/checkpoint-mirror-client.js --watch` | Operator Mac. Verifies the CID, allowlists checkpoint shapes, imports into loopback Kubo, verifies the recursive pin, then acks. |
 | Save policy | `discord-bot/ipfs-state.js` (`requireLocalMirror`) | **Required** stores (DJuke playlist batches, DeVert paid journal, DMTv radio, DCal rewards, some live-audio state) call `beforeUpload(..., { required: true })` *before* the Pinata upload and fail if the mirror is offline. Other stores upload to Pinata first and mirror best-effort. |
-| Manifest | `js/pinner-rewards.mjs` `buildCommunityPinManifest`, served at `GET /api/pinners/manifest` | Latest playlist checkpoint + pinned tracks + `payrollAssets.communityAlbumRoots`; `rewardStatus: 'not-active'`. |
-| Visitor pinning | `js/community-pinning.mjs` (header IPFS button) → `pinCommunityManifest` | Pins the manifest to local IPFS Desktop or the visitor's own Pinata. No registration, no reward. |
-| Reward math | `allocatePinnerRewards` | Score = successful checks; eligible if ≥ 20 checks, ≥ 90 % availability and verified within 24 h. Pure function; nothing calls it for payouts. |
-| Fund | `dbusk-pinners` (settlement router) | Receives the 8 % pinner share of DJuke, DeVert and other routed flows. No disbursal path. |
+| Manifest | `js/pinner-rewards.mjs` `buildCommunityPinManifest`, served at `GET /api/pinners/manifest` | Latest playlist checkpoint + pinned tracks + `payrollAssets.communityAlbumRoots`; reward status comes from the hosted reward service. |
+| Visitor pinning | `js/community-pinning.mjs` and `js/pinner-rewards-ui.mjs` | Local pinning, wallet enrollment, local ownership marker, approval and personal earnings. A visitor's own Pinata copy remains voluntary, not reward-eligible. |
+| Reward service | `discord-bot/pinner-network.js`, `GET/POST /api/pinners` | Discord-linked membership, signed owner approval, durable evidence and frozen weekly receipts. |
+| Independent checks | `discord-bot/pinner-probe.js` | A fresh, empty Kubo probe connects only to the registered peer, verifies its ownership marker and samples public-content DAG blocks. No shared gateway or cached probe data can satisfy a check. |
+| Reward math | `allocatePinnerRewards` | Called for estimates and closed weeks: score = successful checks; eligible if ≥ 20 checks, ≥ 90 % availability and verified within 24 h of the cutoff. |
+| Fund | `dbusk-pinners` (settlement router) | Receives the 8 % routed pinner share. 100 % of unreserved closing USDC is allocated to qualifying wallets; owner-signed Payroll settles immutable weekly references. |
 
-Gaps: one mirror (the operator's Mac), one shared secret that also authorizes
-radio deployment and DMTv radio verification (`checkpointMirror.authorize` in
-`index.js`/`ipfs-worker.js`), acks that are trusted rather than proven, and
-required saves that block when that single Mac is offline.
+Remaining gaps: checkpoint replication still uses one operator mirror and one
+operator-only mirror secret; required saves still depend on that mirror.
+Radio deployment and DMTv verification now use separate secrets. Community
+reward proofs never use any of those secrets and do not trust mirror acks.
+
+## Join and keep your node earning
+
+1. Run IPFS Desktop/Kubo and leave it running. Check available disk space before
+   pinning the full public manifest. Media is retained; this program never
+   removes existing pins or runs garbage collection.
+2. Connect your Base wallet and link your Discord account in **Profile**.
+   Both musicians and listeners may apply. Existing profile linking enforces
+   one wallet per Discord member. The registry also prevents a member from
+   enrolling a second wallet after relinking Discord. To change wallets, ask
+   the admin to suspend the old node first; old frozen awards remain owed to
+   their original wallet.
+3. Open the header **IPFS** button, choose **IPFS Desktop** and pin shared data.
+   Choose **Join pinner rewards**. Sign the enrollment message (no gas or
+   transfer); the browser detects the local peer ID and pins a random ownership
+   marker on that node. Marker bytes are not uploaded to shared Pinata.
+4. Ask the admin to select **Verify node & approve** in the IPFS panel or
+   **Payroll → Community pinner rewards**. The worker must retrieve the marker
+   directly from your peer before approval succeeds. A different peer or a
+   public gateway cannot substitute for that proof.
+5. Keep shared content current with the dependency-free Node 22+ helper from
+   this checkout:
+
+   ```sh
+   cd discord-bot
+   npm run community-pinner
+   ```
+
+   It checks and recursively pins the current public manifest every 15 minutes.
+   No bot token, wallet key, Pinata key or mirror secret is required. It never
+   enrolls you, removes pins or claims a reward. For a different hosted worker,
+   set `DBUSK_SERVICE_URL`; `IPFS_API_URL` must remain loopback. Keep the helper
+   and IPFS Desktop running; arrange your own login/startup service if needed.
+
+### Reachability and browser setup
+
+Rewards require a publicly reachable **TCP or QUIC IPFS swarm address**, normally
+port 4001. The worker discovers advertised public numeric addresses via the
+standard IPFS HTTP peer-routing API, then connects directly to that peer.
+Private IPs, DNS addresses and relay-only nodes are not supported in this pilot.
+Router/NAT port forwarding may be needed; a node behind CGNAT may require a
+publicly reachable host. The panel reports failed checks rather than claiming
+that inaccessible pins earn rewards.
+
+Keep the administrative Kubo API on `127.0.0.1:5001`. **Never expose port 5001
+or a Pinata key publicly.** If the browser cannot detect/pin your node, allow
+the actual DecentBusking page origin in Kubo's API CORS configuration and
+approve any browser local-network permission. Do not use a wildcard origin.
+Changing CORS requires a Kubo restart. A lost ownership marker can be replaced
+with **Reset lost node marker** (or **Retry node setup** while pending),
+followed by fresh owner approval. Resetting returns the node to pending;
+previous frozen awards remain intact.
+
+### Weekly terms and evidence
+
+- Each approved node receives independently scheduled, unpredictable samples
+  approximately once per hour. Checks verify the ownership marker plus
+  CID-hashed public DAG blocks; heartbeats and self-reported pin counts do not
+  earn credit. Infrastructure errors are surfaced and never invented as
+  successful checks or backfilled as participant failures.
+- At least **20 checks**, **90 % availability**, and a successful check in the
+  last **24 hours** qualify at **Monday 00:00 America/New_York**. The operator
+  may enroll under the same rules. This is sampled availability, not proof of
+  continuous uptime or distinct physical hardware; owner approval remains the
+  defense against shared-node/Sybil abuse.
+- The **8 % incoming allocation** funds this pot; the separately approved
+  **100 % weekly payout budget** uses its unreserved closing USDC balance.
+  Historic closing balances and unpaid prior receipts protect existing awards
+  and prevent later deposits from enlarging an old week.
+- Successful checks weight wallet shares. No qualifying wallets means no
+  payout; funds carry forward. Estimates can change and are not payments.
+  Frozen receipts retain `dbusk-pinners:<NY-week>:<wallet>` references, verified
+  on Base before every payment/retry.
+- Evidence for each closed week is uploaded to immutable IPFS journals before
+  it is removed from the hot checkpoint. Weekly receipts and journals are
+  retained; no unpin/GC is performed. Public records contain wallet, peer ID,
+  check metadata and amounts, not endpoint IP addresses or marker bytes.
+  Registry checkpoints include a hashed Discord identity to prevent duplicate
+  wallets; this is pseudonymous, not anonymous.
+
+### Deployment and recovery
+
+The existing Render worker runs enrollment, isolated probes and weekly
+preparation. `npm install` installs the pinned official `kubo` binary at build
+time; runtime never downloads a missing binary. Probes use fresh temporary
+repos with no bootstrap, discovery or content routing and clean up only those
+temporary repos, never the operator's IPFS data.
+
+Deploy matching mirror validation before enabling the worker, then deploy the
+header/payroll UI. Set `PINNER_REWARDS_ENABLED=true`. Verify `/api/pinners`
+reports `ready: true`, `rewardStatus: "active"` and the expected Base router,
+and `/api/pinners/manifest` reports the same active state. An empty enrollment
+list is not an already-earned reward.
+
+The `pinner-network` Pinata checkpoint is strict-restored. Invalid/unavailable
+state disables reward readiness; it is not silently reset. Frozen receipts
+are hash-validated; paid work references are reread from Base. The Payroll
+panel reuses the radio settlement's recipient approval, preflight, transaction
+confirmation and replay-protection helper. Owner approval remains separate
+from actual USDC transfer.
 
 ## Goals
 
@@ -29,7 +134,7 @@ required saves that block when that single Mac is offline.
    entries; the owner still signs every payout.
 4. No single pinner (including the operator) can block the platform.
 
-## Design
+## Wider checkpoint-network design (not yet implemented)
 
 ### 1. Registration and per-pinner credentials
 
@@ -42,7 +147,7 @@ required saves that block when that single Mac is offline.
   stored) scoped to `claim`/`ack`/`challenge` for that pinner. Tokens are
   revocable and rotatable by re-signing. The existing
   `CHECKPOINT_MIRROR_SECRET` stays the **operator** credential and is never
-  shared, because it also authorizes radio deployment and DMTv verification.
+  shared. Radio deployment and DMTv verification already have separate secrets.
 - Status: `pending` (owner approval), `active`, `suspended`, `retired`.
   Pinners are admin-approved (see decisions).
 - `peerId` is proven by the first challenge (the node must serve the challenge
@@ -167,7 +272,7 @@ score by adding peers that serve the same blocks.
   published, and are retained for a short, stated period.
 - Visitors' own Pinata keys remain browser-only, as today.
 
-## Phased rollout
+## Original wider-network rollout
 
 1. **Phase 1 (this PR):** stable operator mirror under launchd (below); this
    design doc. No behavior changes.
@@ -180,8 +285,10 @@ score by adding peers that serve the same blocks.
 4. **Phase 4:** weekly `pinner-rewards/v1` receipts and Payroll panel card;
    owner-signed payouts from `dbusk-pinners`. Optional IPFS Cluster core.
 
-Each phase needs owner approval before deployment; no contract changes are
-anticipated (the settlement router already supports per-reference payouts).
+The manifest reward pilot above delivers enrollment, peer-only verification
+and weekly payroll without exposing the operator mirror's claim/ack API.
+Checkpoint fan-out, per-pinner mirror tokens, persistent multi-mirror jobs and
+the K-of-N policy remain future work. No contract changes are anticipated.
 
 ## Owner decisions (2026-11-25)
 
@@ -190,11 +297,14 @@ anticipated (the settlement router already supports per-reference payouts).
    pinner is healthy for about 5 minutes, save to Pinata only and alert the
    admin; the platform never freezes on pinner availability.
 3. **Mirror scope:** everything that is not a secret.
-4. **Budget:** a percentage of the weekly `dbusk-pinners` fund; the operator's
-   wallet is eligible.
+4. **Budget:** **100 %** of the unreserved closing `dbusk-pinners` USDC fund,
+   approved on 2026-11-25; prior unpaid awards remain protected. The operator's
+   wallet is eligible under the same checks.
 5. **Eligibility:** as proposed (at least 20 checks, 90 % availability, a check
    within 24 h).
-6. **Sybil rule:** one wallet = one Discord musician = one possible pinner.
+6. **Sybil rule:** one wallet = one Discord member = one possible pinner.
+   Admission now includes both musicians and listeners, as requested on
+   2026-11-25; all require admin approval.
 7. **IPFS Cluster:** not now. Start with manifest pinners and our own
    challenges; revisit at about 5+ pinners or when the dataset is too large for
    one person to hold.

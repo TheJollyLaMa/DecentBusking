@@ -97,7 +97,7 @@ test('fund metadata suggestions prefill names and purpose for the project defaul
   const { defaultSettlementFundMetadata } = await import(url);
   assert.deepEqual(defaultSettlementFundMetadata('dbusk-pinners'), {
     name: 'Dbusk Pinners',
-    description: 'USDC allocation for community pinning rewards after the approved availability checks and eligibility rules are implemented.',
+    description: 'Weekly Base USDC rewards for admin-approved community IPFS nodes with qualifying independent availability checks. Closed-week awards use owner-signed payroll; a pin alone is not a payment.',
   });
   assert.equal(defaultSettlementFundMetadata('community-grants').name, 'Community Grants');
   assert.match(defaultSettlementFundMetadata('community-grants').description, /owner-reviewed settlement workflow/);

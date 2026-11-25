@@ -4,6 +4,13 @@
 
 DecentBusking is a community listening room, a 3D timeline of music NFTs, and a Discord radio built around the people who make the music. Listen, explore the archive, tip a performer, or bring a track into JukeLoop.
 
+**Community pinner rewards:** the header IPFS button offers enrollment and earnings
+for admin-approved musicians and listeners with Discord-linked wallets. Independent
+node-ownership and IPFS availability checks qualify weekly Base USDC shares;
+closed-week awards enter owner-signed Payroll. The approved budget is 100% of the
+unreserved closing pinner fund, not funds already owed. Pin clicks and shared
+Pinata copies are not reward proofs. See [node setup, terms and deployment](docs/PINNER-NETWORK.md).
+
 Between tracks, the radio's waiting or up-next message uses the song-title ticker.
 On mobile, compact votes are centered between Discord and the watchlist eyes;
 compact audio controls sit between the hat and briefcase above the ad countdown.

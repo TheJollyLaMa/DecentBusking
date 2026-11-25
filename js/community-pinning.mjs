@@ -1,4 +1,5 @@
 import { pinCommunityManifest } from './pinner-rewards.mjs';
+import { createPinnerRewardsView } from './pinner-rewards-ui.mjs?v=20261125-pinner-rewards';
 
 export function initCommunityPinning({ fetchImpl = fetch } = {}) {
   const dialog = document.getElementById('community-pin-dialog');
@@ -11,6 +12,9 @@ export function initCommunityPinning({ fetchImpl = fetch } = {}) {
   const rewardStatus = document.getElementById('community-pin-rewards-status');
   let manifest = null;
   let busy = false;
+  const rewardsRoot = document.getElementById('community-pinner-rewards');
+  const rewardsView = rewardsRoot ? createPinnerRewardsView({ root: rewardsRoot, enrollment: true, fetchImpl,
+    isBusy: () => busy, setBusy: value => { busy = value; updateProvider(); } }) : null;
   const provider = () => document.querySelector('[name="community-pin-provider"]:checked')?.value || 'local';
 
   async function loadManifest() {
@@ -26,8 +30,9 @@ export function initCommunityPinning({ fetchImpl = fetch } = {}) {
       if (value.schemaVersion !== 1 || !Array.isArray(value.entries)) throw new Error('Invalid pin manifest');
       manifest = value;
       summary.textContent = `${value.entryCount} unique CIDs · shared playlist, songs and albums`;
-      rewardStatus.textContent = value.rewardStatus === 'not-active'
-        ? 'Shared Pinata stays primary. Rewards are not active yet.' : value.rewardStatus;
+      rewardStatus.textContent = value.rewardStatus === 'active'
+        ? 'Shared Pinata stays primary. Join the approved pinner program below to earn verified weekly rewards.'
+        : `Shared Pinata stays primary. Pinner reward status: ${value.rewardStatus}.`;
       start.disabled = !value.entryCount;
     } catch (error) { summary.textContent = `Manifest unavailable: ${error.message}`; }
   }
@@ -37,14 +42,14 @@ export function initCommunityPinning({ fetchImpl = fetch } = {}) {
     key.hidden = !pinata;
     keyLabel.hidden = !pinata;
     start.textContent = pinata ? 'Pin to my Pinata' : 'Pin to IPFS Desktop';
-    if (!busy) start.disabled = !manifest?.entryCount || (pinata && !key.value.trim());
+    start.disabled = busy || !manifest?.entryCount || (pinata && !key.value.trim());
   }
 
   document.querySelectorAll('[name="community-pin-provider"]').forEach(input => input.addEventListener('change', updateProvider));
   key.addEventListener('input', updateProvider);
   window.addEventListener('open-community-pinning', async () => {
     if (!dialog.open) dialog.showModal();
-    await loadManifest();
+    await Promise.all([loadManifest(), rewardsView?.load()]);
     updateProvider();
   });
   document.getElementById('community-pin-cancel').addEventListener('click', () => { key.value = ''; dialog.close(); updateProvider(); });
@@ -59,9 +64,13 @@ export function initCommunityPinning({ fetchImpl = fetch } = {}) {
         ipfsApiUrl: window.DecentConfig?.ipfsApiUrl || 'http://127.0.0.1:5001', fetchImpl,
         onProgress: ({ completed, total }) => { progress.textContent = `Pinned ${completed} of ${total} CIDs…`; } });
       progress.textContent = `Pinned ${result.successes.length} of ${manifest.entryCount}. ${result.failures.length ? `${result.failures.length} could not be pinned; try again later.` : 'All selected CIDs are pinned.'}`;
-      rewardStatus.textContent = 'Your pins add a community copy. Availability rewards are not active yet.';
+      rewardStatus.textContent = 'Your pins add a community copy. Enroll below; only approved nodes with qualifying independent checks earn weekly awards.';
     } catch (error) { progress.textContent = error.message; }
     finally { key.value = ''; busy = false; updateProvider(); }
+    await rewardsView?.load();
+  });
+  for (const event of ['wallet-connected', 'wallet-disconnected']) document.addEventListener(event, () => {
+    if (dialog.open) void rewardsView?.load();
   });
   dialog.addEventListener('close', () => { key.value = ''; });
   updateProvider();

@@ -24,7 +24,7 @@ export function defaultSettlementFundMetadata(slug) {
     'dbusk-playback': 'USDC allocation for eligible artist payouts from completed, audible DecentBusking radio plays.',
     'dbusk-top10': 'USDC allocation for owner-reviewed weekly Top 10 artist prizes, ranked by the published New York-week vote rules.',
     'dbusk-repo-dev': 'DecentBusking contributor and repository-development payouts approved through the project payroll workflow.',
-    'dbusk-pinners': 'USDC allocation for community pinning rewards after the approved availability checks and eligibility rules are implemented.',
+    'dbusk-pinners': 'Weekly Base USDC rewards for admin-approved community IPFS nodes with qualifying independent availability checks. Closed-week awards use owner-signed payroll; a pin alone is not a payment.',
   };
   return {
     name: fundSlug === 'dbusk-referrals' ? 'Musician referrals' : name,

@@ -13,7 +13,7 @@ const EXPLANATIONS = {
   },
   'dbusk-pinners': {
     purpose: 'Supports community copies of our music and metadata on IPFS.',
-    earning: 'You can help pin the public community manifest, but pinning alone currently earns nothing: public availability rewards are not active. Registration, independent availability verification and disbursal must be in place before a recurring reward can be promised.',
+    earning: 'Open the header IPFS button, pin the shared content with IPFS Desktop, and enroll using your Discord-linked wallet. Musicians and listeners need admin approval and a publicly reachable node. At least 20 independent checks, 90% availability and a successful check within 24 hours of the Monday New York cutoff qualify for a weighted share of 100% of the unreserved closing USDC pot. Estimates are not guaranteed payments; closed-week awards enter owner-signed payroll. A Pinata copy or pin click alone does not qualify.',
   },
   'dbusk-live-performers': {
     purpose: 'Supports reviewed live-performance fees and after-show payments.',
