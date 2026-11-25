@@ -1,4 +1,4 @@
-import { createPublicBroadcastListener, getAudibleBroadcast } from './public-broadcast-client.mjs?v=20261120-boundary-sync';
+import { createPublicBroadcastListener, getAudibleBroadcast } from './public-broadcast-client.mjs?v=20261125-song-tail';
 import { createPublicRadioVideo } from './public-radio-video.mjs';
 
 export function createSyncedPlaybackMeter(expectedMs) {

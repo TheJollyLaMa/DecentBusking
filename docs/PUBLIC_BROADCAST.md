@@ -133,12 +133,18 @@ bot event-loop stalls out of the audio clock. The parent forwards only the
 selected public source, with bounded in-flight messages; source age across the
 thread boundary is not used to cut an active song, and the PCM queue is bounded
 at sixty seconds of audio for the same stalled-main-loop protection. By the
-owner's 20 Nov boundary-sync decision, ordinary songs are not cut when a bot
-stall leaves late PCM. A bounded six-second changeover space is the recovery
-window: queued tail PCM from the previous ordinary song can be retired only at
-that track boundary. Live performance PCM and active ordinary-song PCM are
-never silently shortened. The browser stays at normal playback speed and can
-rejoin only during explicit gap metadata. Malformed PCM still fails closed.
+owner's boundary-sync decision, songs are not cut when a bot stall leaves late
+PCM, including their final queued samples after the producer begins the gong.
+Only queued `gap:` padding may be retired when the next radio programme arrives;
+song, paid and live PCM remain ordered and intact. Recovery reports
+`PCM_GAP_CATCHUP` with the amount of padding removed.
+The browser stays at normal playback speed, disables Hls.js's maximum-latency
+auto-seek, and seeks only within a known audible gap. Its target is capped
+250 ms before the next programme, with a 250 ms onset margin; without a known
+gap end it waits rather than skipping into music. Excess delay may require more
+than one gong to recover. An unavailable/expired stream is still an explicit
+failure, not a guarantee of uninterrupted playback through an outage.
+Malformed PCM still fails closed.
 The encoder's scheduling-stall limit, private-room gates and protected tail remain.
 In-flight credits are decremented by the worker through a shared atomic counter,
 not by parent-loop acknowledgment callbacks. Otherwise a busy parent can falsely

@@ -11,7 +11,7 @@ import { createRadioAdTransition } from './radio-ad-transition.mjs?v=20261030-ad
 import { DEVERT_MAX_AD_SECONDS } from './devert-scheduler.mjs';
 import { createLiveAudioListener, createLiveAudioFaultSlate } from './live-audio-client.mjs';
 import { createLivePublisherPresence } from './live-publisher-presence.mjs?v=20261114-monitor-mix';
-import { createPublicBroadcastListener, getAudibleBroadcast } from './public-broadcast-client.mjs?v=20261120-boundary-sync';
+import { createPublicBroadcastListener, getAudibleBroadcast } from './public-broadcast-client.mjs?v=20261125-song-tail';
 import { createPublicRadioVideo } from './public-radio-video.mjs';
 
 const POLL_MS = 8_000;

@@ -440,44 +440,148 @@ test('native-capable Chrome without a programme clock uses Hls.js for exact audi
   await wait(5);
   client.update(state);
   assert.equal(attached, 1);
-  // Keep normal-speed playback and accept a larger live-buffer target; catch-up happens only in a boundary gap.
-  assert.ok(config.liveMaxLatencyDurationCount > config.liveSyncDurationCount);
-  assert.ok(config.liveMaxLatencyDurationCount * 4 >= 60);
+  // Hls.js must not override the song-safe gap policy with an automatic live-edge seek.
+  assert.equal(config.liveMaxLatencyDurationCount, Infinity);
   assert.equal(config.maxLiveSyncPlaybackRate, 1);
   assert.equal(programs.at(-1).playId, 'live:a');
   assert.equal(getAudibleBroadcast(40000).at, 26000);
   client.stop();
 });
 
-test('HLS catch-up is allowed only during an explicit inter-song gap', async () => {
+test('HLS catch-up skips only inside the audible gong, never into the following song', async () => {
   const { catchUpAtBroadcastGap } = await import('../js/public-broadcast-client.mjs');
   const audio = { currentTime: 10 };
   const hls = { latency: 20, liveSyncPosition: 30 };
-  assert.equal(catchUpAtBroadcastGap({ hls, audio,
-    program: { playId: 'gap:12' } }), true);
-  assert.equal(audio.currentTime, 30);
+  const program = { playId: 'gap:12', at: 100000 };
+  const history = [program, { playId: 'song:123', at: 106000 }];
+  const input = { hls, audio, program, history, at: 101000 };
+  assert.equal(catchUpAtBroadcastGap(input), true);
+  assert.equal(audio.currentTime, 14.75, 'leave a safety margin before the next song begins');
   audio.currentTime = 10;
-  assert.equal(catchUpAtBroadcastGap({ hls, audio,
+  assert.equal(catchUpAtBroadcastGap({ ...input,
     program: { playId: 'song:123', live: false } }), false);
   assert.equal(audio.currentTime, 10);
+  for (const at of [99999, 100100, 106000, NaN]) {
+    assert.equal(catchUpAtBroadcastGap({ ...input, at }), false, 'never seek before/near gong onset or after it ends');
+  }
+  assert.equal(catchUpAtBroadcastGap({ ...input, history: [program] }), false, 'unknown gap end is not permission to skip');
+  assert.equal(audio.currentTime, 10);
   hls.latency = 3;
-  assert.equal(catchUpAtBroadcastGap({ hls, audio,
-    program: { playId: 'gap:13' } }), false);
+  assert.equal(catchUpAtBroadcastGap(input), false);
   assert.equal(audio.currentTime, 10);
 });
 
-test('boundary recovery removes only the previous ordinary-song tail, never live PCM', async () => {
+test('boundary recovery removes only gong PCM, preserving song tails, paid audio and live PCM', async () => {
   const { dropBroadcastBoundaryTail } = await import('../discord-bot/public-broadcast.js');
   const ordinary = { program: { playId: 'song-a', live: false }, bytes: Buffer.alloc(40) };
+  const gong = { program: { playId: 'gap:a' }, bytes: Buffer.alloc(60) };
   const live = { program: { playId: 'live-b', live: true, bookingId: 'b' }, bytes: Buffer.alloc(80) };
-  const queue = [ordinary, live];
+  const paid = { program: { playId: 'paid-a', protected: true }, bytes: Buffer.alloc(100) };
+  const queue = [ordinary, gong, live, paid];
   assert.equal(dropBroadcastBoundaryTail(queue, 'song-a',
     { playId: 'live-b', live: true }), 0);
-  assert.equal(queue.length, 2, 'live performance is never trimmed at a live handoff');
-  assert.equal(dropBroadcastBoundaryTail(queue, 'song-a',
-    { playId: 'song-b', live: false }), 40);
-  assert.deepEqual(queue.map(entry => entry.program.playId), ['live-b'],
-    'the old ordinary-song tail is removed while live audio remains');
+  for (const previous of ['song-a', 'paid-a', 'live-b']) {
+    for (const next of ['gap:b', 'song-b']) {
+      assert.equal(dropBroadcastBoundaryTail(queue, previous, { playId: next }), 0);
+    }
+  }
+  assert.deepEqual(queue, [ordinary, gong, live, paid]);
+  assert.equal(dropBroadcastBoundaryTail(queue, 'gap:a', { playId: 'song-b' }), 60);
+  assert.deepEqual(queue, [ordinary, live, paid]);
+});
+
+test('queued song endings and next-song openings reach the encoder sample-for-sample across a gong', { timeout: 5000 }, async t => {
+  const { createPublicBroadcast } = await import('../discord-bot/public-broadcast.js');
+  const OpusScript = require('../discord-bot/node_modules/opusscript');
+  const codec = new OpusScript(48000, 2, OpusScript.Application.AUDIO);
+  const reference = new OpusScript(48000, 2, OpusScript.Application.AUDIO);
+  const encoder = new EventEmitter(), written = [];
+  encoder.stdin = new PassThrough();
+  encoder.stdin.on('data', chunk => written.push(Buffer.from(chunk)));
+  encoder.kill = () => { encoder.emit('close'); return true; };
+  let wall = 1700000000000, elapsed = 0;
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const broadcaster = createPublicBroadcast({ enabled: true, uploader: { baseUrl: 'https://edge.example' },
+    now: () => wall, monotonicNow: () => elapsed, spawnImpl: () => encoder });
+  await broadcaster.start();
+  t.after(async () => { await broadcaster.stop(); codec.delete(); reference.delete(); });
+  const expected = [];
+  // Simulate a producer burst: the next programme arrives while the song tail is still queued.
+  for (const [playId, frames, frequency] of [['song:a', 10, 440], ['gap:a', 5, 220], ['song:b', 10, 660]]) {
+    for (let frame = 0; frame < frames; frame++) {
+      const pcm = Buffer.alloc(3840);
+      for (let sample = 0; sample < 960; sample++) {
+        const value = Math.round(Math.sin((frame * 960 + sample) * 2 * Math.PI * frequency / 48000) * 4000);
+        pcm.writeInt16LE(value, sample * 4); pcm.writeInt16LE(value, sample * 4 + 2);
+      }
+      const packet = codec.encode(pcm, 960);
+      const decoded = Buffer.from(reference.decode(packet));
+      if (!playId.startsWith('gap:')) expected.push(decoded);
+      broadcaster.radioPacket(packet, { playId });
+    }
+  }
+  wall += 100;
+  for (let frame = 0; frame < 20; frame++) {
+    elapsed += 20; wall += 20; t.mock.timers.tick(20);
+  }
+  assert.equal(Buffer.compare(Buffer.concat(written), Buffer.concat(expected)), 0,
+    'every decoded song sample reaches AAC input in order');
+  assert.deepEqual(broadcaster.snapshot().programHistory.map(p => p.playId), ['song:a', 'song:b']);
+  assert.equal(broadcaster.snapshot().lateAudio.droppedMs, 100, 'only the queued gong is shortened');
+});
+
+test('real AAC preserves the final-second marker and next-song opening when a burst consumes the gong', { timeout: 15000 }, async t => {
+  const { createPublicBroadcast } = await import('../discord-bot/public-broadcast.js');
+  const OpusScript = require('../discord-bot/node_modules/opusscript');
+  const codec = new OpusScript(48000, 2, OpusScript.Application.AUDIO);
+  const objects = new Map();
+  const broadcaster = createPublicBroadcast({ enabled: true, uploader: {
+    baseUrl: 'https://edge.example', put: async (key, bytes) => objects.set(key, Buffer.from(bytes)),
+  } });
+  const packets = [];
+  for (const [playId, frames, frequency] of [['song:a', 150, 440], ['gap:a', 300, 220], ['song:b', 150, 660]]) {
+    for (let frame = 0; frame < frames; frame++) {
+      const pcm = Buffer.alloc(3840);
+      const hz = playId === 'song:a' && frame >= 100 ? 990 : frequency;
+      for (let sample = 0; sample < 960; sample++) {
+        const value = Math.round(Math.sin((frame * 960 + sample) * 2 * Math.PI * hz / 48000) * 4000);
+        pcm.writeInt16LE(value, sample * 4); pcm.writeInt16LE(value, sample * 4 + 2);
+      }
+      packets.push({ packet: Buffer.from(codec.encode(pcm, 960)), playId });
+    }
+  }
+  await broadcaster.start();
+  t.after(async () => { await broadcaster.stop(); codec.delete(); });
+  for (let index = 0; index < packets.length; index++) {
+    const { packet, playId } = packets[index];
+    broadcaster.radioPacket(packet, { playId });
+    if (index % 20 === 0) await new Promise(resolve => setImmediate(resolve));
+  }
+  for (let tries = 0; tries < 120 && [...objects.keys()].filter(key => key.endsWith('.ts')).length < 2; tries++) await wait(100);
+  const state = broadcaster.snapshot();
+  assert.equal(state.reason, null);
+  const a = state.programHistory.find(p => p.playId === 'song:a');
+  const b = state.programHistory.find(p => p.playId === 'song:b');
+  assert.ok(a && b, 'both songs must survive the encoder handoff');
+  assert.equal(b.at - a.at, 3000, 'the entire three-second song precedes the next song');
+  assert.equal(state.lateAudio.droppedMs, 6000, 'only six seconds of gong were removed');
+  const segments = [...objects].filter(([key]) => key.endsWith('.ts')).sort(([a], [b]) => a.localeCompare(b));
+  assert.ok(segments.length >= 2, 'actual HLS segments were published');
+  const decoded = spawnSync(process.env.FFMPEG_PATH || 'ffmpeg', ['-v', 'error', '-f', 'mpegts',
+    '-i', 'pipe:0', '-f', 's16le', '-ac', '1', '-ar', '48000', 'pipe:1'],
+  { input: Buffer.concat(segments.map(([, bytes]) => bytes)), maxBuffer: 4 * 1024 * 1024 });
+  assert.equal(decoded.status, 0, decoded.stderr.toString());
+  // Sample away from codec priming and transitions; the tail marker lasts a full second.
+  for (const [start, frequency] of [[0.5, 440], [2.4, 990], [3.4, 660], [5.4, 660]]) {
+    let crossings = 0, negative = false;
+    for (let i = Math.round(start * 48000); i < Math.round((start + 0.5) * 48000); i++) {
+      const sample = decoded.stdout.readInt16LE(i * 2);
+      if (sample < -500) negative = true;
+      if (negative && sample > 500) { crossings++; negative = false; }
+    }
+    assert.ok(Math.abs(crossings * 2 - frequency) <= 10,
+      `${start}s decoded audio: ${crossings * 2} Hz, expected ${frequency} Hz`);
+  }
 });
 
 test('unsupported AAC reports a browser capability failure without pointless recovery or a LiveKit fallback', async () => {

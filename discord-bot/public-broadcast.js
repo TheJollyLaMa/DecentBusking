@@ -67,11 +67,13 @@ export function broadcastProgram(track, at) {
 }
 
 export function dropBroadcastBoundaryTail(queue, previousRadioPlayId, nextProgram) {
-  if (nextProgram?.live || !previousRadioPlayId ||
+  // A producer handoff does not mean the encoder has drained the previous song.
+  if (nextProgram?.live || !String(previousRadioPlayId || '').startsWith('gap:') ||
       !nextProgram?.playId || nextProgram.playId === previousRadioPlayId) return 0;
   let droppedBytes = 0;
   for (let index = 0; index < queue.length;) {
-    if (queue[index].program?.playId === previousRadioPlayId) {
+    if (queue[index].program?.playId === previousRadioPlayId &&
+        !queue[index].program.live && !queue[index].program.protected) {
       droppedBytes += queue[index].bytes?.length || 0;
       queue.splice(index, 1);
     } else {
@@ -156,11 +158,11 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
     const droppedMs = Math.round(droppedBytes / PCM_BYTES_PER_MS);
     lateAudio = { skips: (lateAudio?.skips || 0) + 1,
       droppedMs: (lateAudio?.droppedMs || 0) + droppedMs,
-      lastStage: 'song-boundary', lastAt: now() };
+      lastStage: 'inter-song-gap', lastAt: now() };
     if (now() - lateAudioLoggedAt >= 10000) {
       lateAudioLoggedAt = now();
-      log.warn?.('[public-broadcast] PCM_BOUNDARY_CATCHUP', {
-        stage: 'song-boundary', droppedMs, skips: lateAudio.skips,
+      log.warn?.('[public-broadcast] PCM_GAP_CATCHUP', {
+        stage: 'inter-song-gap', droppedMs, skips: lateAudio.skips,
       });
     }
   }

@@ -1,5 +1,5 @@
 import { radioEndpoint, readRadioState } from './radio-client.mjs';
-import { getAudibleBroadcast, broadcastProgramAt } from './public-broadcast-client.mjs';
+import { getAudibleBroadcast, broadcastProgramAt } from './public-broadcast-client.mjs?v=20261125-song-tail';
 
 export async function readLiveTipTarget({ serviceUrl, expectedBookingId, fetchImpl = fetch,
   signal = AbortSignal.timeout(10000), audibleBroadcast = getAudibleBroadcast() }) {
