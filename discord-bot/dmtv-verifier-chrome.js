@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
@@ -70,7 +70,7 @@ async function extractDebianLibraries(packages, root) {
 export async function installVerifierChrome({ dir = verifierBrowsersDir, log = console } = {}) {
   await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
-  const cli = createRequire(import.meta.url).resolve('playwright-core/cli.js');
+  const cli = join(dirname(createRequire(import.meta.url).resolve('playwright-core')), 'cli.js');
   await run(process.execPath, [cli, 'install', '--only-shell', 'chromium'], {
     env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: dir }, maxBuffer: 1 << 24 });
   const executablePath = await findHeadlessShell(dir);

@@ -2472,6 +2472,9 @@ async function main() {
   const port = process.env.PORT || 10000;
   http.createServer(requestHandler).listen(port, () => {
     console.log(`Health check and IPFS worker listening on port ${port}`);
+    if (dmtvRadioVerification) {
+      startInServiceRadioVerifier().catch(error => console.error(`[dmtv-verifier] ${error.message}`));
+    }
   });
 
   // Restore durable state before Discord backfill or JukeLoop starts.
