@@ -163,7 +163,7 @@ export function verifySettlementRecoveryReceipt({ receipt, router, token, owner,
   if (!recovered || !transferred) throw new Error('Receipt does not prove the exact selected-fund recovery and USDC transfer; recovery remains locked');
 }
 
-export async function depositSettlementUsdc({ router, token, signer, owner, fundId, amountUnits, onStep = () => {}, onStage = () => {}, onBroadcast = () => {} }) {
+export async function depositSettlementUsdc({ router, token, signer, owner, fundId, amountUnits, onStep = () => {}, onStage = () => {}, onBroadcast = () => {}, checkWallet = async () => {}, confirmations = 1, confirmationTimeout }) {
   if (typeof amountUnits !== 'bigint' || amountUnits <= 0n) throw new Error('Enter a positive USDC amount');
   if (!/^0x[0-9a-fA-F]{64}$/.test(fundId || '') || /^0x0{64}$/.test(fundId)) throw new Error('Invalid fund ID');
   const address = await signer.getAddress();
@@ -179,16 +179,18 @@ export async function depositSettlementUsdc({ router, token, signer, owner, fund
   if (await token.allowance(address, router.target) < amountUnits) {
     onStep('Approve the exact USDC deposit amount in your wallet');
     onStage('approval');
+    await checkWallet();
     const approval = await token.approve(router.target, amountUnits);
-    onBroadcast({ stage: 'approval', txHash: approval.hash });
-    if ((await approval.wait())?.status !== 1) throw new Error('USDC approval did not confirm');
+    await onBroadcast({ stage: 'approval', txHash: approval.hash });
+    if ((await approval.wait(confirmations, confirmationTimeout))?.status !== 1) throw new Error('USDC approval did not confirm');
   }
   await router.fundToken.staticCall(fundId, token.target, amountUnits);
+  await checkWallet();
   onStep('Confirm the USDC deposit into the selected fund');
   onStage('deposit');
   const transaction = await router.fundToken(fundId, token.target, amountUnits);
-  onBroadcast({ stage: 'deposit', txHash: transaction.hash });
-  if ((await transaction.wait())?.status !== 1) throw new Error('USDC deposit did not confirm');
+  await onBroadcast({ stage: 'deposit', txHash: transaction.hash });
+  if ((await transaction.wait(confirmations, confirmationTimeout))?.status !== 1) throw new Error('USDC deposit did not confirm');
   announcePaymentCelebration({
     chainId: 8453,
     txHash: transaction.hash,

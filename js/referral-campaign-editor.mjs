@@ -1,6 +1,8 @@
-import { MUSICIAN_REFERRAL_PILOT, MUSICIAN_REFERRAL_TERMS, PROMOTION_TEMPLATES, REFERRALS_FUND, PROMOTIONS_USDC,
+import { MUSICIAN_REFERRAL_PILOT, REFERRALS_FUND, PROMOTIONS_USDC,
   referralCampaignTitle, musicianReferralConfig, CAMPAIGN_ASSETS, campaignAsset, formatAssetUnits, parseAssetAmount,
   campaignGifts, campaignGiftReserveUnits, CAMPAIGN_GIFT_TRIGGERS, CAMPAIGN_GIFT_ICONS, CAMPAIGN_GIFT_LABELS } from './promotions.mjs?v=20261126-eth-gifts';
+import { SUPPORTER_REWARD_ABI, campaignSupporterRewards, supporterRewardKey,
+  REFERRAL_SETTLEMENT_VERSION, referralFundMatchUnits, referralSettlementTerms } from './promotions.mjs?v=20261126-eth-gifts';
 import { cachedEthUsd, loadEthUsd, weiToUsdText } from './eth-usd-quote.mjs?v=20261126-eth-gifts';
 import { newYorkInputToUtc, utcToNewYorkInput } from './radio-calendar.mjs';
 import { isAdminWallet } from './admin-access.mjs';
@@ -25,7 +27,7 @@ const TOKEN_ABI = [
 const DAY = 86400000;
 const BUDGET = BigInt(MUSICIAN_REFERRAL_PILOT.budgetUnits);
 const LEG_ICONS = { referrer: '🤝', musician: '🎤', 'dbusk-top10': '🏆', 'dbusk-playback': '📻' };
-const LEG_LABELS = { referrer: 'Referrer', musician: 'New musician', 'dbusk-top10': 'Top 10 fund', 'dbusk-playback': 'Playback fund' };
+const LEG_LABELS = { referrer: 'Referrer', musician: 'New musician', 'dbusk-top10': 'Top10 match', 'dbusk-playback': 'Playback match' };
 const amountText = (units, asset) => formatAssetUnits(units, asset).replace(/^[$Ξ]/, '').replace(/,/g, '');
 // Swaps a USDC amount to ETH (or back) at the spot rate, rounded to 0.000001 ETH or one cent.
 export function convertCampaignUnits(units, from, to, rate) {
@@ -80,25 +82,37 @@ export function referralTemplateFrom(campaign) {
     })(),
     asset: campaignAsset(campaign).id,
     gifts: campaignGifts(campaign.gifts || []) || [],
+    supporterRewards: campaignSupporterRewards(campaign.supporterRewards),
   };
 }
 
 export function referralCampaignPayload({ title, startsAt, endsAt, claimDeadline, referrers, names = {},
   legAmounts = musicianReferralConfig().amounts, budgetUnits = MUSICIAN_REFERRAL_PILOT.budgetUnits,
-  requiredVotes = MUSICIAN_REFERRAL_PILOT.requiredVotes, asset = 'usdc', gifts = [] }) {
+  requiredVotes = MUSICIAN_REFERRAL_PILOT.requiredVotes, asset = 'usdc', gifts = [], supporterRewards,
+  fundMatchQuote }) {
   const config = musicianReferralConfig({ legAmounts, baseBudgetUnits: budgetUnits, requiredVotes });
   if (!config.valid) throw new Error('Budget must be an exact multiple of the per-musician total, with a referrer reward');
   const giftList = campaignGifts(gifts);
   if (!giftList) throw new Error('Each gift needs an amount or a 🎖 Supporter token');
+  if (giftList.some(gift => gift.amountUnits !== '0' || !gift.supporter)) throw new Error('New referral gifts are Supporter DNFTs only');
+  const rewards = campaignSupporterRewards(supporterRewards);
+  if (!rewards) throw new Error('Choose 1–8 distinct Base Supporter DNFTs');
+  for (const id of ['dbusk-top10', 'dbusk-playback']) {
+    if (asset === 'eth' && BigInt(config.amounts[id]) > 0n && BigInt(referralFundMatchUnits(config.amounts[id], fundMatchQuote)) < 10000n) {
+      throw new Error('Each positive fund match must be at least one USDC cent');
+    }
+  }
   if (!(Date.parse(startsAt) < Date.parse(endsAt))) throw new Error('End must be after start');
   if (Date.parse(endsAt) <= Date.now()) throw new Error('Choose an end date in the future');
   if (Date.parse(claimDeadline) < Date.parse(endsAt)) throw new Error('Claim date must be on or after the end');
-  const template = PROMOTION_TEMPLATES.find(item => item.id === MUSICIAN_REFERRAL_PILOT.template);
   return { template: MUSICIAN_REFERRAL_PILOT.template, title: referralCampaignTitle(title),
-    criteria: template.criteria, terms: MUSICIAN_REFERRAL_TERMS,
+    criteria: `A verified minted playlist track and ${config.requiredVotes} distinct campaign-scoped signed song votes per new musician; subject to admin review.`,
+    terms: referralSettlementTerms({ ...config, asset, baseBudgetUnits: config.baseBudgetUnits, legAmounts: config.amounts, fundMatchQuote }),
     rewardUnits: config.rewardUnits, budgetUnits: config.baseBudgetUnits,
     maxAwards: config.maxConversions, fund: REFERRALS_FUND, legAmounts: config.amounts, requiredVotes: config.requiredVotes,
     asset: asset === 'eth' ? 'eth' : 'usdc', gifts: giftList,
+    supporterRewards: rewards, settlementVersion: REFERRAL_SETTLEMENT_VERSION,
+    ...(asset === 'eth' ? { fundMatchQuote } : {}),
     curatedReferrers: referrers,
     curatedReferrerNames: Object.fromEntries(Object.entries(names).filter(([w, n]) => referrers.includes(w) && n?.trim())),
     startsAt, endsAt, claimDeadline };
@@ -112,6 +126,7 @@ async function readReferralFund(budgetUnits = BUDGET, asset = CAMPAIGN_ASSETS.us
   const fundId = ethers.id(REFERRALS_FUND);
   const [fund, balance, state] = await Promise.all([router.funds(fundId), router.fundBalances(fundId, asset.address), fetchPromotionsState()]);
   return { exists: !!(fund.exists ?? fund[2]), active: !!(fund.active ?? fund[1]), revision: state.revision, asset: asset.id,
+    supportsSettlement: state.features?.referralSettlement === REFERRAL_SETTLEMENT_VERSION,
     ...referralFundAvailability({ balanceUnits: balance, campaigns: state.campaigns || [], budgetUnits, asset: asset.id }) };
 }
 
@@ -145,11 +160,18 @@ export function openReferralCampaignEditor({ startsAt, template = null, campaign
     budgetUnits: preset.budgetUnits || MUSICIAN_REFERRAL_PILOT.budgetUnits,
     requiredVotes: preset.requiredVotes || MUSICIAN_REFERRAL_PILOT.requiredVotes,
     asset: preset.asset === 'eth' ? 'eth' : 'usdc',
-    gifts: (preset.gifts || []).map(gift => ({ ...gift })),
+    gifts: (preset.gifts || []).map(gift => viewing ? { ...gift } : { trigger: gift.trigger, amountUnits: '0', supporter: true }),
+    supporterRewards: campaignSupporterRewards(preset.supporterRewards),
+    fundMatchQuote: campaign?.fundMatchQuote || null,
   };
   const currentAsset = () => viewing ? campaignAsset(campaign) : CAMPAIGN_ASSETS[values.asset];
   const money = units => formatAssetUnits(units, currentAsset());
   let rate = cachedEthUsd();
+  const fixQuote = () => {
+    if (rate && !values.fundMatchQuote) values.fundMatchQuote = {
+      ethUsdMicros: String(Math.round(rate * 1e6)), quotedAt: new Date().toISOString() };
+  };
+        fixQuote();
   const usd = units => currentAsset().id === 'eth' ? weiToUsdText(units, rate) : '';
   const both = units => usd(units) ? `${money(units)} (${usd(units)})` : money(units);
   const giftReserve = () => campaignGiftReserveUnits({ gifts: campaignGifts(values.gifts) || [], curatedReferrers: [...values.referrers] });
@@ -169,11 +191,12 @@ export function openReferralCampaignEditor({ startsAt, template = null, campaign
   info.hidden = true;
   const renderInfo = () => {
     const c = config();
-    info.replaceChildren(...MUSICIAN_REFERRAL_PILOT.rewardLegs.map(leg => el('span', 'rc-leg', `${LEG_ICONS[leg.id]} ${money(c.amounts[leg.id] || 0)}`)),
-      el('span', 'rc-info-line', `🎵 minted track + 🗳 ${c.requiredVotes} votes = 1 conversion`),
-      el('span', 'rc-info-line', `🎖 Supporter token if all ${c.maxConversions || '—'} fill`),
-      ...values.gifts.map(gift => el('span', 'rc-info-line', `${giftChip(gift)} · ${CAMPAIGN_GIFT_LABELS[gift.trigger]}`)),
-      el('span', 'rc-info-line', '🌐 Records are public on IPFS'));
+    info.replaceChildren(
+      el('span', 'rc-info-line', '1 · Set dates and the referrers allowed to recruit. A newcomer accepts the public campaign terms and records their referrer.'),
+      el('span', 'rc-info-line', `2 · A verified minted track + ${c.requiredVotes} distinct campaign song votes qualifies one newcomer, subject to admin review. The budget caps ${c.maxConversions || '—'} successes.`),
+      el('span', 'rc-info-line', '3 · Referrer and musician shares are wallet rewards. Top10/Playback shares become per-newcomer USDC matches after the campaign ends or fills. Payroll releases the ETH share to the admin, then verifies the matching USDC deposit. No automatic swap.'),
+      el('span', 'rc-info-line', '4 · Gifts are admin-held Base Supporter DNFTs: one of each selected token per earned recipient per campaign. Successful full campaigns also earn the default completion basket; optional gift criteria add eligible winners.'),
+      el('span', 'rc-info-line', '5 · Run signs a public IPFS campaign and earmarks its budget; it does not immediately pay anyone or move DNFTs. A shortfall requests a separate deposit. ETH/USD match values shown here are fixed in the published terms.'));
   };
   renderInfo();
   header.append(el('span', 'rc-badge', '🤝'), heading,
@@ -319,17 +342,19 @@ export function openReferralCampaignEditor({ startsAt, template = null, campaign
     input.addEventListener('input', () => {
       const units = parseAssetAmount(input.value, a);
       input.classList.toggle('is-bad', units === null);
-      if (units === null) return;
+      if (units === null) { changed(); return; }
       hint.textContent = usd(units);
       onValue(units);
       changed();
     });
+    if (icon) wrap.append(el('small', 'rc-field-name', label.replace(/ per musician$/, '')));
     if (icon) wrap.append(el('span', 'rc-icon', icon));
     wrap.append(el('span', 'rc-dollar', a.id === 'eth' ? 'Ξ' : '$'), input);
     if (a.id === 'eth') wrap.append(hint);
     return wrap;
   };
   let updateMath = () => {};
+  let updateMatchPreview = () => {};
   let rerenderBudget = () => {};
   let rerenderGifts = () => {};
   let updateReserve = () => {};
@@ -347,6 +372,7 @@ export function openReferralCampaignEditor({ startsAt, template = null, campaign
         values.budgetUnits = c.valid && reward > 0n ? (reward * BigInt(c.maxConversions)).toString() : swap(values.budgetUnits);
         values.gifts = values.gifts.map(gift => ({ ...gift, amountUnits: gift.amountUnits === '0' ? '0' : swap(gift.amountUnits) }));
         values.asset = to;
+          fixQuote();
         picks.forEach(button => button.classList.toggle('is-on', button.textContent.includes(CAMPAIGN_ASSETS[to].symbol)));
         fund = null;
         say();
@@ -391,13 +417,26 @@ export function openReferralCampaignEditor({ startsAt, template = null, campaign
         math.dataset.tone = c.valid ? '' : 'error';
       };
       updateMath();
-      body.replaceChildren(total, legs, votes, math, pill('✓', 'Done', done));
+      const note = el('p', 'rc-help', 'Total budget is the cap. Each approved newcomer uses one complete split; unused slots spend nothing.');
+      const match = el('p', 'rc-help');
+      updateMatchPreview = () => {
+        match.textContent = values.asset === 'eth' && values.fundMatchQuote
+          ? `Per newcomer: Top10 ${formatAssetUnits(referralFundMatchUnits(values.legAmounts['dbusk-top10'], values.fundMatchQuote))} USDC · Playback ${formatAssetUnits(referralFundMatchUnits(values.legAmounts['dbusk-playback'], values.fundMatchQuote))} USDC, fixed at publication.`
+          : 'Fund matches use the campaign currency; ETH matches fix their USDC value before publication.';
+      };
+      updateMatchPreview();
+      const refreshQuote = pill('↻ Quote', 'Refresh and review the fixed ETH/USD match quote', async () => {
+        rate = await loadEthUsd({ force: true });
+        if (!rate) return say('ETH/USD quote unavailable; no campaign can be published with an unknown match value.', 'error');
+        values.fundMatchQuote = null; fixQuote(); changed(); say('Quote updated. Review the USDC matches before Run.');
+      });
+      body.replaceChildren(note, total, legs, votes, math, match, refreshQuote, pill('✓', 'Done', done));
     };
     rerenderBudget();
   });
-  const GIFT_HINTS = { participation: 'each converting referrer', completion: 'all, if it fills', top: 'most musicians' };
+  const GIFT_HINTS = { participation: 'One approved newcomer earns it.', completion: 'Earned by converting referrers if all slots fill.', top: 'Most approved newcomers wins; tied winners each earn the basket.' };
   const giftOf = trigger => values.gifts.find(gift => gift.trigger === trigger);
-  const giftsText = () => values.gifts.length ? values.gifts.map(giftChip).join(' · ') : 'Add gifts';
+  const giftsText = () => `${values.supporterRewards.length} Supporter DNFT${values.supporterRewards.length === 1 ? '' : 's'}${values.gifts.length ? ` · ${values.gifts.map(giftChip).join(' · ')}` : ' · choose gift criteria'}`;
   const giftsRow = row('🎁', 'Gifts', giftsText, (body, done) => {
     const reserve = el('p', 'rc-math');
     rerenderGifts = () => {
@@ -411,27 +450,15 @@ export function openReferralCampaignEditor({ startsAt, template = null, campaign
         on.checked = !!gift;
         on.setAttribute('aria-label', CAMPAIGN_GIFT_LABELS[trigger]);
         on.addEventListener('change', () => {
-          if (on.checked) values.gifts.push({ trigger, amountUnits: values.legAmounts.referrer || '0', supporter: false });
+          if (on.checked) values.gifts.push({ trigger, amountUnits: '0', supporter: true });
           else values.gifts = values.gifts.filter(item => item.trigger !== trigger);
           rerenderGifts();
           changed();
         });
-        toggle.append(on, el('span', 'rc-icon', CAMPAIGN_GIFT_ICONS[trigger]));
-        line.append(toggle);
-        if (!gift) line.append(el('small', 'rc-usd', GIFT_HINTS[trigger]));
-        else {
-          const supporter = el('label', 'rc-check rc-supporter');
-          supporter.title = 'Also earns a DecentBusking Supporter token';
-          const box = el('input');
-          box.type = 'checkbox';
-          box.checked = gift.supporter;
-          box.setAttribute('aria-label', 'Supporter token');
-          box.addEventListener('change', () => { gift.supporter = box.checked; changed(); });
-          supporter.append(box, el('span', '', '🎖'));
-          line.append(moneyInput(`${CAMPAIGN_GIFT_LABELS[trigger]} gift`, '', gift.amountUnits, units => { gift.amountUnits = units; }), supporter);
-        }
+        toggle.append(on, el('span', 'rc-icon', CAMPAIGN_GIFT_ICONS[trigger]), el('span', '', trigger === 'top' ? 'Top referrer' : trigger === 'completion' ? 'Campaign filled' : 'Participation'));
+        line.append(toggle, el('small', 'rc-help', GIFT_HINTS[trigger]));
         return line;
-      }), reserve, pill('✓', 'Done', done));
+      }), basketEditor(), reserve, pill('✓', 'Done', done));
       updateReserve();
     };
     updateReserve = () => {
@@ -441,8 +468,48 @@ export function openReferralCampaignEditor({ startsAt, template = null, campaign
     };
     rerenderGifts();
   });
+  function basketEditor() {
+    const box = el('section', 'rc-basket');
+    box.append(el('p', 'rc-help', 'Supporter basket · one of each DNFT per eligible referrer, sent from the admin wallet. No cash gifts or token escrow.'));
+    for (const token of values.supporterRewards || []) {
+      const line = el('div', 'rc-inline');
+      const link = el('a', 'rc-chip', token.name || (supporterRewardKey(token) === supporterRewardKey()
+        ? 'DecentBusking Supporter #75' : `Supporter #${token.tokenId}`));
+      link.href = `https://basescan.org/token/${token.contract}?a=${token.tokenId}`;
+      link.target = '_blank'; link.rel = 'noopener';
+      line.append(link, pill('✕', `Remove Supporter #${token.tokenId}`, () => {
+        if (values.supporterRewards.length === 1) return say('Keep at least one Supporter DNFT in the basket.', 'error');
+        values.supporterRewards = values.supporterRewards.filter(item => supporterRewardKey(item) !== supporterRewardKey(token));
+        rerenderGifts(); changed();
+      }));
+      box.append(line);
+    }
+    const contract = el('input'), tokenId = el('input'), name = el('input');
+    contract.placeholder = 'Base ERC-1155 contract'; contract.setAttribute('aria-label', 'Supporter contract');
+    tokenId.placeholder = 'Token ID'; tokenId.inputMode = 'numeric'; tokenId.setAttribute('aria-label', 'Supporter token ID');
+    name.placeholder = 'Name (optional)'; name.maxLength = 100; name.setAttribute('aria-label', 'Supporter name');
+    const add = pill('＋ Add DNFT', 'Add an owned Base Supporter DNFT', async () => {
+      add.disabled = true;
+      try {
+        if (!isAdminWallet()) throw new Error('Connect the admin wallet');
+        const candidate = { chainId: 8453, contract: contract.value.trim(), tokenId: tokenId.value.trim(), quantity: 1,
+          ...(name.value.trim() ? { name: name.value.trim() } : {}) };
+        const next = campaignSupporterRewards([...values.supporterRewards, candidate]);
+        if (!next) throw new Error('Choose distinct Base ERC-1155 DNFTs, up to eight');
+        const token = new window.ethers.Contract(candidate.contract, SUPPORTER_REWARD_ABI, getBaseReadProvider());
+        if (!await token.supportsInterface('0xd9b67a26') || await token.balanceOf(window._wallet.address, candidate.tokenId) < 1n) {
+          throw new Error('This must be an ERC-1155 token held by the admin wallet on Base');
+        }
+        values.supporterRewards = next;
+        rerenderGifts(); changed(); say('DNFT added to the basket.');
+      } catch (error) { say(error.shortMessage || error.message, 'error'); }
+      finally { add.disabled = false; }
+    });
+    box.append(contract, tokenId, name, add);
+    return box;
+  }
   function changed() {
-    updateMath(); updateReserve(); renderInfo();
+    updateMath(); updateMatchPreview(); updateReserve(); renderInfo();
     currencyRow.refresh(); budgetRow.refresh(); giftsRow.refresh(); peopleRow.refresh();
     check();
   }
@@ -453,6 +520,7 @@ export function openReferralCampaignEditor({ startsAt, template = null, campaign
     ...(!viewing || values.gifts.length ? [giftsRow.wrap] : []), fundRow.wrap, allocation);
 
   const footer = el('footer', 'rc-foot');
+  const matchNotice = el('p', 'rc-match-notice');
   const runButton = el('button', 'rc-run', '▶ Run Campaign');
   runButton.type = 'button';
   if (viewing) {
@@ -467,7 +535,7 @@ export function openReferralCampaignEditor({ startsAt, template = null, campaign
       dialog.close();
       openPromotionCalendarEditor({ startsAt: campaign.startsAt, endsAt: campaign.endsAt, campaignId: campaign.id });
     }));
-  } else footer.append(runButton);
+  } else footer.append(matchNotice, runButton);
 
   function giftAwardsView() {
     const box = el('div', 'rc-gift-awards');
@@ -558,9 +626,19 @@ export function openReferralCampaignEditor({ startsAt, template = null, campaign
     const ready = fund && !fund.error && fund.asset === values.asset;
     const shortfall = ready && need > fund.available ? need - fund.available : 0n;
     if (!c.valid) { message = '⚠️ Fix the budget breakdown'; tone = 'error'; }
+    else if (dialog.querySelector('.rc-money input.is-bad')) { message = 'Correct the invalid amount before Run.'; tone = 'error'; }
+    else if (values.asset === 'eth' && (!values.fundMatchQuote ||
+        Math.abs(Date.now() - Date.parse(values.fundMatchQuote.quotedAt)) > 300000)) {
+      message = 'Refresh the quote in Budget and review the fixed USDC matches before Run.'; tone = 'error';
+    }
+    else if (values.asset === 'eth' && ['dbusk-top10', 'dbusk-playback'].some(id =>
+        BigInt(values.legAmounts[id]) > 0n && BigInt(referralFundMatchUnits(values.legAmounts[id], values.fundMatchQuote)) < 10000n)) {
+      message = 'Each positive fund share must match at least one USDC cent.'; tone = 'error';
+    }
     else if (!campaignGifts(values.gifts)) { message = '⚠️ Each gift needs an amount or 🎖'; tone = 'error'; }
     else if (fund?.error) { message = `⚠️ ${fund.error}`; tone = 'error'; }
     else if (!ready) message = '⏳ Checking fund…';
+    else if (!fund.supportsSettlement) { message = 'Campaign publication is paused until the new matching/basket backend is deployed. Do not use the older Run button.'; tone = 'error'; }
     else if (!fund.exists || !fund.active) { message = `🏦 Create or restore ${REFERRALS_FUND} in Admin Community Calendar → Fund Allocations`; tone = 'error'; }
     else {
       const giftNote = gifts > 0n ? ` incl. 🎁 ${money(gifts)}` : '';
@@ -568,11 +646,20 @@ export function openReferralCampaignEditor({ startsAt, template = null, campaign
         ? `Allocating ${both(need)}${giftNote} of ${money(fund.available)} · ${money(shortfall)} more will be deposited from your wallet`
         : `Allocating ${both(need)}${giftNote} of ${money(fund.available)} in ${REFERRALS_FUND}`;
       ok = true;
+      if (values.asset === 'eth') {
+        message += ` · Fixed USDC per success: Top10 ${formatAssetUnits(referralFundMatchUnits(c.amounts['dbusk-top10'], values.fundMatchQuote))}, Playback ${formatAssetUnits(referralFundMatchUnits(c.amounts['dbusk-playback'], values.fundMatchQuote))}. No automatic swap.`;
+      }
     }
     allocation.textContent = message;
     allocation.dataset.tone = tone;
     runButton.textContent = ok && shortfall > 0n ? `▶ Fund ${money(shortfall)} & Run` : '▶ Run Campaign';
     runButton.disabled = busy || !ok;
+    runButton.title = message;
+    matchNotice.textContent = fund && !fund.error && !fund.supportsSettlement
+      ? 'Publication blocked: matching backend update required.'
+      : c.valid && (values.asset !== 'eth' || values.fundMatchQuote)
+        ? `USDC match / newcomer · 🏆 ${formatAssetUnits(values.asset === 'eth' ? referralFundMatchUnits(c.amounts['dbusk-top10'], values.fundMatchQuote) : c.amounts['dbusk-top10'])} · 📻 ${formatAssetUnits(values.asset === 'eth' ? referralFundMatchUnits(c.amounts['dbusk-playback'], values.fundMatchQuote) : c.amounts['dbusk-playback'])}. Fixed at publication; no automatic swap.`
+        : 'Review the budget and ETH/USD quote before publication.';
     fundRow.refresh();
     return ok;
   }
@@ -594,6 +681,13 @@ export function openReferralCampaignEditor({ startsAt, template = null, campaign
       const payload = referralCampaignPayload({ ...values, referrers: [...values.referrers] });
       await refreshFund();
       if (fund.error || !fund.exists || !fund.active) throw new Error(fund.error || `Create ${REFERRALS_FUND} first`);
+      if (!fund.supportsSettlement) throw new Error('The worker does not yet support verified fund matches and DNFT baskets');
+      for (const reward of payload.supporterRewards) {
+        const token = new w.ethers.Contract(reward.contract, SUPPORTER_REWARD_ABI, w.signer);
+        if (!await token.supportsInterface('0xd9b67a26') || await token.balanceOf(w.address, reward.tokenId) < 1n) {
+          throw new Error(`Admin wallet must hold the ERC-1155 Supporter #${reward.tokenId} before publication`);
+        }
+      }
       if (fund.shortfall > 0n && values.asset === 'eth') {
         const router = new w.ethers.Contract(REFERRAL_ROUTER_ADDRESS, ROUTER_ABI, w.signer);
         say(`🦊 Deposit ${money(fund.shortfall)}`);
@@ -651,7 +745,7 @@ export function openReferralCampaignEditor({ startsAt, template = null, campaign
   }
   check();
   if (!viewing) void refreshFund();
-  if (currentAsset().id === 'eth' && !rate) void loadEthUsd().then(value => { rate = value; if (dialog.isConnected) changed(); });
+  if (currentAsset().id === 'eth' && !rate) void loadEthUsd().then(value => { rate = value; fixQuote(); if (dialog.isConnected) changed(); });
   void loadReferralContributors().then(list => {
     contributors.splice(0, contributors.length, ...list);
     renderPeople();

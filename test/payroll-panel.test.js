@@ -60,7 +60,7 @@ test('Base payroll excludes retired legacy entries without sending or verifying 
     return nodes.get(id);
   };
   const context = vm.createContext({ ...await import('../js/fund-admin.mjs'), owner, localStorage: storage, createLegacyReceiptStore, verifyLegacyPayment,
-    isAdminWallet: address => address === owner, loadSupporterPayroll: async () => {},
+    isAdminWallet: address => address === owner, loadSupporterPayroll: async () => {}, loadReferralMatchPayroll: async () => {},
     window: { _wallet: { address: owner } }, document: { getElementById: node }, URL,
     ethers: { ...ethers, JsonRpcProvider: class {
       async getNetwork() { return { chainId: 10 }; }

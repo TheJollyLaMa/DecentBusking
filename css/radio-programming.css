@@ -108,7 +108,7 @@
 .rc-pill { flex: none; min-width: 34px; height: 34px; padding: 0 12px; border: 1px solid #ffffff2a; border-radius: 999px; background: #ffffff12; cursor: pointer; }
 .rc-pill:hover { background: #ffffff24; }
 .referral-blob :focus-visible { outline: 2px solid #f4d380; outline-offset: 2px; }
-.rc-info { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 16px 6px; padding: 10px; border-radius: 18px; background: #ffffff0d; font-size: .78rem; }
+.rc-info { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 16px 6px; padding: 10px; border-radius: 18px; background: #ffffff0d; font-size: .78rem; max-height: min(180px, 30vh); overflow-y: auto; flex-shrink: 0; }
 .rc-info[hidden] { display: none; }
 .rc-leg { padding: 3px 9px; border-radius: 999px; background: #d5a8ff22; }
 .rc-info-line { flex-basis: 100%; color: var(--rc-soft); }
@@ -142,7 +142,10 @@
 .rc-status { margin: 0 18px; min-height: 1.2em; color: var(--rc-soft); font-size: .8rem; }
 .rc-status:empty { display: none; }
 .rc-status[data-tone=error] { color: #ffb5ae; }
-.rc-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px 14px; }
+.rc-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 10px 14px 14px; }
+.rc-match-notice { width: 100%; margin: 0; font-size: .76rem; line-height: 1.4; color: var(--rc-soft); }
+.referral-match-row { border-radius: 18px; }
+.referral-match-row a { color: #c8b5f4; text-decoration: none; }
 .rc-run { padding: 11px 22px; border: 0; border-radius: 999px; background: linear-gradient(135deg, #b98cf0, #6fd0c4); color: #12101c; font-weight: 800; cursor: pointer; box-shadow: 0 4px 16px #d5a8ff44; }
 .rc-run:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
 .radio-calendar-presets .radio-calendar-chip.is-template { background: #3e2d57; border-style: dashed; }
@@ -173,6 +176,13 @@
 .rc-money .rc-dollar { color: var(--rc-soft); }
 .rc-total input { width: 6ch; font-weight: 700; }
 .rc-legs { display: flex; flex-wrap: wrap; gap: 6px; }
+.rc-legs .rc-money { flex-wrap: wrap; border-radius: 16px; max-width: 100%; }
+.rc-field-name { flex-basis: 100%; color: var(--rc-soft); font-size: .72rem; }
+.rc-help { flex-basis: 100%; margin: 4px 0; color: var(--rc-soft); font-size: .76rem; line-height: 1.45; }
+.rc-gift { flex-wrap: wrap; }
+.rc-gift .rc-help { flex: 1 1 15ch; }
+.rc-basket { display: grid; gap: 6px; width: 100%; min-width: 0; }
+.rc-basket .rc-chip { overflow-wrap: anywhere; min-width: 0; }
 .rc-math { flex-basis: 100%; margin: 2px 0 0; color: #9fd0ff; font-size: .8rem; }
 .rc-math[data-tone=error] { color: #ffb4b4; }
 .rc-name { width: 9ch; }

@@ -1,15 +1,17 @@
 // Earned referral Supporter tokens, listed in the dev payroll queue and sent directly from the admin wallet.
-import { SUPPORTER_REWARD, SUPPORTER_REWARD_ABI, supporterRewardQueue } from './promotions.mjs?v=20261123-supporter-queue';
+import { SUPPORTER_REWARD, SUPPORTER_REWARD_ABI, supporterRewardQueue, supporterRewardKey } from './promotions.mjs?v=20261123-supporter-queue';
 import { fetchPromotionsState, signedPromotionCommand, promotionWallet } from './promotions-ui.mjs?v=20261126-eth-gifts';
 import { isAdminWallet } from './admin-access.mjs';
 
-const journalKey = item => `decentbusking:supporter-delivery:${item.campaignId}:${item.wallet}`;
+const rewardKey = item => item.tokenKey || supporterRewardKey(item.token);
+const journalKey = item => `decentbusking:supporter-delivery:${item.campaignId}:${item.wallet}${rewardKey(item) === supporterRewardKey() ? '' : `:${rewardKey(item)}`}`;
 const short = wallet => `${wallet.slice(0, 6)}…${wallet.slice(-4)}`;
 const delivered = (state, item) => supporterRewardQueue(state.campaigns || [])
-  .find(entry => entry.campaignId === item.campaignId && entry.wallet === item.wallet)?.status === 'delivered';
+  .find(entry => entry.campaignId === item.campaignId && entry.wallet === item.wallet && rewardKey(entry) === rewardKey(item))?.status === 'delivered';
 
 export function createSupporterPayroll({ root, fetchState = fetchPromotionsState, sign = signedPromotionCommand,
-  getWallet = promotionWallet, storage = globalThis.localStorage, ask = globalThis.prompt, confirmAction = globalThis.confirm } = {}) {
+  getWallet = promotionWallet, storage = globalThis.localStorage, ask = globalThis.prompt, confirmAction = globalThis.confirm,
+  isBusy = () => false, setBusy = () => {} } = {}) {
   let state = null;
   let busy = false;
   let line = null;
@@ -29,13 +31,14 @@ export function createSupporterPayroll({ root, fetchState = fetchPromotionsState
     const w = await getWallet();
     if (!isAdminWallet(w.address)) throw new Error('Connect the admin wallet');
     if (storage.getItem(journalKey(item))) throw new Error('A transfer is unresolved. Check its receipt before retrying.');
-    const token = new w.ethers.Contract(SUPPORTER_REWARD.contract, SUPPORTER_REWARD_ABI, w.signer);
-    const tokenId = BigInt(SUPPORTER_REWARD.tokenId), quantity = BigInt(SUPPORTER_REWARD.quantity);
+    const reward = item.token || SUPPORTER_REWARD;
+    const token = new w.ethers.Contract(reward.contract, SUPPORTER_REWARD_ABI, w.signer);
+    const tokenId = BigInt(reward.tokenId), quantity = BigInt(reward.quantity);
     if (await token.balanceOf(w.address, tokenId) < quantity) throw new Error(`Admin wallet holds no Supporter #${tokenId}`);
     const args = [w.address, item.wallet, tokenId, quantity, '0x'];
     await token.safeTransferFrom.staticCall(...args);
     state = await fetchState();
-    await command({ action: 'prepare-supporter', campaignId: item.campaignId, wallet: item.wallet });
+    await command({ action: 'prepare-supporter', campaignId: item.campaignId, wallet: item.wallet, tokenKey: rewardKey(item) });
     await w.check();
     storage.setItem(journalKey(item), JSON.stringify({ status: 'awaiting-wallet' }));
     let tx;
@@ -46,15 +49,15 @@ export function createSupporterPayroll({ root, fetchState = fetchPromotionsState
     try { storage.setItem(journalKey(item), JSON.stringify({ hash: tx.hash })); }
     catch (error) { throw new Error(`Sent as ${tx.hash}, but the browser journal failed: ${error.message}. Check this hash; do not send again.`); }
     status(`🎖 Sending… ${tx.hash.slice(0, 10)}… Do not send again.`);
-    const firstCheck = await command({ action: 'reconcile-supporter', campaignId: item.campaignId, wallet: item.wallet, txHash: tx.hash });
+    const firstCheck = await command({ action: 'reconcile-supporter', campaignId: item.campaignId, wallet: item.wallet, tokenKey: rewardKey(item), txHash: tx.hash });
     if (delivered(firstCheck, item)) {
       storage.removeItem(journalKey(item));
       return;
     }
-    await tx.wait(2);
+    await tx.wait(2, 120000);
     await w.check();
     if (delivered(await command({ action: 'reconcile-supporter', campaignId: item.campaignId,
-      wallet: item.wallet, txHash: tx.hash }), item)) storage.removeItem(journalKey(item));
+      wallet: item.wallet, tokenKey: rewardKey(item), txHash: tx.hash }), item)) storage.removeItem(journalKey(item));
     else return 'transfer-pending';
   }
 
@@ -63,8 +66,8 @@ export function createSupporterPayroll({ root, fetchState = fetchPromotionsState
     const hash = String(ask?.('Transaction hash for this Supporter transfer (update it if replaced)', savedHash) || '').trim();
     if (!hash) throw new Error('Enter the transaction hash, or release if wallet history shows nothing was sent');
     state = await fetchState();
-    const next = await command({ action: 'reconcile-supporter', campaignId: item.campaignId, wallet: item.wallet, txHash: hash });
-    const entry = supporterRewardQueue(next.campaigns || []).find(e => e.campaignId === item.campaignId && e.wallet === item.wallet);
+    const next = await command({ action: 'reconcile-supporter', campaignId: item.campaignId, wallet: item.wallet, tokenKey: rewardKey(item), txHash: hash });
+    const entry = supporterRewardQueue(next.campaigns || []).find(e => e.campaignId === item.campaignId && e.wallet === item.wallet && rewardKey(e) === rewardKey(item));
     if (!entry) throw new Error('Supporter transfer is missing from the queue; check wallet history and do not send again');
     if (entry.status !== 'transfer-pending') storage.removeItem(journalKey(item));
     else {
@@ -80,7 +83,7 @@ export function createSupporterPayroll({ root, fetchState = fetchPromotionsState
     if (!reason) throw new Error('Record why wallet history confirms nothing was sent');
     state = await fetchState();
     await command({ action: 'release-supporter-preparation', campaignId: item.campaignId, wallet: item.wallet,
-      confirmNoBroadcast: true, reason });
+      tokenKey: rewardKey(item), confirmNoBroadcast: true, reason });
     storage.removeItem(journalKey(item));
   }
 
@@ -99,7 +102,7 @@ export function createSupporterPayroll({ root, fetchState = fetchPromotionsState
     };
     const head = el('header', 'supporter-payroll-head');
     const info = el('span', 'supporter-payroll-info', 'ⓘ');
-    info.title = `Earned in referral campaigns. Sent from the admin wallet: 1 × Supporter #${SUPPORTER_REWARD.tokenId} on Base. Delivered after 2 confirmations.`;
+    info.title = 'Earned in referral campaigns. One of each selected Base Supporter DNFT per eligible wallet, from the admin wallet. Delivered after 2 confirmations.';
     head.append(el('h4', '', '🎖 Supporter tokens owed'),
       el('span', 'supporter-payroll-count', `${open.length} owed${done ? ` · ${done} ✅` : ''}`), info);
     const list = el('ul', 'supporter-payroll-list');
@@ -107,13 +110,13 @@ export function createSupporterPayroll({ root, fetchState = fetchPromotionsState
       const row = el('li', `supporter-payroll-row is-${item.status}`);
       const who = el('span', 'supporter-payroll-who', `👽 ${item.name || short(item.wallet)}`);
       who.title = item.wallet;
-      const what = el('span', 'supporter-payroll-what', `🎖×1 · ${item.title || 'Referral Campaign'}`);
+      const what = el('span', 'supporter-payroll-what', `🎖 ${item.token?.name || `Supporter #${item.token?.tokenId || '75'}`} ×1 · ${item.title || 'Referral Campaign'}`);
       const actions = el('span', 'supporter-payroll-actions');
       const button = (label, title, fn) => {
         const b = el('button', 'payroll-btn payroll-btn-secondary supporter-payroll-btn', label);
         b.type = 'button';
         b.title = title;
-        b.disabled = !admin || busy;
+        b.disabled = !admin || busy || isBusy();
         b.addEventListener('click', () => run(fn, item));
         actions.append(b);
       };
@@ -133,8 +136,9 @@ export function createSupporterPayroll({ root, fetchState = fetchPromotionsState
   }
 
   async function run(fn, item) {
-    if (busy) return;
+    if (busy || isBusy()) { status('Another Payroll action is in progress; wait before sending a Supporter.', true); return; }
     busy = true;
+    setBusy(true);
     render();
     status('⏳ Working…');
     let outcome;
@@ -144,18 +148,21 @@ export function createSupporterPayroll({ root, fetchState = fetchPromotionsState
       setTimeout(() => root.classList.remove('is-celebrating'), 1200);
     } catch (error) {
       busy = false;
+      setBusy(false);
       try { state = await fetchState(); } catch {}
       render();
       status(`⚠️ ${error.shortMessage || error.message}`, true);
       return;
     }
     busy = false;
+    setBusy(false);
     render();
     status(outcome === 'transfer-pending' ? '⏳ Transfer still confirming' : '✨ Updated');
   }
 
   return {
     async load() {
+      if (busy) return;
       try { state = await fetchState(); render(); }
       catch (error) { state = null; render(); status(`⚠️ Supporter queue unavailable: ${error.message}`, true); }
     },
@@ -163,11 +170,11 @@ export function createSupporterPayroll({ root, fetchState = fetchPromotionsState
 }
 
 let mounted = null;
-export async function loadSupporterPayroll(doc = globalThis.document) {
+export async function loadSupporterPayroll(doc = globalThis.document, options = {}) {
   const root = doc?.getElementById('payroll-supporter-queue');
   if (!root) return;
   try {
-    if (mounted?.root !== root) mounted = { root, view: createSupporterPayroll({ root }) };
+    if (mounted?.root !== root) mounted = { root, view: createSupporterPayroll({ root, ...options }) };
     await mounted.view.load();
   } catch (error) {
     root.textContent = `⚠️ Supporter queue unavailable: ${error.message}`;
