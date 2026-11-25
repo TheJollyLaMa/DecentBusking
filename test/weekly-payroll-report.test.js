@@ -31,8 +31,10 @@ async function fixture({ forfeiture = false } = {}) {
     }))) };
   const posts = [];
   const history = new Map([['100', { id: '100', author: { id: 'human' }, embeds: [] }]]);
+  const roles = new Map([['555555555555555555', { id: '555555555555555555', name: 'Jukebox Hero', mentionable: true, managed: false }]]);
   const channel = {
     id: '123', client: { user: { id: 'bot' } },
+    guild: { id: '999999999999999999', members: { me: {} }, roles: { fetch: async () => roles } },
     messages: { fetch: async ({ limit, before }) => {
       const messages = [...history.values()].filter(message => !before || BigInt(message.id) < BigInt(before))
         .sort((a, b) => BigInt(a.id) > BigInt(b.id) ? -1 : 1).slice(0, limit);
@@ -54,7 +56,7 @@ async function fixture({ forfeiture = false } = {}) {
     getChannel: async () => channel, now: () => Date.parse('2026-10-19T08:00:00Z'),
     restore: async () => structuredClone(saved),
     save: async value => { saves++; saved = structuredClone(value); return 'ipfs://reports'; } };
-  return { id, options, weekly, ledger, report, allocations, channel, posts, history, saves: () => saves,
+  return { id, options, weekly, ledger, report, allocations, channel, roles, posts, history, saves: () => saves,
     saved: () => saved, create: override => createWeeklyPayrollReporter({ ...options, ...override }), buildWeeklyPayrollReport };
 }
 
@@ -75,7 +77,8 @@ test('combined report waits for every verified payment in both published allocat
   await Promise.all([reporter.tick(), reporter.tick()]);
   assert.equal(value.posts.length, 1);
   assert.equal(reporter.getState().reports[0].status, 'sent');
-  assert.deepEqual(value.posts[0].allowedMentions, { parse: [] });
+  assert.equal(value.posts[0].content, '<@&555555555555555555>');
+  assert.deepEqual(value.posts[0].allowedMentions, { parse: [], roles: ['555555555555555555'], users: [], repliedUser: false });
   await reporter.tick();
   await value.create().tick();
   assert.equal(value.posts.length, 1);
@@ -113,7 +116,7 @@ test('forfeited chart positions stay visible as unpaid and are never counted in 
   assert.doesNotMatch(embed.description, /\$2000\.00 USDC paid/);
 });
 
-test('festival-style payroll celebrates verified payouts and invites newcomers without pings', async () => {
+test('festival-style payroll celebrates verified payouts, pings only JukeboxHero, and invites newcomers', async () => {
   const value = await fixture();
   await value.create().tick();
   const payload = value.posts[0];
@@ -130,12 +133,28 @@ test('festival-style payroll celebrates verified payouts and invites newcomers w
   assert.match(invitation.value, /this week’s music/);
   assert.match(invitation.value, /\[Enter DecentBusking & tune in\]\(https:\/\/example.org\/DecentBusking\/\)/);
   assert.match(invitation.value, /DVert advertising/);
-  assert.deepEqual(payload.allowedMentions, { parse: [] });
+  assert.deepEqual(payload.allowedMentions, { parse: [], roles: ['555555555555555555'], users: [], repliedUser: false });
   assert.equal(embed.footer.text, 'decentbusking-payroll-paid:NY-2026-10-12');
   assert.ok(embed.title.length <= 256);
   assert.ok(embed.description.length <= 4096);
   assert.ok(embed.fields.every(field => field.name.length <= 256 && field.value.length <= 1024));
   assert.ok(JSON.stringify(embed).length <= 5500);
+});
+
+test('payroll waits rather than posting without a pingable JukeboxHero role', async () => {
+  const value = await fixture();
+  const role = value.roles.get('555555555555555555');
+  role.mentionable = false;
+  value.channel.permissionsFor = () => ({ has: () => false });
+  await assert.rejects(value.create().tick(), /not mentionable/);
+  value.roles.clear();
+  await assert.rejects(value.create().tick(), /role not found/);
+  assert.equal(value.posts.length, 0);
+  value.roles.set(role.id, role);
+  value.channel.permissionsFor = () => ({ has: () => true });
+  await value.create().tick();
+  assert.equal(value.posts.length, 1);
+  assert.equal(value.posts[0].content, '<@&555555555555555555>');
 });
 
 test('report ranks by amount, sums case-insensitive artist wallets, and breaks ties deterministically', async () => {

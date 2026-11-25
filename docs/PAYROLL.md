@@ -254,9 +254,15 @@ and show an error rather than leaving stale readiness active.
 Newly prepared reports use a purple, emoji-rich festival-style embed celebrating
 paid artists and community support. The invitation welcomes newcomers to listen,
 vote, share music, and explore contributions or DVert advertising. The paid week,
-verified totals, chart, artist payments, and proof links remain explicit; no
-everyone/role mentions are enabled. Already prepared checkpoint payloads retain
-their saved appearance so retries do not rewrite an announcement.
+verified totals, chart, artist payments, and proof links remain explicit. Each
+report pings only the **@Jukebox Hero** role, resolved by name (ignoring spaces
+and case) in the channel's
+guild at send time (including already prepared reports); @everyone, users and
+reply pings stay disabled. If the role is missing or neither mentionable nor
+pingable by the bot (Mention Everyone permission), the report is held and the
+error is shown instead of posting without the tag. Already prepared checkpoint
+payloads otherwise retain their saved appearance so retries do not rewrite an
+announcement.
 
 The bot checks every 15 seconds for a completed New York week with both published Playback and song-based Top 10 allocations. After **every payable entry in both allocations** has a matching, independently verified Base payment in the payment ledger (two confirmations), it posts one combined report to `JUKEBOX_CHANNEL_ID` (`#decentjukebox`). Clicking Pay, accepting a wallet prompt, recipient approvals, and partial batches do not trigger a paid report. Allocation and payment backups must be healthy before posting. Weeks without both published allocations, including unfunded categories, do not trigger a combined completion report.
 
