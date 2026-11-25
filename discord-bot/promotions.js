@@ -5,6 +5,7 @@ import { currentPayrollPeriod } from '../js/payroll-week.mjs';
 import { PROMOTIONS_FUND, REFERRALS_FUND, referralCampaignTitle, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS,
   MUSICIAN_REFERRAL_PILOT, isMusicianReferralCampaign, CAMPAIGN_ASSETS, campaignAsset, campaignGifts, campaignGiftReserveUnits,
   campaignGiftWinners, musicianReferralLegs, musicianReferralConfig, SUPPORTER_REWARD, SUPPORTER_REWARD_ABI,
+  campaignSupporterRewards, supporterRewardKey, REFERRAL_SETTLEMENT_VERSION, referralFundMatchUnits, referralFundMatchQueue,
   isPromotionsFund, promotionAnnouncementDraft, promotionAuthorization, promotionWorkReference } from '../js/promotions.mjs';
 
 const address = value => {
@@ -35,8 +36,41 @@ const timestamp = (value, label) => {
 const statuses = new Set(['draft', 'published', 'paused', 'closed', 'archived']);
 const held = claim => ['approved', 'payment-pending', 'paid'].includes(claim.status);
 const unpaidReservedUnits = claim => claim.legs
-  ? claim.legs.filter(leg => leg.status !== 'paid').reduce((total, leg) => total + BigInt(leg.amountUnits), 0n)
+  ? claim.legs.filter(leg => leg.match ? leg.match.source.status !== 'paid' : leg.status !== 'paid')
+    .reduce((total, leg) => total + BigInt(leg.amountUnits), 0n)
   : claim.status === 'paid' ? 0n : BigInt(claim.amountUnits);
+const sourcePaidUnits = claim => claim.legs
+  ? claim.legs.filter(leg => leg.match ? leg.match.source.status === 'paid' : leg.kind === 'wallet' && leg.status === 'paid')
+    .reduce((total, leg) => total + BigInt(leg.amountUnits), 0n)
+  : claim.status === 'paid' ? BigInt(claim.amountUnits) : 0n;
+const paymentTargets = next => [
+  ...next.claims.flatMap(claim => [claim, ...(claim.legs || []).flatMap(leg => [leg, ...(leg.match ? [leg.match.source, leg.match.deposit] : [])])]),
+  ...next.campaigns.flatMap(campaign => [...(campaign.giftAwards || []), ...(campaign.supporterToken?.deliveries || [])]),
+];
+function validateReferralSettlement(campaign) {
+  if (campaign.settlementVersion === undefined) {
+    if (campaign.supporterRewards !== undefined || campaign.fundMatchQuote !== undefined || campaign.settlementWallet !== undefined) {
+      throw new Error('New referral settlement terms require a supported version');
+    }
+    return;
+  }
+  if (!isMusicianReferralCampaign(campaign) || campaign.settlementVersion !== REFERRAL_SETTLEMENT_VERSION ||
+      !campaignSupporterRewards(campaign.supporterRewards) || campaign.supporterRewards === undefined ||
+      !isAddress(campaign.settlementWallet) || /^0x0{40}$/i.test(campaign.settlementWallet) ||
+      campaign.settlementWallet !== campaign.settlementWallet.toLowerCase() ||
+      (campaign.gifts || []).some(gift => gift.amountUnits !== '0' || gift.supporter !== true)) {
+    throw new Error('Invalid versioned referral settlement or Supporter basket');
+  }
+  if (campaignAsset(campaign).id === 'eth') {
+    referralFundMatchUnits('0', campaign.fundMatchQuote);
+    for (const leg of MUSICIAN_REFERRAL_PILOT.rewardLegs.filter(leg => leg.kind === 'funding-needed')) {
+      const amount = musicianReferralConfig(campaign).amounts[leg.id];
+      if (BigInt(amount) > 0n && BigInt(referralFundMatchUnits(amount, campaign.fundMatchQuote)) < 10000n) {
+        throw new Error('Each positive fund match must be at least one USDC cent');
+      }
+    }
+  } else if (campaign.fundMatchQuote !== undefined) throw new Error('USDC campaigns do not use an ETH quote');
+}
 const paymentInterface = new Interface([
   ...PAYMENT_EVENT_ABI,
   'event Transfer(address indexed from,address indexed to,uint256 value)',
@@ -111,6 +145,7 @@ export function validatePromotionCheckpoint(value) {
     if (c.curatedReferrers && c.curatedReferrers.some(w => !validWallet(w))) fail();
     if (c.asset !== undefined && (!['usdc', 'eth'].includes(c.asset) || c.asset === 'eth' && !isMusicianReferralCampaign(c))) fail();
     if (c.gifts !== undefined && (!isMusicianReferralCampaign(c) || JSON.stringify(campaignGifts(c.gifts)) !== JSON.stringify(c.gifts))) fail();
+    validateReferralSettlement(c);
     if (c.giftAwards !== undefined) {
       if (!Array.isArray(c.giftAwards) || c.giftAwards.length > 200 || !validDate(c.giftsAwardedAt)) fail();
       const awarded = new Set();
@@ -137,10 +172,12 @@ export function validatePromotionCheckpoint(value) {
     }
     if (c.supporterToken?.deliveries !== undefined) {
       const deliveries = c.supporterToken.deliveries;
-      if (!Array.isArray(deliveries) || deliveries.length > 200) fail();
+      if (!Array.isArray(deliveries) || deliveries.length > 1600) fail();
       const delivered = new Set();
       for (const d of deliveries) {
-        if (!d || !validWallet(d.wallet) || !c.supporterToken.eligibleWallets.includes(d.wallet) || delivered.has(d.wallet) ||
+        const tokenKey = d?.tokenKey || supporterRewardKey();
+        if (!(campaignSupporterRewards(c.supporterRewards) || []).some(token => supporterRewardKey(token) === tokenKey)) fail();
+        if (!d || !validWallet(d.wallet) || !c.supporterToken.eligibleWallets.includes(d.wallet) || delivered.has(`${d.wallet}:${tokenKey}`) ||
             !['owed', 'transfer-pending', 'delivered'].includes(d.status) || !validDate(d.preparedAt) ||
             d.txHash && (!/^0x[0-9a-f]{64}$/.test(d.txHash) || transactionHashes.has(d.txHash)) ||
             d.lastRevertedHash !== undefined && !/^0x[0-9a-f]{64}$/.test(d.lastRevertedHash) ||
@@ -152,7 +189,7 @@ export function validatePromotionCheckpoint(value) {
           if (!h || !validDate(h.at) || !validWallet(h.reviewer) || h.action !== 'no-broadcast-confirmed') fail();
           text(h.reason, 'Checkpoint Supporter delivery review reason');
         }
-        delivered.add(d.wallet);
+        delivered.add(`${d.wallet}:${tokenKey}`);
       }
     }
     for (const curation of c.curationHistory || []) {
@@ -280,6 +317,32 @@ export function validatePromotionCheckpoint(value) {
               leg.txHash && !/^0x[0-9a-f]{64}$/.test(leg.txHash) ||
               leg.status === 'paid' && (!leg.txHash || !Number.isSafeInteger(leg.paymentBlockNumber) ||
                 leg.paymentBlockNumber < 0 || !/^0x[0-9a-f]{64}$/i.test(leg.paymentBlockHash || '') || !validDate(leg.paidAt)))) fail();
+      for (const [index, leg] of c.legs.entries()) {
+        const match = expected[index].match;
+        if (!match) { if (leg.match !== undefined) fail(); continue; }
+        if (!leg.match || leg.match.usdcUnits !== match.usdcUnits ||
+            leg.match.source?.id !== leg.id || leg.match.source?.amountUnits !== leg.amountUnits ||
+            leg.match.source?.recipient !== campaign.settlementWallet ||
+            !['pending', 'approved', 'payment-pending', 'paid'].includes(leg.match.source?.status) ||
+            !['owed', 'deposit-pending', 'paid'].includes(leg.match.deposit?.status) ||
+            (leg.status === 'paid') !== (leg.match.deposit.status === 'paid') ||
+            leg.match.deposit.status !== 'owed' && leg.match.source.status !== 'paid') fail();
+        for (const phase of [leg.match.source, leg.match.deposit]) {
+          if (phase.txHash && !/^0x[0-9a-f]{64}$/.test(phase.txHash) ||
+              ['payment-pending', 'deposit-pending'].includes(phase.status) && !validDate(phase.paymentPreparedAt) ||
+              phase.status === 'paid' && (!phase.txHash || !Number.isSafeInteger(phase.paymentBlockNumber) ||
+                phase.paymentBlockNumber < 0 || !/^0x[0-9a-f]{64}$/i.test(phase.paymentBlockHash || '') || !validDate(phase.paidAt)) ||
+              phase.lastRevertedHash && !/^0x[0-9a-f]{64}$/.test(phase.lastRevertedHash) ||
+              phase.paymentHistory !== undefined && (!Array.isArray(phase.paymentHistory) ||
+                phase.paymentHistory.some(h => !validDate(h.at) || !validWallet(h.reviewer) ||
+                  h.action !== 'no-broadcast-confirmed' || typeof h.reason !== 'string' || !h.reason.trim()))) fail();
+        }
+        if (leg.status === 'paid' && (leg.txHash !== leg.match.deposit.txHash ||
+            leg.paymentBlockNumber !== leg.match.deposit.paymentBlockNumber ||
+            leg.paymentBlockHash !== leg.match.deposit.paymentBlockHash || leg.paidAt !== leg.match.deposit.paidAt)) fail();
+        if (!held(c) && [leg.match.source, leg.match.deposit].some(phase => phase.txHash || phase.status === 'paid' ||
+            phase.status.endsWith('-pending'))) fail();
+      }
     }
     if (campaign.template === 'sponsor' && (!/^0x[0-9a-f]{64}$/.test(c.purchaseHash || '') ||
         !validWallet(c.purchaser) || c.purchaser === c.wallet || !/^\d{1,30}$/.test(c.advertId || '') ||
@@ -293,7 +356,8 @@ export function validatePromotionCheckpoint(value) {
         text(h.reason, 'Checkpoint payment review reason');
       }
     }
-    for (const hash of [c.txHash, ...(c.legs || []).map(leg => leg.txHash)].filter(Boolean)) {
+    for (const hash of [c.txHash, ...(c.legs || []).flatMap(leg =>
+      [leg.match?.deposit.txHash || leg.txHash, leg.match?.source.txHash])].filter(Boolean)) {
       if (transactionHashes.has(hash)) fail();
       transactionHashes.add(hash);
     }
@@ -332,7 +396,7 @@ export function validatePromotionCheckpoint(value) {
 const validateCheckpoint = validatePromotionCheckpoint;
 
 export function createPromotions({ restore, save, getCheckpointUri = () => '', provider, routerAddress, ownerWallet,
-  voteOnRadio, readPlaylist = () => [], readFunding, announcements, siteUrl, devertContractAddress = '', now = Date.now, verifySignature = verifyMessage }) {
+  voteOnRadio, readPlaylist = () => [], readFunding, readSupporterInventory, announcements, siteUrl, devertContractAddress = '', now = Date.now, verifySignature = verifyMessage }) {
   const owner = address(ownerWallet);
   const router = new Contract(routerAddress, PROMOTIONS_ROUTER_ABI, provider);
   let state = { schemaVersion: 1, revision: 0, campaigns: [], claims: [], members: [], votes: [] };
@@ -350,6 +414,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
     const value = await restore();
     if (value) {
       validateCheckpoint(value);
+      if (value.campaigns.some(c => c.settlementWallet && c.settlementWallet !== owner)) throw new Error('Referral settlement wallet differs from the configured owner');
       state = value;
     }
   })();
@@ -361,6 +426,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       return;
     }
     validateCheckpoint(latest);
+    if (latest.campaigns.some(c => c.settlementWallet && c.settlementWallet !== owner)) throw new Error('Referral settlement wallet differs from the configured owner');
     if (latest.revision < state.revision ||
         latest.revision === state.revision && JSON.stringify(latest) !== JSON.stringify(state)) {
       fault = 'Promotions storage revision is inconsistent; restore a verified current backup before accepting writes.';
@@ -386,6 +452,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
     return 'counted';
   }
   const persist = async next => {
+    validateCheckpoint(next);
     if (fault) throw new Error(fault);
     next.revision = state.revision + 1;
     try {
@@ -425,7 +492,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
         giftPaidUnits: giftPaid(campaign).toString() } : {}),
       committedUnits: committed.toString(), approvedUnits: special ? legTotal('approved').toString() : total('approved').toString(),
       paymentPendingUnits: special ? legTotal('payment-pending').toString() : total('payment-pending').toString(),
-      paidUnits: special ? legTotal('paid').toString() : total('paid').toString(),
+      paidUnits: special ? claims.reduce((n, c) => n + sourcePaidUnits(c), 0n).toString() : total('paid').toString(),
       remainingUnits: (BigInt(campaign.budgetUnits) - committed).toString(),
       remainingAwards: Math.max(0, Math.min(campaign.maxAwards - reserved.length,
         Number((BigInt(campaign.budgetUnits) - committed) / BigInt(campaign.rewardUnits)))),
@@ -447,10 +514,22 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
     next.campaigns.filter(c => sameBucket(c, campaign)).flatMap(c => c.giftAwards || [])
       .filter(a => a.status !== 'paid').reduce((n, a) => n + BigInt(a.amountUnits), 0n);
   async function assertPublishable(next, campaign) {
+    validateReferralSettlement(campaign);
+    if (campaign.settlementVersion) {
+      if (campaign.status === 'draft' && campaignAsset(campaign).id === 'eth' &&
+          Math.abs(now() - Date.parse(campaign.fundMatchQuote.quotedAt)) > 300000) throw new Error('Refresh the publication quote and review the fixed matches before signing');
+      for (const reward of campaignSupporterRewards(campaign.supporterRewards)) {
+        const token = new Contract(reward.contract, SUPPORTER_REWARD_ABI, provider);
+        const stock = readSupporterInventory ? await readSupporterInventory(reward, owner) : {
+          erc1155: await token.supportsInterface('0xd9b67a26'), balanceUnits: await token.balanceOf(owner, reward.tokenId) };
+        if (!stock.erc1155 || BigInt(stock.balanceUnits) < 1n) throw new Error(`Admin must hold Base ERC-1155 Supporter #${reward.tokenId}`);
+      }
+    }
     if (campaign.template === 'sponsor-match') throw new Error('Sponsor matching is draft-only until fund-to-fund settlement is implemented and verified');
     if (now() >= Date.parse(campaign.endsAt)) throw new Error('Offer has expired');
     const balance = await funding(campaign.fund, campaignAsset(campaign));
-    const paid = c => next.claims.filter(q => q.campaignId === c.id && q.status === 'paid').reduce((sum, q) => sum + BigInt(q.amountUnits), 0n) + giftPaid(c);
+    const paid = c => next.claims.filter(q => q.campaignId === c.id)
+      .reduce((sum, q) => sum + (c.settlementVersion ? sourcePaidUnits(q) : q.status === 'paid' ? BigInt(q.amountUnits) : 0n), 0n) + giftPaid(c);
     const otherBudgets = next.campaigns.filter(c => c.id !== campaign.id && sameBucket(c, campaign) && ['published', 'paused', 'closed'].includes(c.status))
       .reduce((n, c) => n + BigInt(c.budgetUnits) + giftReserve(c) - paid(c), 0n);
     if (balance < otherBudgets + BigInt(campaign.budgetUnits) + giftReserve(campaign) - paid(campaign)) throw new Error('Fund balance cannot cover campaign budgets and gifts already earmarked');
@@ -617,8 +696,13 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
         asset: campaignAsset(campaign).id, gifts: campaign.gifts || [],
         giftAwards: (campaign.giftAwards || []).filter(award => award.wallet === wallet),
         supporterToken: { status: campaign.supporterToken?.status || 'eligibility-only', eligible: supporterEligible,
-          delivery: supporterEligible
-            ? campaign.supporterToken.deliveries?.find(item => item.wallet === wallet)?.status || 'owed' : '',
+          delivery: supporterEligible ? (() => {
+            const tokens = campaignSupporterRewards(campaign.supporterRewards);
+            const deliveries = tokens.map(token => campaign.supporterToken.deliveries?.find(item => item.wallet === wallet &&
+              (item.tokenKey || supporterRewardKey()) === supporterRewardKey(token))?.status || 'owed');
+            return deliveries.every(status => status === 'delivered') ? 'delivered' :
+              deliveries.some(status => status === 'transfer-pending') ? 'transfer-pending' : 'owed';
+          })() : '',
           note: 'Earned Supporter tokens join the dev payroll queue and are sent from the admin wallet.' } });
     }
     return result;
@@ -626,8 +710,9 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
   function updateSupporterEligibility(next, campaign) {
     if (!isMusicianReferralCampaign(campaign)) return;
     const qualifyingClaims = next.claims.filter(item => item.campaignId === campaign.id &&
-      item.legs?.length && item.legs.every(leg => leg.status === 'paid' && leg.paidAt &&
-        Date.parse(leg.paidAt) < Date.parse(campaign.endsAt)));
+      held(item) && item.legs?.length && item.legs.filter(leg => !campaign.settlementVersion || leg.kind === 'wallet')
+        .every(leg => leg.status === 'paid' && leg.paidAt &&
+          (campaign.settlementVersion || Date.parse(leg.paidAt) < Date.parse(campaign.endsAt))));
     if (qualifyingClaims.length !== musicianReferralConfig(campaign).maxConversions) return;
     campaign.supporterToken ||= { status: 'payroll-queue', eligibleWallets: [] };
     campaign.supporterToken.status = 'payroll-queue';
@@ -660,7 +745,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       catch (error) { return { slug, balanceUnits: null, error: error.message }; }
     }));
     const defaultFund = funds.find(fund => fund.slug === PROMOTIONS_FUND);
-    return structuredClone({ revision: state.revision, viewerWallet: wallet, campaigns, fundSlug: PROMOTIONS_FUND, routerAddress,
+    return structuredClone({ revision: state.revision, features: { referralSettlement: REFERRAL_SETTLEMENT_VERSION }, viewerWallet: wallet, campaigns, fundSlug: PROMOTIONS_FUND, routerAddress,
       funds, fundBalanceUnits: defaultFund?.balanceUnits ?? null, fundingError: defaultFund?.error || '', storageError: fault,
       checkpointUri: getCheckpointUri(),
       claims: state.claims,
@@ -672,14 +757,23 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       activity: wallet ? { week, voted: state.votes.some(v => v.wallet === wallet && v.week === week) } : null,
     });
   }
-  // Delivery is proven only by a canonical, twice-confirmed TransferSingle of exactly one Supporter from the admin wallet.
-  async function reconcileSupporter(next, delivery, hash) {
+  // Without a work reference, matching receipts alone cannot prove a pending transfer was replaced.
+  async function assertWalletReplacement(originalHash, replacementHash) {
+    const [original, replacement] = await Promise.all([
+      provider.getTransaction(originalHash), provider.getTransaction(replacementHash),
+    ]);
+    if (!original || !replacement || !Number.isSafeInteger(original.nonce) || original.nonce < 0 ||
+        original.nonce !== replacement.nonce || lower(original.from) !== owner || lower(replacement.from) !== owner ||
+        lower(original.to) !== lower(replacement.to) || !original.data || lower(original.data) !== lower(replacement.data) ||
+        BigInt(original.value || 0) !== BigInt(replacement.value || 0)) {
+      throw new Error('Cannot prove this replaces the original wallet transaction; do not send again');
+    }
+  }
+  async function reconcileSupporter(next, delivery, hash, reward) {
     if (Number((await provider.getNetwork()).chainId) !== SUPPORTER_REWARD.chainId) throw new Error('Supporter reconciliation requires Base');
     if (!/^0x[0-9a-f]{64}$/i.test(hash || '')) throw new Error('Enter a valid Base transaction hash');
     const txHash = lower(hash);
-    if (next.claims.some(c => c.txHash === txHash || c.legs?.some(item => item.txHash === txHash)) ||
-        next.campaigns.some(c => (c.giftAwards || []).some(item => item.txHash === txHash) ||
-          (c.supporterToken?.deliveries || []).some(item => item !== delivery && item.txHash === txHash))) {
+    if (paymentTargets(next).some(item => item !== delivery && item.txHash === txHash)) {
       throw new Error('Transaction already assigned');
     }
     const receipt = await provider.getTransactionReceipt(txHash);
@@ -691,15 +785,16 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       return;
     }
     if ((await provider.getBlock(receipt.blockNumber))?.hash !== receipt.blockHash) throw new Error('Transfer is not in the canonical Base block');
-    if (lower(receipt.to) !== SUPPORTER_REWARD.contract) throw new Error('Wrong Supporter transfer target');
-    const tokenId = BigInt(SUPPORTER_REWARD.tokenId), quantity = BigInt(SUPPORTER_REWARD.quantity);
+    if (delivery.txHash && delivery.txHash !== txHash && Number(receipt.status) === 1) await assertWalletReplacement(delivery.txHash, txHash);
+    if (lower(receipt.to) !== lower(reward.contract)) throw new Error('Wrong Supporter transfer target');
+    const tokenId = BigInt(reward.tokenId), quantity = BigInt(reward.quantity);
     if (Number(receipt.status) !== 1) {
       if (delivery.txHash && delivery.txHash !== txHash) throw new Error('Check the originally recorded transfer before another hash');
       const tx = await provider.getTransaction(txHash);
       let parsed;
       try { parsed = tx && supporterInterface.parseTransaction({ data: tx.data, value: tx.value || 0 }); } catch {}
       const args = parsed?.args;
-      if (!tx || lower(tx.to) !== SUPPORTER_REWARD.contract || lower(tx.from) !== owner || parsed?.name !== 'safeTransferFrom' ||
+      if (!tx || lower(tx.to) !== lower(reward.contract) || lower(tx.from) !== owner || parsed?.name !== 'safeTransferFrom' ||
           lower(args[0]) !== owner || lower(args[1]) !== delivery.wallet || args[2] !== tokenId || args[3] !== quantity) {
         throw new Error('Reverted transaction does not prove this exact admin Supporter transfer attempt');
       }
@@ -709,7 +804,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       return;
     }
     const match = receipt.logs.some(log => {
-      if (lower(log.address) !== SUPPORTER_REWARD.contract) return false;
+      if (lower(log.address) !== lower(reward.contract)) return false;
       let e;
       try { e = supporterInterface.parseLog(log); } catch { return false; }
       return e?.name === 'TransferSingle' && lower(e.args.from) === owner && lower(e.args.to) === delivery.wallet &&
@@ -726,11 +821,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
     const paymentWallet = leg?.recipient || claim.wallet;
     const paymentUnits = leg?.amountUnits || claim.amountUnits;
     const asset = campaignAsset(next.campaigns.find(item => item.id === claim.campaignId));
-    if (next.claims.some(c => c.id !== claim.id && (c.txHash === lower(hash) ||
-        c.legs?.some(item => item.txHash === lower(hash)))) ||
-        next.campaigns.some(c => (c.giftAwards || []).some(item => item !== leg && item.txHash === lower(hash)) ||
-          (c.supporterToken?.deliveries || []).some(item => item.txHash === lower(hash)))) throw new Error('Transaction already assigned');
-    if (claim.legs?.some(item => item.id !== leg?.id && item.txHash === lower(hash))) throw new Error('Transaction already assigned');
+    if (paymentTargets(next).some(item => item !== paymentTarget && item.txHash === lower(hash))) throw new Error('Transaction already assigned');
     const receipt = await provider.getTransactionReceipt(hash);
     if (paymentTarget.txHash && paymentTarget.txHash !== lower(hash) && (!receipt || Number(receipt.status) !== 1)) {
       throw new Error('Original payment is unresolved; only a matching successful replacement may reconcile another hash');
@@ -738,7 +829,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
     if (!receipt || await provider.getBlockNumber() - receipt.blockNumber + 1 < 2) {
       paymentTarget.txHash = lower(hash);
       paymentTarget.status = 'payment-pending';
-      if (leg) claim.status = claim.legs.filter(item => item.kind === 'wallet').every(item => item.status === 'paid') ? 'paid' : 'payment-pending';
+      if (leg) claim.status = 'payment-pending';
       return;
     }
     if ((await provider.getBlock(receipt.blockNumber))?.hash !== receipt.blockHash) throw new Error('Payment is not in the canonical Base block');
@@ -759,6 +850,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       paymentTarget.status = 'approved';
       if (leg) claim.status = 'approved';
       claim.lastRevertedHash = lower(hash);
+      paymentTarget.lastRevertedHash = lower(hash);
       return;
     }
     const events = receipt.logs.flatMap(log => {
@@ -783,6 +875,56 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       updateSupporterEligibility(next, next.campaigns.find(item => item.id === claim.campaignId));
     }
   }
+  async function reconcileFundMatchDeposit(next, claim, leg, hash) {
+    if (Number((await provider.getNetwork()).chainId) !== 8453) throw new Error('Fund matching requires Base');
+    if (!/^0x[0-9a-f]{64}$/i.test(hash || '')) throw new Error('Enter a valid Base funding transaction hash');
+    const txHash = lower(hash), deposit = leg.match.deposit;
+    if (paymentTargets(next).some(item => item !== deposit && item.txHash === txHash)) throw new Error('Transaction already assigned');
+    const receipt = await provider.getTransactionReceipt(txHash);
+    if (deposit.txHash && deposit.txHash !== txHash && (!receipt || Number(receipt.status) !== 1)) throw new Error('Original deposit is unresolved; only a matching successful replacement may reconcile another hash');
+    if (!receipt || await provider.getBlockNumber() - receipt.blockNumber + 1 < 2) {
+      deposit.txHash = txHash;
+      deposit.status = 'deposit-pending';
+      return;
+    }
+    if ((await provider.getBlock(receipt.blockNumber))?.hash !== receipt.blockHash) throw new Error('Deposit is not in the canonical Base block');
+    if (deposit.txHash && deposit.txHash !== txHash && Number(receipt.status) === 1) await assertWalletReplacement(deposit.txHash, txHash);
+    if (lower(receipt.to) !== lower(routerAddress)) throw new Error('Wrong funding transaction target');
+    const amount = BigInt(leg.match.usdcUnits);
+    if (Number(receipt.status) !== 1) {
+      const transaction = await provider.getTransaction(txHash);
+      let parsed;
+      try { parsed = transaction && routerInterface.parseTransaction({ data: transaction.data, value: transaction.value || 0 }); } catch {}
+      if (!transaction || lower(transaction.to) !== lower(routerAddress) || lower(transaction.from) !== owner ||
+          parsed?.name !== 'fundToken' || parsed.args[0] !== id(leg.fund) ||
+          lower(parsed.args[1]) !== lower(PROMOTIONS_USDC) || parsed.args[2] !== amount) {
+        throw new Error('Reverted transaction does not prove this exact admin USDC fund deposit attempt');
+      }
+      deposit.status = 'owed'; deposit.txHash = ''; deposit.lastRevertedHash = txHash;
+      return;
+    }
+    const funded = receipt.logs.some(log => {
+      if (lower(log.address) !== lower(routerAddress)) return false;
+      let event;
+      try { event = fundInterface.parseLog(log); } catch { return false; }
+      return event?.name === 'FundFunded' && event.args.fundId === id(leg.fund) &&
+        lower(event.args.asset) === lower(PROMOTIONS_USDC) && lower(event.args.funder) === owner &&
+        event.args.amount === amount;
+    });
+    const transferred = receipt.logs.some(log => {
+      if (lower(log.address) !== lower(PROMOTIONS_USDC)) return false;
+      let event;
+      try { event = paymentInterface.parseLog(log); } catch { return false; }
+      return event?.name === 'Transfer' && lower(event.args.from) === owner &&
+        lower(event.args.to) === lower(routerAddress) && event.args.value === amount;
+    });
+    if (!funded || !transferred) throw new Error('Missing exact target-fund funding and admin USDC transfer proofs');
+    const proof = { txHash, paymentBlockNumber: receipt.blockNumber, paymentBlockHash: receipt.blockHash,
+      paidAt: new Date(now()).toISOString() };
+    Object.assign(deposit, { status: 'paid', ...proof });
+    Object.assign(leg, { status: 'paid', ...proof });
+    claim.status = claim.legs.every(item => item.status === 'paid') ? 'paid' : 'approved';
+  }
   return {
     async publicState() {
       return run(async () => {
@@ -792,7 +934,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
             .flatMap(c => c.curatedReferrers || []),
           ...state.campaigns.flatMap(c => supporterEarners(state, c))])].flatMap(wallet =>
           participantStats(wallet).map(stats => ({ wallet, ...stats })));
-        return structuredClone({ ...state, inviters: state.inviters || [], campaigns: state.campaigns.map(c => summary(c, true)),
+        return structuredClone({ ...state, features: { referralSettlement: REFERRAL_SETTLEMENT_VERSION }, routerAddress, inviters: state.inviters || [], campaigns: state.campaigns.map(c => summary(c, true)),
           checkpointUri: getCheckpointUri(), participantProfiles,
           notice: 'All promotion records, including drafts, evidence, referral links, activity and review notes, are public and checkpointed to IPFS. Do not submit secrets or personal information about others. Drafts are not live offers. Rewards require admin approval; budgets are earmarked, not escrowed.' });
       });
@@ -844,6 +986,8 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           'reconcile', 'reconcile-funding-leg', 'preview-discord', 'send-discord', 'reconcile-discord',
           'award-gifts', 'prepare-gift', 'reconcile-gift', 'release-gift-preparation',
           'prepare-supporter', 'reconcile-supporter', 'release-supporter-preparation'];
+        adminActions.push('prepare-fund-match-source', 'reconcile-fund-match-source', 'prepare-fund-match-deposit',
+          'reconcile-fund-match-deposit', 'release-fund-match-preparation');
         if (adminActions.includes(command.action)) {
           if (!admin) throw new Error('Only the configured admin may manage promotions');
           if (command.revision !== state.revision) throw new Error('Promotions changed; refresh before retrying');
@@ -895,6 +1039,9 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           const running = command.action === 'run';
           if (running && (campaign || command.campaign?.template !== MUSICIAN_REFERRAL_PILOT.template)) {
             throw new Error('Run Campaign starts a new musician referral campaign');
+          }
+          if (running && command.campaign?.settlementVersion !== REFERRAL_SETTLEMENT_VERSION) {
+            throw new Error('Update the calendar editor: Run requires verified fund matching and the Supporter basket policy');
           }
           if (!campaign && next.campaigns.length >= 1000) throw new Error('Promotion storage capacity reached; export and review before adding offers');
           if (campaign && campaign.status !== 'draft') throw new Error('Published terms are immutable; duplicate into a new draft');
@@ -955,7 +1102,15 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
             if (!['usdc', 'eth'].includes(asset)) throw new Error('Campaign currency must be USDC or ETH');
             const gifts = campaignGifts(input.gifts === undefined ? campaign?.gifts || [] : input.gifts);
             if (!gifts) throw new Error('Gifts need one entry per trigger with an amount or a Supporter token');
+            let settlement = {};
+            if (input.settlementVersion !== undefined || input.supporterRewards !== undefined || input.fundMatchQuote !== undefined) {
+              const supporterRewards = campaignSupporterRewards(input.supporterRewards);
+              settlement = { settlementVersion: input.settlementVersion, supporterRewards, settlementWallet: owner,
+                ...(asset === 'eth' ? { fundMatchQuote: input.fundMatchQuote } : {}) };
+              validateReferralSettlement({ ...input, asset, gifts, ...settlement, legAmounts: config.amounts });
+            }
             qualification = { campaignConfigId: MUSICIAN_REFERRAL_PILOT.id, asset, gifts,
+              ...settlement,
               legAmounts: config.amounts, baseBudgetUnits: config.baseBudgetUnits, requiredVotes: config.requiredVotes,
               curatedReferrerNames, curatedReferrers, amendments: campaign?.amendments || [],
               supporterToken: campaign?.supporterToken || { status: 'payroll-queue', eligibleWallets: [],
@@ -990,6 +1145,8 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
             reason: text(command.reason, 'Curator reason') });
         } else if (command.action === 'amend') {
           if (!campaign || !isMusicianReferralCampaign(campaign) || campaign.status === 'archived') throw new Error('Pilot amendment is unavailable');
+          if (next.claims.some(c => c.campaignId === campaign.id && c.legs?.some(leg => leg.match &&
+              ['paid', 'payment-pending'].includes(leg.match.source.status)))) throw new Error('Do not amend a campaign after fund matching starts');
           const budgetIncreaseUnits = command.budgetIncreaseUnits === undefined || command.budgetIncreaseUnits === '0'
             ? '0' : units(command.budgetIncreaseUnits);
           const endsAt = timestamp(command.endsAt || campaign.endsAt, 'Amended end');
@@ -1003,7 +1160,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           if (['published', 'paused', 'closed'].includes(campaign.status)) {
             const balance = await funding(campaign.fund, campaignAsset(campaign));
             const paidCampaignUnits = item => next.claims.filter(claim => claim.campaignId === item.id)
-              .reduce((total, claim) => total + (claim.legs
+              .reduce((total, claim) => total + (item.settlementVersion ? sourcePaidUnits(claim) : claim.legs
                 ? claim.legs.filter(leg => leg.status === 'paid').reduce((sum, leg) => sum + BigInt(leg.amountUnits), 0n)
                 : claim.status === 'paid' ? BigInt(claim.amountUnits) : 0n), 0n) + giftPaid(item);
             const otherOutstanding = next.campaigns.filter(item => item.id !== campaign.id &&
@@ -1157,6 +1314,49 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
             member.uploadTrackIds ||= [];
             if (!member.uploadTrackIds.includes(trackId)) member.uploadTrackIds.push(trackId);
           }
+        } else if (['prepare-fund-match-source', 'reconcile-fund-match-source', 'prepare-fund-match-deposit',
+          'reconcile-fund-match-deposit', 'release-fund-match-preparation'].includes(command.action)) {
+          const claim = next.claims.find(c => c.id === command.claimId);
+          campaign = next.campaigns.find(c => c.id === claim?.campaignId);
+          const leg = claim?.legs?.find(item => item.id === command.legId);
+          if (!leg?.match || campaign?.settlementVersion !== REFERRAL_SETTLEMENT_VERSION ||
+              !referralFundMatchQueue(next.campaigns, next.claims, now()).some(item => item.claimId === claim.id && item.legId === leg.id)) {
+            throw new Error('Fund matching requires an approved newcomer after the campaign ends, closes or fills');
+          }
+          const sourcePhase = command.action.endsWith('-source') || command.action === 'release-fund-match-preparation' && command.phase === 'source';
+          const target = sourcePhase ? leg.match.source : leg.match.deposit;
+          if (command.action === 'release-fund-match-preparation') {
+            if (!['source', 'deposit'].includes(command.phase) || target.txHash ||
+                target.status !== (sourcePhase ? 'payment-pending' : 'deposit-pending') || command.confirmNoBroadcast !== true) {
+              throw new Error('Only an unbroadcast preparation can be released after wallet-history review');
+            }
+            target.paymentHistory ||= [];
+            target.paymentHistory.push({ at, reviewer: owner, action: 'no-broadcast-confirmed',
+              reason: text(command.reason, 'Wallet-history review reason') });
+            target.status = sourcePhase ? 'approved' : 'owed';
+          } else {
+            if (target.status === 'paid') throw new Error('This match phase is already paid');
+            if (!sourcePhase && leg.match.source.status !== 'paid') throw new Error('Verify the referral-fund source payout before depositing USDC');
+            if (!sourcePhase && ((await provider.getBlock(leg.match.source.paymentBlockNumber))?.hash !== leg.match.source.paymentBlockHash ||
+                await provider.getBlockNumber() - leg.match.source.paymentBlockNumber + 1 < 2)) {
+              throw new Error('Source payout proof is no longer canonical; stop and reconcile before depositing USDC');
+            }
+            if (command.action.startsWith('prepare-')) {
+              if (target.txHash || ['payment-pending', 'deposit-pending'].includes(target.status)) throw new Error('This match phase is unresolved; reconcile before retrying');
+              if (sourcePhase && await funding(campaign.fund, campaignAsset(campaign)) < reservedIn(next, campaign)) {
+                throw new Error('Referral fund cannot cover its outstanding source commitments');
+              }
+              target.status = sourcePhase ? 'payment-pending' : 'deposit-pending';
+              target.paymentPreparedAt = at;
+            } else {
+              target.paymentPreparedAt ||= at;
+              if (sourcePhase) await reconcile(next, claim, command.txHash, target);
+              else await reconcileFundMatchDeposit(next, claim, leg, command.txHash);
+            }
+          }
+          claim.status = claim.legs.every(item => item.status === 'paid') ? 'paid' :
+            claim.legs.some(item => item.status === 'payment-pending' || item.match?.source.status === 'payment-pending' ||
+              item.match?.deposit.status === 'deposit-pending') ? 'payment-pending' : 'approved';
         } else if (['review', 'prepare-payment', 'release-payment-preparation', 'reconcile',
             'reconcile-funding-leg'].includes(command.action)) {
           const claim = next.claims.find(c => c.id === command.claimId);
@@ -1168,6 +1368,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
             }
             const leg = claim.legs?.find(item => item.id === command.legId);
             if (!leg || leg.kind !== 'funding-needed' || leg.status === 'paid') throw new Error('Unknown or already reconciled funding leg');
+            if (leg.match) throw new Error('Use the two-stage Payroll fund match; a deposit alone cannot settle this leg');
             const hash = /^0x[0-9a-f]{64}$/i.test(command.txHash || '') ? lower(command.txHash) : '';
             if (!hash) throw new Error('Enter a valid Base funding transaction hash');
             const receipt = await provider.getTransactionReceipt(hash);
@@ -1197,7 +1398,8 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
                 claim.status === 'approved' && command.decision === 'rejected') ||
                 !['approved', 'rejected', 'needs-evidence'].includes(command.decision)) throw new Error('Claim is not reviewable');
             if (isMusicianReferralCampaign(campaign) && command.decision !== 'approved' &&
-                claim.legs.some(leg => leg.kind === 'wallet' && ['paid', 'payment-pending'].includes(leg.status))) {
+                claim.legs.some(leg => leg.kind === 'wallet' && ['paid', 'payment-pending'].includes(leg.status) ||
+                  leg.match && ['paid', 'payment-pending'].includes(leg.match.source.status))) {
               throw new Error('Do not reverse conversion evidence after a wallet leg has payment evidence or pending reconciliation');
             }
             const reason = text(command.reason, 'Review reason');
@@ -1227,6 +1429,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
             claim.status = command.decision;
             if (isMusicianReferralCampaign(campaign) && command.decision === 'approved') {
               for (const leg of claim.legs.filter(item => item.kind === 'wallet')) leg.status = 'approved';
+              for (const leg of claim.legs.filter(item => item.match)) leg.match.source.status = 'approved';
             } else if (isMusicianReferralCampaign(campaign) && command.decision === 'rejected') {
               for (const leg of claim.legs.filter(item => item.kind === 'wallet')) leg.status = 'pending';
             }
@@ -1326,14 +1529,19 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
         } else if (['prepare-supporter', 'reconcile-supporter', 'release-supporter-preparation'].includes(command.action)) {
           const recipient = lower(command.wallet);
           if (!campaign || !supporterEarners(next, campaign).includes(recipient)) throw new Error('No Supporter token is owed to this wallet');
+          const tokenKey = command.tokenKey || supporterRewardKey();
+          const reward = campaignSupporterRewards(campaign.supporterRewards)?.find(token => supporterRewardKey(token) === tokenKey);
+          if (!reward) throw new Error('This Supporter DNFT is not in the published campaign basket');
           campaign.supporterToken.deliveries ||= [];
-          let delivery = campaign.supporterToken.deliveries.find(item => item.wallet === recipient);
+          let delivery = campaign.supporterToken.deliveries.find(item => item.wallet === recipient &&
+            (item.tokenKey || supporterRewardKey()) === tokenKey);
           if (command.action === 'prepare-supporter') {
             if (delivery && delivery.status !== 'owed') throw new Error('Supporter token is already pending or delivered');
             if (!campaign.supporterToken.eligibleWallets.includes(recipient)) campaign.supporterToken.eligibleWallets.push(recipient);
             campaign.supporterToken.status = 'payroll-queue';
             campaign.supporterToken.evaluatedAt ||= at;
-            if (!delivery) campaign.supporterToken.deliveries.push(delivery = { wallet: recipient });
+            if (!delivery) campaign.supporterToken.deliveries.push(delivery = { wallet: recipient,
+              ...(campaign.supporterRewards ? { tokenKey } : {}) });
             delivery.status = 'transfer-pending';
             delivery.preparedAt = at;
           } else if (command.action === 'release-supporter-preparation') {
@@ -1346,7 +1554,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
             delivery.status = 'owed';
           } else {
             if (delivery?.status !== 'transfer-pending') throw new Error('Supporter token does not need transfer reconciliation');
-            await reconcileSupporter(next, delivery, command.txHash);
+            await reconcileSupporter(next, delivery, command.txHash, reward);
           }
           campaign.updatedAt = at;
         } else if (command.action === 'evidence') {
