@@ -9,6 +9,37 @@ const TOKEN_ID = /^(0|[1-9][0-9]{0,77})$/;
 const LIVE_TIP_NOTICE_LIMIT = 20;
 const LIVE_TIP_FRESH_MS = 60_000;
 
+function validTipAmount(entry, assets) {
+  if (!entry.kind) return UNITS.test(entry.amountWei || '');
+  if (!assets) return false;
+  if (entry.kind === 'token') return ADDRESS.test(entry.token || '') && UNITS.test(entry.amountUnits || '');
+  return entry.kind === 'nft' && ADDRESS.test(entry.collection || '') && [0, 1].includes(entry.standard) &&
+    TOKEN_ID.test(entry.tokenId || '') && UNITS.test(entry.amount || '') && (entry.standard === 1 || entry.amount === '1');
+}
+
+export function validateTipLedgerCheckpoint(saved, { routerAddress, startBlock, assets = true } = {}) {
+  const expectedRouter = typeof routerAddress === 'string' ? routerAddress.toLowerCase() : undefined;
+  if (!saved || typeof saved !== 'object' || saved.schemaVersion !== 1 || saved.chainId !== 8453 ||
+      !ADDRESS.test(saved.routerAddress || '') || (expectedRouter && saved.routerAddress !== expectedRouter) ||
+      !Number.isSafeInteger(saved.startBlock) || saved.startBlock < 0 ||
+      (startBlock !== undefined && saved.startBlock !== startBlock) ||
+      !Number.isSafeInteger(saved.scannedThrough) || saved.scannedThrough < saved.startBlock - 1 ||
+      !Array.isArray(saved.entries) ||
+      (saved.scannedThrough >= saved.startBlock && !HASH.test(saved.anchorHash || ''))) {
+    throw new Error('Invalid tip ledger checkpoint');
+  }
+  for (const entry of saved.entries) {
+    if (!entry || !HASH.test(entry.txHash || '') || !Number.isSafeInteger(entry.logIndex) || entry.logIndex < 0 ||
+        !Number.isSafeInteger(entry.blockNumber) || entry.blockNumber < saved.startBlock || entry.blockNumber > saved.scannedThrough ||
+        entry.chainId !== 8453 || entry.routerAddress !== saved.routerAddress.toLowerCase() ||
+        !ADDRESS.test(entry.sender || '') || !ADDRESS.test(entry.recipient || '') ||
+        !HASH.test(entry.blockHash || '') || !validTipAmount(entry, assets)) {
+      throw new Error('Invalid tip ledger checkpoint entry');
+    }
+  }
+  return saved;
+}
+
 // `assets: true` (v0.2 router) also indexes ERC-20 tips (kind 'token') and NFT gifts (kind 'nft'); ETH entries have no kind.
 export function createTipLedger({ provider, routerAddress, startBlock, resolveContext, assets = false,
   restore = async () => null, save, now = Date.now, maxWindowsPerRun = 1,
@@ -169,20 +200,7 @@ export function createTipLedger({ provider, routerAddress, startBlock, resolveCo
         }
         const saved = await restore();
         if (saved) {
-          if (saved.schemaVersion !== 1 || saved.chainId !== 8453 || saved.routerAddress !== router ||
-              saved.startBlock !== startBlock || !Number.isSafeInteger(saved.scannedThrough) ||
-              saved.scannedThrough < startBlock - 1 || !Array.isArray(saved.entries) ||
-              (saved.scannedThrough >= startBlock && !HASH.test(saved.anchorHash || ''))) {
-            throw new Error('Invalid tip ledger checkpoint');
-          }
-          for (const entry of saved.entries) {
-            if (!HASH.test(entry.txHash || '') || !Number.isSafeInteger(entry.logIndex) || entry.logIndex < 0 ||
-                !Number.isSafeInteger(entry.blockNumber) || entry.blockNumber < startBlock || entry.blockNumber > saved.scannedThrough ||
-                entry.chainId !== 8453 || entry.routerAddress !== router || !ADDRESS.test(entry.sender || '') ||
-                !ADDRESS.test(entry.recipient || '') || !HASH.test(entry.blockHash || '') || !validAmount(entry)) {
-              throw new Error('Invalid tip ledger checkpoint entry');
-            }
-          }
+          validateTipLedgerCheckpoint(saved, { routerAddress: router, startBlock, assets });
           entries.clear();
           for (const entry of saved.entries) entries.set(entryKey(entry), { ...entry, chainVerified: false,
             sourceVerification: { status: 'unavailable', error: 'Restored tip awaits chain comparison' } });
@@ -197,13 +215,6 @@ export function createTipLedger({ provider, routerAddress, startBlock, resolveCo
         throw error;
       }
     });
-  }
-  function validAmount(entry) {
-    if (isEth(entry)) return UNITS.test(entry.amountWei || '');
-    if (!assets) return false;
-    if (entry.kind === 'token') return ADDRESS.test(entry.token || '') && UNITS.test(entry.amountUnits || '');
-    return entry.kind === 'nft' && ADDRESS.test(entry.collection || '') && [0, 1].includes(entry.standard) &&
-      TOKEN_ID.test(entry.tokenId || '') && UNITS.test(entry.amount || '') && (entry.standard === 1 || entry.amount === '1');
   }
   function getLiveTips({ bookingId, recipient, startedAt, endsAt, limit = LIVE_TIP_NOTICE_LIMIT } = {}) {
     createTipContext({ source: 'live', bookingId });

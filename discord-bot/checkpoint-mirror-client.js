@@ -10,6 +10,7 @@ import { validatePromotionCheckpoint } from './promotions.js';
 import { validateCalendarRewardCheckpoint } from './calendar-rewards.js';
 import { isDmtvRadioCheckpoint } from './dmtv-queue.js';
 import { validDmtvEvidence } from './dmtv-escrow.js';
+import { validateTipLedgerCheckpoint } from './tip-ledger.js';
 
 export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiUrl = 'http://127.0.0.1:5001', fetchImpl = fetch }) {
   const remote = new URL(serviceUrl);
@@ -59,6 +60,11 @@ export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiU
       validateCalendarRewardCheckpoint(snapshot);
       scheduledCheckpoint = true;
     }
+    let tipLedgerCheckpoint = false;
+    if (snapshot.schemaVersion === 1 && 'anchorHash' in snapshot) {
+      validateTipLedgerCheckpoint(snapshot);
+      tipLedgerCheckpoint = true;
+    }
     if (snapshot.schemaVersion === 1) {
       if (Array.isArray(snapshot.campaigns)) {
         validatePromotionCheckpoint(snapshot);
@@ -80,7 +86,8 @@ export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiU
       }
     }
     if (!(snapshot.schemaVersion === 1 && (Array.isArray(snapshot.playlist) || playbackJournal)) &&
-        !batchJournal && !scheduledCheckpoint && !isDmtvRadioCheckpoint(snapshot) && !validDmtvEvidence(snapshot)) {
+        !batchJournal && !scheduledCheckpoint && !tipLedgerCheckpoint &&
+        !isDmtvRadioCheckpoint(snapshot) && !validDmtvEvidence(snapshot)) {
       throw new Error(unsupportedCheckpointSummary(snapshot));
     }
     const form = new FormData();
