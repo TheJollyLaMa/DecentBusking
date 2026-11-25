@@ -11,9 +11,9 @@ export function cachedEthUsd(storage = globalThis.sessionStorage, now = Date.now
   } catch { return null; }
 }
 
-export function loadEthUsd({ fetchImpl = globalThis.fetch, storage = globalThis.sessionStorage } = {}) {
+export function loadEthUsd({ fetchImpl = globalThis.fetch, storage = globalThis.sessionStorage, force = false } = {}) {
   const cached = cachedEthUsd(storage);
-  if (cached) return Promise.resolve(cached);
+  if (cached && !force) return Promise.resolve(cached);
   request ||= fetchImpl(QUOTE_URL, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
     .then(async response => {
       const rate = Number((await response.json())?.data?.amount);

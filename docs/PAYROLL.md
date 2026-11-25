@@ -72,6 +72,33 @@ public-vs-admin discovery. Chrome verification covers review cancellation,
 receipt locks, public archive removal and responsive chart views using mocks;
 no real transactions or campaign publication are part of validation.
 
+### Referral fund matches
+
+Beneath the Supporter queue, **Referral fund matches owed** handles new
+versioned musician campaigns after they end, close or fill. Each approved
+newcomer creates only their earned Top10/Playback entries; unfilled slots do
+not create debts. The ETH source amount and publication-fixed USDC match are
+shown separately, with the newcomer and both BaseScan receipts.
+
+**Release & match** explicitly pays the source share from `dbusk-referrals`
+to the configured admin wallet, enabling that router recipient if needed,
+then asks for the matching USDC deposit. There is no automatic swap. The
+admin must arrange USDC and keep Base ETH for gas. Declining the second step
+leaves the verified source paid and the deposit owed; resume with
+**Deposit USDC**, without paying the source twice.
+
+Preparations and broadcast hashes are journaled per claim/leg/phase. Unknown,
+replaced or timed-out transactions remain protected. **Check receipt** uses
+the original or successful matching replacement transaction, not an approval.
+**Review unsent** releases only a preparation without a recorded payout or
+deposit hash after an explicit wallet-history reason. An unrelated revert
+never unlocks a phase. Source release needs an exact canonical, twice-confirmed
+`PayrollPaid`; target completion needs exact owner `FundFunded` and native-USDC
+transfer proofs. A source reorg blocks the target stage. Source payouts reduce
+ETH commitments immediately; only both verified stages mark the fund leg paid.
+Pending source payments also block rejection, amendments and archiving.
+The queue and Supporter transfers share Payroll's wallet-write lock.
+
 ### USDC Deposits
 
 The public fund pills open immediately; wallet names enhance the rows after

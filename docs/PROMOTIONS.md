@@ -104,35 +104,60 @@ dragged onto new dates.
 On the week view each published campaign is one continuous bar across the
 days it runs, stacked above the time grid like iCal all-day events.
 
-### ETH campaigns and gifts
+### ETH campaigns, fixed fund matches and Supporter baskets
 
 **💱 Currency** switches a campaign between 💵 USDC and Ξ ETH. Switching
 converts the current amounts at the Coinbase ETH-USD spot price (the same
 quote as the tip modal), rounded to 0.000001 ETH or one cent. ETH amounts show
 an approximate USD value in brackets, which is an estimate only. ETH campaigns
 hold native ETH in `dbusk-referrals` (the router's `fundNative` and
-`fundBalances(fund, 0x0)`) and pay each completed leg in ETH. USDC and ETH
+`fundBalances(fund, 0x0)`). Wallet rewards and fund-share releases originate
+there; Top10/Playback ultimately receive USDC through the Payroll flow below. USDC and ETH
 balances are separate: a campaign is only checked against, and funded from,
 its own currency. No Settlements Router change is needed.
 
-**🎁 Gifts** are optional, one per trigger, each with an amount, a
-🎖 Supporter token flag, or both:
+New calendar campaigns use settlement policy `eth-usdc-match-v1`. **Budget**
+shows the fixed USDC match per successful newcomer before signing, using an
+admin-approved ETH/USD quote captured before publication. Refresh and review
+quotes older than five minutes. Calculate with integer wei and quote micros;
+round each fund share to the nearest USDC cent, halves upward. A nonzero ETH
+fund share must match at least one cent. This is a publication agreement, not
+an on-chain oracle or automatic swap. The admin supplies USDC and separate gas.
+
+After the campaign ends, closes or fills, **Payroll → Referral fund matches
+owed** lists one Top10/Playback obligation per approved qualifying newcomer.
+Unfilled slots create no entries. **Release & match** first pays the exact
+source share to the configured admin wallet with a unique router work
+reference; it then asks separately to deposit the fixed USDC match. An ERC-20
+approval may be needed too. Both canonical, twice-confirmed receipts are
+required. The source payout immediately reduces ETH commitments, but the
+target leg remains owed until its USDC deposit is proven. A deposit alone
+cannot settle a new-policy leg. See [Payroll recovery](PAYROLL.md#referral-fund-matches).
+
+**🎁 Gifts** for new campaigns are Supporter DNFTs only, one optional criterion
+per trigger:
 
 | Gift | Who wins |
 | --- | --- |
 | 🎟 Participation | Every curated referrer with at least one conversion |
 | 🏁 Completion | Every converting referrer, only if the campaign fills |
-| 🥇 Top referrer | Most conversions; ties break on registered referrals, then split evenly |
+| 🥇 Top referrer | Most conversions; ties break on registered referrals; remaining tied winners each receive the basket |
 
-Gifts are paid in the campaign currency from `dbusk-referrals`. Run sets aside
-the most gifts could pay: participation and completion amounts are multiplied
-by the number of curated referrers, and the top-referrer gift is counted once.
-That reserve is added to the budget, so Run stays blocked until both are funded.
+The basket defaults to DecentBusking Supporter #75 on Base. Add other
+admin-owned Base ERC-1155 Supporter contracts/IDs (up to eight distinct tokens).
+Each eligible wallet receives one of each selected DNFT per campaign, even if
+multiple criteria overlap. Gifts reserve **zero ETH/USDC**. Publication checks
+ERC-1155 support and at least one admin-held copy of every selected token;
+inventory is not escrowed or guaranteed and may need replenishing for winners.
 
 Once the campaign fills or its claims close, and every claim has been reviewed,
 the admin presses **🎁 Award** on the campaign bar. That signed `award-gifts`
 command freezes the winners and adds 🎖 winners to the Supporter queue (see
-**🎖 Supporter tokens owed** below). Each money award then has its own
+**🎖 Supporter tokens owed** below). New-policy full-campaign Supporter eligibility
+requires successful wallet rewards, not delayed fund-match deposits.
+
+**Legacy campaigns keep their original terms**, cash-gift reserves, separate
+owner-funded fund legs, and default #75 delivery identity. Each legacy money award has its own
 **🎁 Send** button: one router payout with work reference
 `…:<campaign>:<wallet>:gift-<trigger>`, reconciled like a claim payment.
 If a wallet transaction is interrupted, **↻** reconciles its hash; **↩** can
@@ -161,8 +186,8 @@ hold ERC-1155 tokens, so they are owed and sent as described below.
 An earned Supporter enters the queue when an approved conversion earns a 🎖
 participation gift, when the campaign fills for a 🎖 completion gift, when the
 top-referrer 🎖 award is finalized, or when all configured conversions are paid.
-Each earning wallet is owed at most one
-Supporter #75 (Base `0xe63E…439B`) per campaign. Owed tokens appear in the
+Each earning wallet is owed one of each selected Supporter DNFT per campaign
+(#75 on Base `0xe63E…439B` by default). Owed tokens appear in the
 **💸 Payroll** panel, below the repo dev payouts, as **🎖 Supporter tokens
 owed**. They come from the public promotions ledger rather than
 `payroll-queue.json`, because referrers are wallets, not registered GitHub
@@ -172,9 +197,9 @@ reversed.
 
 **🎖 Send** checks that the admin wallet holds a copy and simulates the
 transfer. It then records a signed `prepare-supporter`, and the wallet sends
-`safeTransferFrom(admin, recipient, 75, 1)`. The token is marked delivered only
+`safeTransferFrom(admin, recipient, selectedTokenId, 1)` on the selected contract. The token is marked delivered only
 after a twice-confirmed, canonical Base receipt has a `TransferSingle` of
-exactly one #75 from the admin wallet to that recipient. A hash can settle only
+exactly one selected token from the admin wallet to that recipient. A hash can settle only
 one record. A proven reverted attempt returns the token to owed. **🔎 Check**
 reconciles an interrupted send and accepts a replacement transaction hash.
 **↩** releases a preparation without a hash only after wallet-history review,
@@ -189,7 +214,28 @@ funding produces an explicit error. Draft editing does not require money.
 Publishing checks that the chosen fund covers its own and other outstanding
 campaign budgets; approvals and payment preparation recheck commitments. These
 are service-side earmarks, not on-chain escrow: the owner can recover the fund.
-No existing fee split is changed.
+No existing fee split is changed. Deploy the matching worker first and verify
+`features.referralSettlement === "eth-usdc-match-v1"` in `/api/promotions`;
+the new editor refuses to Run against an older worker. The worker also
+rejects an older calendar's Run command, including an
+unsaved draft in an already-open tab; preserve its details and reopen in the
+updated editor instead of signing the old policy. New checkpoint fields
+require the matching worker on restart; do not roll back to one that ignores
+them. Worker releases still require the radio-safe predeploy process and
+explicit approval; frontend deployment is not campaign publication.
+
+Reuse decision: adapt this receiving app's existing
+[router payout and signing controller](../js/promotions-ui.mjs),
+[USDC deposit helper](../js/settlement-funds.mjs), and
+[Supporter delivery journal](../js/supporter-payroll.mjs), from production commit
+`3230c38581462c7f01d8f85a9302cef267939b36`. ArtFi's
+`ArtFiSettlementRouter.payout` / `fundToken` (commit `843e770`) supply the two
+explicit stages; there is no direct fund transfer or hidden recovery bridge.
+Scoped Canopy and existing referral worktree inspection found no compatible
+basket/matching implementation to reuse. Legacy cash rewards, Base-only assets,
+and the ETH/USDC mismatch are kept explicit. Receiving-app tests exercise the
+0.00095/0.0008 ETH trial, exact proofs, unfilled slots, per-token delivery and
+checkpoint recovery without real transfers.
 
 The six templates start as drafts: album onboarding, referral rush, sponsor
 scout, band-buddy onboarding, first-sponsor match, and village listening

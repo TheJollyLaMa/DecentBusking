@@ -50,6 +50,191 @@ async function fixture(options = {}) {
     stored: () => stored, setTime: t => { clock = t; }, setBalance: b => { balance = b; },
     setReceipt: r => { receipt = r ? { blockHash, ...r } : r; }, setTransaction: tx => { transaction = tx; } };
 }
+async function matchFixture({ slots = 1, gifts = [], rewards, stock = 11n } = {}) {
+  const musician = Wallet.createRandom();
+  const f = await fixture({ readPlaylist: () => [{ trackId: 'match-track', title: 'Trial song', mintStatus: 'minted', tokenId: '7',
+    mintRecipient: musician.address }], readSupporterInventory: async () => ({ erc1155: true, balanceUnits: stock }) });
+  const share = '200000000000000';
+  const campaignInput = input({ template: 'musician-referral', asset: 'eth', rewardUnits: '800000000000000',
+    budgetUnits: (800000000000000n * BigInt(slots)).toString(), maxAwards: slots, requiredVotes: 10,
+    legAmounts: { referrer: share, musician: share, 'dbusk-top10': share, 'dbusk-playback': share },
+    curatedReferrers: [alice.address], gifts, settlementVersion: f.shared.REFERRAL_SETTLEMENT_VERSION,
+    supporterRewards: rewards || [f.shared.SUPPORTER_REWARD],
+    fundMatchQuote: { ethUsdMicros: '4000000000', quotedAt: new Date(epoch).toISOString() } });
+  f.setBalance(950000000000000n * BigInt(slots));
+  const campaign = (await f.exec({ action: 'run', campaign: campaignInput })).campaigns[0];
+  const qualify = async () => {
+    await f.join(campaign, alice);
+    await f.exec({ action: 'join', campaignId: campaign.id, referrer: alice.address, trackId: 'match-track',
+      acceptTerms: true, termsVersion: campaign.version }, musician);
+    for (let i = 0; i < 10; i++) await f.exec({ action: 'vote', campaignId: campaign.id, playId: `match-song-${i}`,
+      voterId: `match-browser-${i}-0000000000`, subjectWallet: musician.address, vote: 1 }, musician);
+    const claim = (await f.exec({ action: 'claim', campaignId: campaign.id, musicianWallet: musician.address,
+      evidence: 'Minted track and ten votes' }, alice)).claims[0];
+    return (await f.exec({ action: 'review', claimId: claim.id, decision: 'approved', reason: 'Verified newcomer' })).claims[0];
+  };
+  const iface = new Interface([
+    'event PayrollPaid(bytes32 indexed fundId,address indexed asset,address indexed recipient,uint256 amount,bytes32 workReference,bytes32 repositoryIdHash,bytes32 contributorIdHash,string metadataUri,bytes32 metadataHash)',
+    'event FundFunded(bytes32 indexed fundId,address indexed asset,address indexed funder,uint256 amount)',
+    'event Transfer(address indexed from,address indexed to,uint256 value)',
+  ]);
+  const payoutReceipt = (claim, legId, recipient, extra = {}) => {
+    const event = iface.encodeEventLog('PayrollPaid', [id(f.shared.REFERRALS_FUND), f.shared.CAMPAIGN_ASSETS.eth.address,
+      recipient, BigInt(share), id(f.shared.promotionWorkReference(claim, legId)), id('repo'), id('recipient'), '', ZeroHash]);
+    return { status: 1, to: routerAddress, blockNumber: 99, logs: [{ ...event, address: routerAddress }], ...extra };
+  };
+  const depositReceipt = (fund, extra = {}) => {
+    const funded = iface.encodeEventLog('FundFunded', [id(fund), f.shared.PROMOTIONS_USDC, owner.address, 800000n]);
+    const transfer = iface.encodeEventLog('Transfer', [owner.address, routerAddress, 800000n]);
+    return { status: 1, to: routerAddress, blockNumber: 99, logs: [
+      { ...funded, address: routerAddress }, { ...transfer, address: f.shared.PROMOTIONS_USDC }], ...extra };
+  };
+  return { ...f, campaign, campaignInput, musician, qualify, iface, payoutReceipt, depositReceipt };
+}
+
+test('four-way 0.0008 ETH trial debits the referral fund and settles only after both exact receipts', async () => {
+  const f = await matchFixture();
+  const queue = async () => f.shared.referralFundMatchQueue((await f.view()).campaigns, (await f.view()).claims, epoch);
+  assert.deepEqual(await queue(), []);
+  const claim = await f.qualify();
+  const target = legId => ({ claimId: claim.id, legId });
+  assert.deepEqual((await queue()).map(item => [item.fund, item.amountUnits, item.usdcUnits]), [
+    ['dbusk-top10', '200000000000000', '800000'], ['dbusk-playback', '200000000000000', '800000']]);
+  await assert.rejects(f.exec({ action: 'prepare-fund-match-deposit', ...target('dbusk-top10') }), /source payout/);
+  await assert.rejects(f.exec({ action: 'reconcile-funding-leg', ...target('dbusk-top10'), txHash }), /two-stage/);
+  let balance = 950000000000000n;
+  f.setTime(Date.parse(f.campaign.endsAt) + 1000);
+  for (const [i, legId, recipient] of [[1, 'referrer', alice.address], [2, 'musician', f.musician.address]]) {
+    await f.exec({ action: 'prepare-payment', ...target(legId) });
+    f.setReceipt(f.payoutReceipt(claim, legId, recipient));
+    await f.exec({ action: 'reconcile', ...target(legId), txHash: `0x${String(i).repeat(64)}` });
+    balance -= 200000000000000n; f.setBalance(balance);
+  }
+  assert.deepEqual((await f.view()).campaigns[0].supporterToken.eligibleWallets, [alice.address.toLowerCase()],
+    'post-campaign fund matching must not prevent the earned Supporter basket');
+  f.setTime(Date.parse(f.campaign.endsAt) + 1000);
+  await f.exec({ action: 'prepare-fund-match-source', ...target('dbusk-top10') });
+  await assert.rejects(f.exec({ action: 'prepare-fund-match-source', ...target('dbusk-top10') }), /unresolved/);
+  for (const wrong of [
+    f.payoutReceipt(claim, 'dbusk-top10', alice.address),
+    f.payoutReceipt(claim, 'dbusk-playback', owner.address),
+    f.payoutReceipt(claim, 'dbusk-top10', owner.address, { to: alice.address }),
+  ]) {
+    f.setReceipt(wrong);
+    await assert.rejects(f.exec({ action: 'reconcile-fund-match-source', ...target('dbusk-top10'), txHash }), /proofs|target/);
+  }
+  f.setReceipt(f.payoutReceipt(claim, 'dbusk-top10', owner.address, { blockNumber: 100 }));
+  await f.exec({ action: 'reconcile-fund-match-source', ...target('dbusk-top10'), txHash });
+  await assert.rejects(f.exec({ action: 'release-fund-match-preparation', ...target('dbusk-top10'),
+    phase: 'source', confirmNoBroadcast: true, reason: 'Not authorized with a recorded hash' }), /unbroadcast/);
+  f.setReceipt(f.payoutReceipt(claim, 'dbusk-top10', owner.address));
+  let state = await f.exec({ action: 'reconcile-fund-match-source', ...target('dbusk-top10'), txHash });
+  balance -= 200000000000000n; f.setBalance(balance);
+  assert.equal(state.campaigns[0].paidUnits, '600000000000000');
+  assert.equal(state.claims[0].legs[2].status, 'funding-needed');
+  const { referralFundAvailability } = await import('../js/referral-campaign-editor.mjs');
+  assert.equal(referralFundAvailability({ balanceUnits: balance, campaigns: state.campaigns, asset: 'eth', budgetUnits: 0n }).available, 150000000000000n);
+  await assert.rejects(f.exec({ action: 'review', claimId: claim.id, decision: 'rejected', reason: 'Do not undo a source payment' }), /reverse/);
+  await assert.rejects(f.exec({ action: 'amend', campaignId: f.campaign.id, budgetIncreaseUnits: '800000000000000',
+    reason: 'Late amendment' }), /after fund matching starts/);
+  const originalGetBlock = f.cfg.provider.getBlock;
+  f.cfg.provider.getBlock = async () => ({ hash: ZeroHash });
+  await assert.rejects(f.exec({ action: 'prepare-fund-match-deposit', ...target('dbusk-top10') }), /no longer canonical/);
+  f.cfg.provider.getBlock = originalGetBlock;
+  await f.exec({ action: 'prepare-fund-match-deposit', ...target('dbusk-top10') });
+  const depositHash = '0x' + 'cd'.repeat(32);
+  for (const wrong of [
+    f.depositReceipt('dbusk-playback'),
+    f.depositReceipt('dbusk-top10', { logs: f.depositReceipt('dbusk-top10').logs.slice(0, 1) }),
+    f.depositReceipt('dbusk-top10', { to: alice.address }),
+  ]) {
+    f.setReceipt(wrong);
+    await assert.rejects(f.exec({ action: 'reconcile-fund-match-deposit', ...target('dbusk-top10'), txHash: depositHash }), /proofs|target/);
+  }
+  for (const args of [
+    [id('dbusk-top10'), f.shared.PROMOTIONS_ETH, owner.address, 800000n],
+    [id('dbusk-top10'), f.shared.PROMOTIONS_USDC, alice.address, 800000n],
+    [id('dbusk-top10'), f.shared.PROMOTIONS_USDC, owner.address, 800001n],
+  ]) {
+    const event = f.iface.encodeEventLog('FundFunded', args);
+    f.setReceipt(f.depositReceipt('dbusk-top10', { logs: [
+      { ...event, address: routerAddress }, f.depositReceipt('dbusk-top10').logs[1]] }));
+    await assert.rejects(f.exec({ action: 'reconcile-fund-match-deposit', ...target('dbusk-top10'), txHash: depositHash }), /proofs/);
+  }
+  const originalDepositHash = '0x' + '78'.repeat(32);
+  f.setReceipt(null);
+  await f.exec({ action: 'reconcile-fund-match-deposit', ...target('dbusk-top10'), txHash: originalDepositHash });
+  f.setReceipt(f.depositReceipt('dbusk-top10'));
+  const routerIface = new Interface(f.shared.PROMOTIONS_ROUTER_ABI);
+  const data = routerIface.encodeFunctionData('fundToken', [id('dbusk-top10'), f.shared.PROMOTIONS_USDC, 800000n]);
+  f.cfg.provider.getTransaction = async hash => ({ from: owner.address, to: routerAddress, data, value: 0n,
+    nonce: hash === originalDepositHash ? 9 : 10 });
+  await assert.rejects(f.exec({ action: 'reconcile-fund-match-deposit', ...target('dbusk-top10'), txHash: depositHash }), /replaces the original/);
+  f.cfg.provider.getTransaction = async () => ({ from: owner.address, to: routerAddress, data, value: 0n, nonce: 9 });
+  f.setReceipt(f.depositReceipt('dbusk-top10'));
+  state = await f.exec({ action: 'reconcile-fund-match-deposit', ...target('dbusk-top10'), txHash: depositHash });
+  assert.equal(state.claims[0].legs[2].status, 'paid');
+  await f.exec({ action: 'prepare-fund-match-source', ...target('dbusk-playback') });
+  await assert.rejects(f.exec({ action: 'reconcile-fund-match-source', ...target('dbusk-playback'), txHash }), /already assigned/);
+  f.setReceipt(f.payoutReceipt(claim, 'dbusk-playback', owner.address));
+  await f.exec({ action: 'reconcile-fund-match-source', ...target('dbusk-playback'), txHash: '0x' + '34'.repeat(32) });
+  balance -= 200000000000000n; f.setBalance(balance);
+  assert.equal(balance, 150000000000000n);
+  await f.exec({ action: 'prepare-fund-match-deposit', ...target('dbusk-playback') });
+  await assert.rejects(f.exec({ action: 'reconcile-fund-match-deposit', ...target('dbusk-playback'), txHash: depositHash }), /already assigned/);
+  f.setReceipt(f.depositReceipt('dbusk-playback'));
+  state = await f.exec({ action: 'reconcile-fund-match-deposit', ...target('dbusk-playback'), txHash: '0x' + '56'.repeat(32) });
+  assert.equal(state.claims[0].status, 'paid');
+  assert.equal(state.campaigns[0].paidUnits, '800000000000000');
+  const { validatePromotionCheckpoint, createPromotions } = await import('../discord-bot/promotions.js');
+  validatePromotionCheckpoint(f.stored());
+  const damaged = structuredClone(f.stored()); damaged.claims[0].legs[2].match.usdcUnits = '900000';
+  assert.throws(() => validatePromotionCheckpoint(damaged), /Invalid promotions checkpoint/);
+  const restarted = createPromotions({ ...f.cfg, restore: async () => f.stored() });
+  assert.equal((await restarted.publicState()).claims[0].legs[2].match.source.txHash, txHash);
+});
+
+test('unfilled slots create no fund-match obligations and stale quotes or missing Supporters block publication', async () => {
+  const f = await matchFixture({ slots: 2 });
+  const claim = await f.qualify();
+  assert.deepEqual(f.shared.referralFundMatchQueue((await f.view()).campaigns, (await f.view()).claims, epoch), []);
+  await assert.rejects(f.exec({ action: 'prepare-fund-match-source', claimId: claim.id, legId: 'dbusk-top10' }), /after the campaign/);
+  f.setTime(Date.parse(f.campaign.endsAt) + 1000);
+  assert.equal(f.shared.referralFundMatchQueue((await f.view()).campaigns, (await f.view()).claims,
+    Date.parse(f.campaign.endsAt) + 1000).length, 2);
+  await assert.rejects(f.exec({ action: 'run', campaign: f.campaignInput }), /Refresh the publication quote/);
+  await assert.rejects(matchFixture({ stock: 0n }), /Admin must hold/);
+});
+
+test('Supporter basket delivery binds contract, token, recipient and receipt identity and restores per-token status', async () => {
+  const { SUPPORTER_REWARD, supporterRewardKey } = await import('../js/promotions.mjs');
+  const custom = { ...SUPPORTER_REWARD, contract: '0x' + 'cd'.repeat(20), tokenId: '123', name: 'Other Supporter' };
+  const f = await matchFixture({ rewards: [SUPPORTER_REWARD, custom],
+    gifts: [{ trigger: 'participation', amountUnits: '0', supporter: true }] });
+  await f.qualify();
+  const target = token => ({ campaignId: f.campaign.id, wallet: alice.address, tokenKey: supporterRewardKey(token) });
+  await assert.rejects(f.exec({ action: 'prepare-supporter', ...target({ ...custom, tokenId: '124' }) }), /not in the published/);
+  await f.exec({ action: 'prepare-supporter', ...target(custom) });
+  await f.exec({ action: 'prepare-supporter', ...target(SUPPORTER_REWARD) });
+  const iface = new Interface(f.shared.SUPPORTER_REWARD_ABI);
+  const receipt = (token, recipient = alice.address, quantity = 1n) => {
+    const event = iface.encodeEventLog('TransferSingle', [owner.address, owner.address, recipient, BigInt(token.tokenId), quantity]);
+    return { status: 1, to: token.contract, blockNumber: 99, logs: [{ ...event, address: token.contract }] };
+  };
+  for (const wrong of [receipt(SUPPORTER_REWARD), receipt(custom, bob.address), receipt(custom, alice.address, 2n)]) {
+    f.setReceipt(wrong);
+    await assert.rejects(f.exec({ action: 'reconcile-supporter', ...target(custom), txHash }), /target|exactly/);
+  }
+  f.setReceipt(receipt(custom));
+  await f.exec({ action: 'reconcile-supporter', ...target(custom), txHash });
+  await assert.rejects(f.exec({ action: 'reconcile-supporter', ...target(SUPPORTER_REWARD), txHash }), /already assigned/);
+  f.setReceipt(receipt(SUPPORTER_REWARD));
+  await f.exec({ action: 'reconcile-supporter', ...target(SUPPORTER_REWARD), txHash: '0x' + 'ef'.repeat(32) });
+  const { createPromotions } = await import('../discord-bot/promotions.js');
+  const restarted = createPromotions({ ...f.cfg, restore: async () => f.stored() });
+  const queue = f.shared.supporterRewardQueue((await restarted.publicState()).campaigns);
+  assert.deepEqual(queue.map(item => [item.token.tokenId, item.status]), [['75', 'delivered'], ['123', 'delivered']]);
+});
 test('drafts, evidence and attribution are public without a wallet and recover after restart', async () => {
   const f = await fixture();
   const c = await f.create();
@@ -806,9 +991,11 @@ test('pilot amendment checks every other campaign commitment on the same promoti
     reason: 'Cannot overcommit the shared fund' }), /other campaign commitments/);
 });
 test('Run Campaign saves and publishes a funded referral campaign in one signed command', async () => {
-  const f = await fixture();
+  const f = await fixture({ readSupporterInventory: async () => ({ erc1155: true, balanceUnits: 11n }) });
   const pilot = input({ template: 'musician-referral', title: 'Jose', rewardUnits: '25000000',
-    budgetUnits: '150000000', maxAwards: 6, fund: 'dbusk-promotionals', curatedReferrers: [alice.address] });
+    budgetUnits: '150000000', maxAwards: 6, fund: 'dbusk-promotionals', curatedReferrers: [alice.address],
+    settlementVersion: f.shared.REFERRAL_SETTLEMENT_VERSION, supporterRewards: [f.shared.SUPPORTER_REWARD] });
+  await assert.rejects(f.exec({ action: 'run', campaign: { ...pilot, settlementVersion: undefined } }), /Update the calendar editor/);
   f.setBalance(149999999n);
   await assert.rejects(f.exec({ action: 'run', campaign: pilot }), /Fund balance cannot cover/);
   assert.equal((await f.service.publicState()).campaigns.length, 0);
@@ -823,11 +1010,12 @@ test('Run Campaign saves and publishes a funded referral campaign in one signed 
 });
 
 test('Run Campaign accepts a custom budget, leg breakdown, vote count and referrer names', async () => {
-  const f = await fixture();
+  const f = await fixture({ readSupporterInventory: async () => ({ erc1155: true, balanceUnits: 11n }) });
   const legAmounts = { referrer: '20000000', musician: '10000000', 'dbusk-top10': '0', 'dbusk-playback': '10000000' };
   const custom = input({ template: 'musician-referral', title: 'Spring', rewardUnits: '40000000',
     budgetUnits: '200000000', maxAwards: 5, legAmounts, requiredVotes: 5,
-    curatedReferrers: [alice.address], curatedReferrerNames: { [alice.address]: 'Alice', [bob.address]: 'Not curated' } });
+    curatedReferrers: [alice.address], curatedReferrerNames: { [alice.address]: 'Alice', [bob.address]: 'Not curated' },
+    settlementVersion: f.shared.REFERRAL_SETTLEMENT_VERSION, supporterRewards: [f.shared.SUPPORTER_REWARD] });
   await assert.rejects(f.exec({ action: 'run', campaign: { ...custom, budgetUnits: '210000000' } }), /exact multiple/);
   await assert.rejects(f.exec({ action: 'run', campaign: { ...custom, maxAwards: 6 } }), /must match the breakdown/);
   await assert.rejects(f.exec({ action: 'run', campaign: { ...custom, legAmounts: { ...legAmounts, referrer: '0' }, rewardUnits: '20000000', maxAwards: 10 } }), /referrer reward/);
@@ -909,16 +1097,17 @@ test('ETH campaigns fund, reserve gifts and reconcile native gift payouts separa
   const pilot = input({ template: 'musician-referral', title: 'Ether', asset: 'eth', legAmounts, requiredVotes: 1,
     rewardUnits: '2000000000000000', budgetUnits: '4000000000000000', maxAwards: 2, gifts,
     curatedReferrers: [alice.address, bob.address] });
-  await assert.rejects(f.exec({ action: 'run', campaign: { ...pilot, asset: 'doge' } }), /USDC or ETH/);
-  await assert.rejects(f.exec({ action: 'run', campaign: { ...pilot, gifts: [...gifts, gifts[0]] } }), /one entry per trigger/);
+  await assert.rejects(f.create({ ...pilot, asset: 'doge' }), /USDC or ETH/);
+  await assert.rejects(f.create({ ...pilot, gifts: [...gifts, gifts[0]] }), /one entry per trigger/);
+  const campaign = await f.create(pilot);
   // Budget 0.004 + participation 2 × 0.001 + top 0.003 = 0.009 ETH; USDC balance never counts.
   balances.usdc = 10n ** 30n; balances.eth = 8999999999999999n;
-  await assert.rejects(f.exec({ action: 'run', campaign: pilot }), /cannot cover campaign budgets and gifts/);
+  await assert.rejects(f.publish(campaign), /cannot cover campaign budgets and gifts/);
   assert.equal(assets.at(-1), 'eth');
   balances.eth = 9000000000000000n;
-  const [campaign] = (await f.exec({ action: 'run', campaign: pilot })).campaigns;
-  assert.equal(campaign.asset, 'eth');
-  assert.equal(campaign.giftReserveUnits, '5000000000000000');
+  const [published] = (await f.publish(campaign)).campaigns;
+  assert.equal(published.asset, 'eth');
+  assert.equal(published.giftReserveUnits, '5000000000000000');
   await f.join(campaign, alice);
   await f.exec({ action: 'join', campaignId: campaign.id, referrer: alice.address, trackId: 'eth-track',
     acceptTerms: true, termsVersion: campaign.version }, musician);
@@ -973,7 +1162,8 @@ test('earned Supporter tokens queue for admin delivery and settle only on an exa
   const pilot = input({ template: 'musician-referral', title: 'Supporters', legAmounts, requiredVotes: 1,
     rewardUnits: '2000000', budgetUnits: '2000000', maxAwards: 1,
     gifts: [{ trigger: 'top', amountUnits: '0', supporter: true }], curatedReferrers: [alice.address, bob.address] });
-  const [campaign] = (await f.exec({ action: 'run', campaign: pilot })).campaigns;
+  const campaign = await f.create(pilot);
+  await f.publish(campaign);
   await f.join(campaign, alice);
   await f.exec({ action: 'join', campaignId: campaign.id, referrer: alice.address, trackId: 'sup-track',
     acceptTerms: true, termsVersion: campaign.version }, musician);
@@ -1044,7 +1234,8 @@ test('approved Supporter gifts enter payroll immediately, deduplicate, and survi
   const pilot = input({ template: 'musician-referral', title: 'Early gifts', legAmounts, requiredVotes: 1,
     rewardUnits: '2000000', budgetUnits: '4000000', maxAwards: 2, curatedReferrers: [alice.address],
     gifts: ['participation', 'completion', 'top'].map(trigger => ({ trigger, amountUnits: '0', supporter: true })) });
-  const [campaign] = (await f.exec({ action: 'run', campaign: pilot })).campaigns;
+  const campaign = await f.create(pilot);
+  await f.publish(campaign);
   await f.join(campaign, alice);
   const submit = async index => {
     const musician = musicians[index];
