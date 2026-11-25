@@ -1,4 +1,5 @@
 import { id } from 'ethers';
+import { PermissionFlagsBits } from 'discord.js';
 import { radioAllocationMatchesReport, validateRadioReceipt } from '../js/radio-payroll.mjs';
 import { rankTopTenSongs } from '../js/top-ten-prizes.mjs';
 import { formatUsdcUnits } from '../js/usdc-format.mjs';
@@ -90,7 +91,8 @@ export function buildWeeklyPayrollReport({ playback, top10, report, siteUrl }) {
 }
 
 export function createWeeklyPayrollReporter({ config, channelId, siteUrl, getWeeklyPayflow,
-  getPaymentLedger, getReports, getChannel, restore, save, now = () => Date.now() }) {
+  getPaymentLedger, getReports, getChannel, restore, save, mentionRoleName = 'JukeboxHero',
+  now = () => Date.now() }) {
   const records = new Map();
   let initialized = false;
   let dirty = false;
@@ -170,6 +172,19 @@ export function createWeeklyPayrollReporter({ config, channelId, siteUrl, getWee
     }
   }
 
+  // Only the named role is pingable; @everyone, users and replies stay suppressed.
+  async function roleMention(channel) {
+    const guild = channel.guild;
+    const roles = guild?.roles ? await guild.roles.fetch() : null;
+    const key = name => String(name).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const role = [...(roles?.values() || [])].find(value => key(value.name) === key(mentionRoleName));
+    if (!role || role.id === guild.id || role.managed) throw new Error(`@${mentionRoleName} role not found for the payroll announcement`);
+    if (!role.mentionable && !channel.permissionsFor?.(guild.members?.me)?.has(PermissionFlagsBits.MentionEveryone)) {
+      throw new Error(`@${mentionRoleName} is not mentionable by the bot; make the role mentionable`);
+    }
+    return { content: `<@&${role.id}>`, allowedMentions: { parse: [], roles: [role.id], users: [], repliedUser: false } };
+  }
+
   async function update() {
     if (!initialized) await initialize();
     await persist();
@@ -218,7 +233,7 @@ export function createWeeklyPayrollReporter({ config, channelId, siteUrl, getWee
       if (record.allocationHash !== allocationHash) throw new Error('Payroll allocations changed after announcement preparation');
       // Recover a successful send whose response or checkpoint was lost before trying another POST.
       const message = await findPosted(channel, record) || await channel.send({ ...record.payload,
-        nonce: id(markerFor(week)).slice(2, 26), enforceNonce: true });
+        ...await roleMention(channel), nonce: id(markerFor(week)).slice(2, 26), enforceNonce: true });
       if (!snowflake(message.id)) throw new Error('Discord did not return a payroll announcement message ID');
       record.messageId = message.id;
       record.sentAt = new Date(now()).toISOString();
