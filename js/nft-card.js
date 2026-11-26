@@ -96,6 +96,13 @@ export function renderNFTCard(nft) {
   if (!panel || !content) return;
 
   content.innerHTML = _buildCardHTML(nft);
+  const releases = content.querySelector('[data-release-albums]');
+  if (releases && Array.isArray(nft.releaseAlbums)) {
+    void import('./release-album-card.mjs').then(async ({ albumButton }) => {
+      const { memberships } = await import('./release-albums.mjs');
+      for (const m of memberships(nft)) releases.append(albumButton(m));
+    });
+  }
   panel.classList.remove('hidden');
   if (!panel.open) panel.showModal();
   panel.oncancel = (event) => {
@@ -358,6 +365,7 @@ function _buildCardHTML(nft) {
     <section class="nft-credits-section" aria-label="Credits and payout splits">
       <h4>Credits &amp; splits</h4>
       <p>${albumLabel}</p>
+      <div aria-label="Release albums" data-release-albums></div>
       ${nft.djukeAlbumId && nft.djukeSplitMode ? `<p>${nft.djukeSplitMode === 'custom' ? 'Custom song split - album default changes do not overwrite this song.' : 'Uses album default payments.'}</p>` : ''}
       <ul>${credits}</ul>
       ${canEditCreatorSplits(nft, window._wallet?.address)

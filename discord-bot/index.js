@@ -130,6 +130,7 @@ import {
   waitForRemotePersistence,
   addTrack,
   submitMediaTrack,
+  submitReleaseBatch,
   submitLiveRecordingRelease,
   liveRecordingReleaseState,
   submitCatalogRecordingRelease,
@@ -497,6 +498,11 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder()
     .setName('jukebox')
     .setDescription('Personal jukebox — receive a private IPFS playlist via DM')
+    .addSubcommand(sub => sub.setName('submit-batch').setDescription('Queue songs or albums using a release sheet or your music uploads')
+      .addAttachmentOption(o => o.setName('sheet').setDescription('Text file: Album | Title | Format | File CID, one row per song'))
+      .addStringOption(o => o.setName('rows').setDescription('Release rows separated by newlines: Album | Title | Format | File CID').setMaxLength(6000))
+      .addStringOption(o => o.setName('post').setDescription('Message ID of your multi-file upload in this channel'))
+      .addStringOption(o => o.setName('album').setDescription('Album name for a single upload post (optional)').setMaxLength(100)))
     .addSubcommand((sub) =>
       sub
         .setName('play')
@@ -2243,6 +2249,10 @@ async function main() {
       ownerWallet: config.mintOwnerWallet,
     }),
     onMintComplete: reconcileMint,
+    onReleaseBatch: async (tracks, actor) => {
+      if (!playlistReady) throw Error('Playlist is restoring; retry shortly');
+      return submitReleaseBatch(tracks, actor);
+    },
     onMediaSubmission: async (submission) => {
       if (!playlistReady) throw new Error('Playlist is restoring; please retry shortly');
       const track = submitMediaTrack(submission);
@@ -2335,6 +2345,7 @@ async function main() {
         tipWallet: track.tipWallet || track.mintRecipient,
         parentTokenId: track.parentTokenId || 0,
         isDevertAd: track.isDevertAd === true,
+        ...(track.releaseAlbums?.length ? { releaseAlbums: track.releaseAlbums } : {}),
         ...(track.creatorSplits ? { creatorSplits: track.creatorSplits } : {}),
         requestedAt: track.mintRequestedAt,
         requestType: 'mint',
@@ -2801,7 +2812,7 @@ async function main() {
       if (interaction.commandName === 'radio') {
         await handleRadioCommand(interaction, config);
       } else if (interaction.commandName === 'jukebox') {
-        await handleJukeboxCommand(interaction, config);
+        await handleJukeboxCommand(interaction, config, { playlistReady, creatorProfiles });
       } else if (interaction.commandName === 'jukeloop') {
         await handleJukeLoopCommand(interaction, config, { reconcileMint });
       }
@@ -2962,9 +2973,29 @@ async function handleRadioCommand(interaction, config) {
  * @param {import('discord.js').ChatInputCommandInteraction} interaction
  * @param {ReturnType<typeof loadConfig>} config
  */
-async function handleJukeboxCommand(interaction, config) {
+async function handleJukeboxCommand(interaction, config, { playlistReady, creatorProfiles }) {
   const sub = interaction.options.getSubcommand();
 
+  if (sub === 'submit-batch') {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      if (!playlistReady || config.disableMintFlow) throw Error('Mint intake is not ready');
+      if (interaction.channelId !== config.jukeboxChannelId) throw Error('Use this command in the DecentJukebox channel');
+      const linked = creatorProfiles?.getByDiscordId(interaction.user.id);
+      if (!linked?.address) throw Error('Link your Discord account in your DecentBusking creator profile first');
+      const { discordReleaseRows, releaseReceipt } = await import('./release-discord.js');
+      const { prepareMediaRelease } = await import('./release-batch.js');
+      const rows = await discordReleaseRows(interaction, { playlist: getPlaylist(), isAudioAttachment });
+      const tracks = prepareMediaRelease(rows);
+      const image = await pinDiscordAvatar(interaction.user, config);
+      if (!image) throw Error('Could not archive your Discord artwork; retry before queueing');
+      const results = await submitReleaseBatch(tracks, { source: 'discord', uploader: interaction.user.tag || interaction.user.username,
+        uploaderId: interaction.user.id, wallet: linked.address, artworkCid: image });
+      await interaction.editReply({ content: `${results.length} recording(s) saved. See the per-track receipt. No mint transaction was sent.`,
+        files: [{ name: 'release-receipt.txt', attachment: Buffer.from(releaseReceipt(results)) }] });
+    } catch (error) { await interaction.editReply({ content: `Batch submission: ${error.message}`, allowedMentions: { parse: [] } }); }
+    return;
+  }
   if (sub === 'submit') {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     try {

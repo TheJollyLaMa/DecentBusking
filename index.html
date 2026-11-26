@@ -35,7 +35,8 @@
       "./js/dbusker.mjs?v=20261116-studio-polish":"./js/dbusker.mjs?v=20261118-github-reports",
       "./js/radio-sync.js?v=20261030-ad-cutoff":"./js/radio-sync.js?v=20261123-wallet-votes",
       "./js/live-tip-target.mjs?v=20261114-live-direction":"./js/live-tip-target.mjs?v=20261117-public-hls",
-      "./js/space.js?v=20261030-ad-cutoff":"./js/space.js?v=20261122-hls-tip-match",
+      "./js/space.js?v=20261030-ad-cutoff":"./js/space.js?v=20261126-release-batches",
+      "./js/nft-card.js?v=20261118-artist-artwork":"./js/nft-card.js?v=20261126-release-batches",
       "./js/stage.js?v=20261030-ad-cutoff":"./js/stage.js?v=20261123-song-splits",
       "./js/live-audio-client.mjs":"./js/live-audio-client.mjs?v=20261117-lease-recovery",
       "./js/live-audio-client.mjs?v=20261114-direction":"./js/live-audio-client.mjs?v=20261117-lease-recovery",
@@ -73,7 +74,7 @@
       "./js/promotions.mjs":"./js/promotions.mjs?v=20261126-pinner-dashboard",
       "./js/supporter-payroll.mjs?v=20261123-supporter-queue":"./js/supporter-payroll.mjs?v=20261126-referral-match",
       "./js/eth-usd-quote.mjs?v=20261126-eth-gifts":"./js/eth-usd-quote.mjs?v=20261126-referral-match",
-      "./js/mint.js?v=20261030-ad-cutoff":"./js/mint.js?v=20261125-inviter",
+      "./js/mint.js?v=20261030-ad-cutoff":"./js/mint.js?v=20261126-release-batches",
       "./js/fund-display.mjs?v=20261024-djuke-labels":"./js/fund-display.mjs?v=20261124-visible-payments",
       "./js/fund-display.mjs?v=20261124-lazy-funds":"./js/fund-display.mjs?v=20261124-visible-payments",
       "./js/fund-display.mjs":"./js/fund-display.mjs?v=20261124-visible-payments",
@@ -764,6 +765,25 @@
       </div>
       <p class="mint-intro">A song, a film, a little magic. Drop it in, give it a face, and credit your people.</p>
       <ol class="mint-flow" aria-label="Submission flow"><li>01 · Your media</li><li>02 · The story</li><li>03 · Your people</li></ol>
+      <details class="mint-extras" id="release-batch">
+        <summary>Submit several songs or albums together</summary>
+        <fieldset>
+          <legend>Release batch · up to 20 recordings</legend>
+          <label>Artist name <input data-release-artist maxlength="80" placeholder="Defaults to your connected wallet"></label>
+          <label>Album for loose files (blank for singles) <input data-release-album maxlength="100"></label>
+          <label class="mint-dropzone" data-release-drop>Drop files or album folders, or browse
+            <input data-release-files type="file" multiple accept="audio/*,.m4a,.mp3,.mp4,.weba">
+          </label>
+          <label>Browse an album folder <input data-release-folder type="file" webkitdirectory multiple></label>
+          <label>Release sheet: Album | Title | Format | File CID
+            <textarea data-release-rows rows="7" placeholder="Album name | Song name | m4a | bafy…"></textarea>
+          </label>
+          <p>Review and reorder the rows before signing. Leave the album blank for singles. Repeat a CID in another album to reference the same recording. Files are public on IPFS; the website queue stays off radio until mint.</p>
+          <label>Shared cover image file CID (optional) <input data-release-cover></label>
+          <button type="button" data-release-submit>Sign and queue this batch</button>
+        </fieldset>
+        <pre data-release-status role="status" aria-live="polite"></pre>
+      </details>
       <form id="mint-form">
         <section class="mint-step" aria-labelledby="mint-media-heading">
         <h3 id="mint-media-heading"><span aria-hidden="true">♫</span> Drop your busk</h3>
@@ -1357,7 +1377,7 @@
   <script type="module" src="js/live-booking-notifications.mjs?v=20261126-worker-gas-gauge"></script>
   <script type="module" src="js/live-performance-admin.mjs?v=20261121-typed-review"></script>
   <link rel="stylesheet" href="css/promotions.css?v=20261116-promotions">
-  <script type="module" src="js/admin.js?v=20261126-pinner-dashboard"></script>
+  <script type="module" src="js/admin.js?v=20261126-pinner-dashboard-release-batches"></script>
   <link rel="stylesheet" href="css/content-review.css?v=20261107-flags">
   <script type="module" src="js/content-review-ui.mjs?v=20261107-flags"></script>
 
@@ -1371,7 +1391,7 @@
   <script type="module" src="js/top-ten-board.mjs?v=20261123-song-splits"></script>
   <script type="module" src="js/djuke.mjs?v=20261112-playlist-continuity"></script>
   <script type="module" src="js/devert-site.mjs?v=20261107-review"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261123-supporter-queue"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261126-release-batches"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261118-artist-artwork"></script>
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/djuke-playlists-ui.mjs?v=20261025-scheduling-info"></script>
@@ -1482,6 +1502,10 @@
       </div>
       <p class="creator-profile-edit-status" data-profile-edit-status role="status" aria-live="polite"></p>
     </dialog>
+    <details class="creator-dropdown" data-release-profile>
+      <summary>Albums</summary>
+      <div class="creator-dropdown-body" data-release-profile-items aria-live="polite"></div>
+    </details>
     <details class="creator-dropdown" data-my-nfts-section hidden>
       <summary><span class="creator-dropdown-title">🎵 My songs</span><span class="creator-dropdown-count" data-my-nfts-count></span></summary>
       <div class="creator-dropdown-body">

@@ -34,6 +34,7 @@ export function buildTrackMetadata(track, registeredBy, now = new Date()) {
     name: track.title,
     description: `Shared through DecentJukebox by ${track.uploader}`,
     animation_url: `ipfs://${track.ipfsCid}`,
+    ...(track.releaseAlbums?.length ? { releaseAlbums: track.releaseAlbums } : {}),
     audioUrl: `ipfs://${track.ipfsCid}`,
     ...(mediaTypeFor(track.filename, track.mediaType) ? { mediaType: mediaTypeFor(track.filename, track.mediaType) } : {}),
     ...(mediaTypeFor(track.filename, track.mediaType) === 'video/mp4' ? { videoUrl: `ipfs://${track.ipfsCid}` } : {}),
