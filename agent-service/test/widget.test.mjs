@@ -112,12 +112,12 @@ test('returning to the same invited wallet rechecks without closing the reading 
   const f = await fixture(t), { window, document, host, root } = f;
   Object.defineProperty(document, 'hidden', { value: false });
   root.querySelector('.launcher').click();
-  root.querySelector('.rabbit-trails').open = true;
+  root.querySelector('.rabbit-toggle').click();
   document.dispatchEvent(new window.Event('visibilitychange'));
   assert.equal(root.querySelector('section').hidden, false);
   await new Promise(resolve => window.setTimeout(resolve, 0));
   assert.equal(root.querySelector('section').hidden, false);
-  assert.equal(root.querySelector('.rabbit-trails').open, true);
+  assert.equal(root.querySelector('.rabbit-trails').hidden, false);
   window.fetch = async () => Response.json({ invited: false });
   document.dispatchEvent(new window.Event('visibilitychange'));
   await new Promise(resolve => window.setTimeout(resolve, 0));
@@ -125,7 +125,7 @@ test('returning to the same invited wallet rechecks without closing the reading 
   assert.equal(root.querySelector('section').hidden, true);
 });
 
-test('rabbit dropdown contains only a tutorial list and decorative, inaccessible-to-focus animation', async t => {
+test('rabbit pathway opens and closes its tutorial menu', async t => {
   const { root } = await fixture(t);
   for (const kind of ['payroll', 'playlists', 'splits']) {
     const link = root.querySelector(`a[href="?tutorial=${kind}"]`);
@@ -133,14 +133,31 @@ test('rabbit dropdown contains only a tutorial list and decorative, inaccessible
     assert.equal(link.target, '_blank');
     assert.equal(link.rel, 'noopener noreferrer');
   }
-  const trails = root.querySelector('.rabbit-trails');
-  assert.equal(trails.querySelector('summary').getAttribute('aria-label'), 'Follow the white rabbit');
-  assert.equal(trails.querySelector('.letter-stream').textContent.replaceAll('\u00a0', ' '), 'Follow the white rabbit');
+  const trails = root.querySelector('.rabbit-trails'), toggle = root.querySelector('.rabbit-toggle');
+  assert.equal(trails.hidden, true);
+  toggle.click();
+  assert.equal(trails.hidden, false);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
   assert.equal(trails.querySelectorAll('ol li a').length, 4);
   assert.equal(trails.querySelectorAll('a').length, 4);
-  assert.equal(trails.querySelector('.garden-bunny').getAttribute('aria-hidden'), 'true');
-  assert.equal(trails.querySelector('.rabbit-invitation').getAttribute('aria-hidden'), 'true');
   assert.equal(trails.querySelector('a[href*="issues"]'), null);
+  toggle.click();
+  assert.equal(trails.hidden, true);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+});
+
+test('bug pathway explains reporting and contributor onboarding without submitting', async t => {
+  const f = await fixture(t), { root } = f;
+  const info = root.querySelector('.issue-info'), toggle = root.querySelector('.issue-info-toggle');
+  assert.ok(root.querySelector('.starters').contains(root.querySelector('.report-issue')));
+  assert.equal(info.hidden, true);
+  toggle.click();
+  assert.equal(info.hidden, false);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  assert.match(info.textContent, /publicly includes your GitHub handle and payout address/);
+  assert.ok(info.querySelector('a[href*="bug-report.yml"]'));
+  assert.ok(info.querySelector('a[href*="whitelist-request.yml"]'));
+  assert.equal(f.calls.length, 0);
 });
 
 test('greeting is dismissible; opening and closing does not fetch or alter radio', async t => {
@@ -247,7 +264,7 @@ test('community routes draft editable questions without sending, signing, or con
   assert.match(root.querySelector('textarea').value, /not a coder/);
   assert.match(root.querySelector('.status').textContent, /not sent/);
   assert.equal(root.querySelector('textarea').disabled, true);
-  assert.equal(root.querySelector('.paths').open, false);
+  assert.equal(root.querySelector('.paths').querySelectorAll('[data-starter]').length, 7);
   assert.equal(root.activeElement, root.querySelector('input'));
   assert.equal(root.querySelector('.transcript').children.length, 0);
   assert.equal(f.calls.length, 0);
@@ -259,6 +276,7 @@ test('portrait welcome and illustrated paths preserve readable accessible names'
   const { root } = await fixture(t);
   assert.doesNotMatch(root.querySelector('.launcher').textContent, /friendly signal/i);
   assert.equal(root.querySelector('.hello').textContent, 'How can I help you, Earthling?');
+  assert.equal(root.querySelector('.paths h3').textContent, 'Pick a quick pathway ...');
   assert.match(root.querySelector('.greeting').textContent, /How can I help you, Earthling\?/);
   assert.match(root.querySelector('.portrait-port img').alt, /DBusker/);
   for (const route of root.querySelectorAll('[data-starter]')) {
@@ -271,6 +289,9 @@ test('mode selection defaults to Balanced and changes only the compute explanati
   const { root, window, calls } = await fixture(t);
   const mode = root.querySelector('#dbusker-mode');
   assert.ok(root.querySelector('form').contains(mode));
+  assert.equal(root.querySelector('textarea').placeholder, 'Your question');
+  assert.ok(root.querySelector('form').contains(root.querySelector('.privacy-info')));
+  assert.match(root.querySelector('.mode-label').title, /Efficient.*Deep dive/);
   assert.equal(mode.value, 'balanced');
   assert.deepEqual([...mode.options].map(option => option.value), ['efficient', 'balanced', 'deep']);
   mode.value = 'efficient';
@@ -532,7 +553,7 @@ test('usage is private UI data and an exchange is shared only after a deliberate
   root.querySelector('.signin').click();
   await new Promise(resolve => window.setTimeout(resolve, 10));
   assert.match(root.querySelector('.usage-note').textContent, /2 provider passes.*123 in \/ 45 out/);
-  assert.match(root.querySelector('.handoff').textContent, /Read-only Base evidence enabled/);
+  assert.equal(root.querySelector('.handoff'), null);
   root.querySelector('textarea').value = 'PRIVATE question';
   root.querySelector('form').dispatchEvent(new window.Event('submit', { cancelable: true }));
   await new Promise(resolve => window.setTimeout(resolve, 10));
