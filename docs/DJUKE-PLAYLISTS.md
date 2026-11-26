@@ -303,17 +303,24 @@ native value/cost before payment and the replacement contracts reject it too.
 Funding details belong only in Admin. Legacy v0.4 checkout must continue disclosing
 its real charge until cutover, and historical receipts retain their original terms.
 
-Launch funding is **manual top-ups with admin alerts**. Keep
+Launch funding is **manual admin top-ups from a gas gauge**. Keep
 `WORKER_RESERVE_ENABLED` unset/false; no reserve key is required for sponsored
-quotes. No keys, transfers, contract deployment or production financial cutover
-are authorized by the funding policy. The connected admin sees worker funding
-warnings in Admin and the left ankh/Admin action count, without overwriting
-live-booking actions. The monitor reads the active contract's `gasWorker()` on
-Base every minute while the page is visible; it is not an offline Discord/email
-notification. An unavailable balance is an action, never a healthy result.
-Wallet disconnect/change invalidates in-flight reads.
+quotes. No keys, automatic transfers, contract deployment or production
+financial cutover are authorized by the funding policy. The connected admin sees
+a semicircle worker gas gauge under the ✕ of the Admin Community Calendar. It is
+red and blinking when low, amber below one tank, green when full, and shows 2×,
+3×… at its base when holding several tanks. There is no menu badge or Admin
+section. The gauge reads the active contract's `gasWorker()` balance on Base
+when the calendar opens and every minute while the calendar or top-up dialog is
+open and the page is visible; it is not an offline Discord/email notification.
+An unavailable balance shows a grey "unavailable" gauge, never a healthy result.
+Wallet disconnect/change invalidates in-flight reads. Clicking the gauge opens a
+top-up dialog: Fill, 2×, 3×, 5× or a custom amount, capped at 0.1 ETH per send
+as a typo guard. Each send re-reads `gasWorker()` and stops if the address
+changed, switches to Base, checks the signer is an admin, then waits for the
+admin to confirm the ETH transfer in their wallet.
 
-For v0.5, warn below **0.002 ETH**, suggest a **0.003 ETH** target, and pause
+For v0.5, warn below **0.002 ETH**, use a **0.003 ETH** tank, and pause
 sponsored quotes below **0.001 ETH** or when twice the estimated execution
 budget exceeds the balance. This is an early warning, not a promise of capacity
 for all outstanding purchases. Top up only the verified worker with ETH on Base.

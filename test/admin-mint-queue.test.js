@@ -296,11 +296,10 @@ test('Admin reuses the header signer, checks roles without reconnecting, and cle
   assert.equal(context.getSigner(), null);
 });
 
-test('admin section order, identity and worker notice stay scoped to their requested sections', () => {
+test('admin section order and identity stay scoped; worker gas lives on the calendar gauge', () => {
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const admin = html.slice(html.indexOf('id="admin-modal"'), html.indexOf('id="payroll-overlay"'));
-  const ids = ['admin-radio-schedule', 'admin-mint-section', 'admin-live-performance-slot',
-    'admin-devert-campaigns', 'admin-worker-funding', 'admin-role-section'];
+  const ids = ['admin-mint-section', 'admin-live-performance-slot', 'admin-devert-campaigns', 'admin-role-section'];
   const positions = ids.map(id => admin.indexOf(`id="${id}"`));
   assert.ok(positions.every(position => position >= 0));
   assert.deepEqual(positions, [...positions].sort((a, b) => a - b));
@@ -308,9 +307,12 @@ test('admin section order, identity and worker notice stay scoped to their reque
   assert.match(admin, /id="admin-connected-role" hidden>DEFAULT_ADMIN_ROLE/);
   assert.match(admin, /<span>📣 DVert<\/span>/);
   assert.doesNotMatch(admin, /id="admin-mint-section"[^>]*\bopen\b/);
-  assert.ok(admin.indexOf('id="admin-worker-alert"') > admin.indexOf('id="admin-worker-funding"'));
-  assert.ok(admin.indexOf('id="admin-worker-alert"') < admin.indexOf('id="admin-role-section"'));
+  assert.doesNotMatch(admin, /worker-gas|admin-worker-funding|admin-payment-ledger-status/);
   assert.equal((admin.match(/class="admin-tool-section/g) || []).length, 5);
+  const calendar = html.slice(html.indexOf('id="radio-programming-modal"'), html.indexOf('id="admin-modal"'));
+  const header = calendar.slice(0, calendar.indexOf('id="radio-programming-status"'));
+  assert.ok(header.indexOf('id="worker-gas-gauge"') > header.indexOf('id="radio-programming-close-btn"'));
+  assert.ok(calendar.indexOf('id="worker-gas-dialog"') > calendar.indexOf('</dialog>'), 'top-up dialog sits outside the calendar dialog');
   const live = fs.readFileSync(path.join(__dirname, '../js/live-performance-admin.mjs'), 'utf8');
   assert.match(live, /getElementById\('admin-live-performance-slot'\)/);
 });

@@ -269,7 +269,7 @@ test('DJuke replaces operator messaging with a podium, info dialog and decorativ
   assert.match(panel, /id="djuke-earners"/);
   assert.match(panel, /id="djuke-payment-state"[^>]*><\/p>/);
   assert.match(html, /<dialog id="djuke-instructions"/);
-  assert.match(html, /Mint gas comes from your wallet/);
+  assert.doesNotMatch(html, /Mint gas comes from your wallet/);
   assert.doesNotMatch(html, /id="admin-reviewed-album-import"/);
   assert.match(html, /<section id="admin-radio-schedule" class="hidden" aria-label="Radio programming calendar"/);
   assert.match(html, /<details id="admin-role-section"/);

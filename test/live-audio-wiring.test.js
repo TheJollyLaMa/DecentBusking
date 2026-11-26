@@ -912,7 +912,7 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
   }
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /live-performance-admin\.mjs\?v=20261121-typed-review/);
-  assert.match(html, /live-booking-notifications\.mjs\?v=20261117-booking-assets/);
+  assert.match(html, /live-booking-notifications\.mjs\?v=20261126-worker-gas-gauge/);
   assert.match(html, /src="js\/creator-profile\.mjs\?v=20261123-supporter-queue"/);
   assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261124-public-personal"/);
   assert.match(html, /live-performance\.css\?v=20261121-action-status/);
@@ -926,7 +926,7 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
       './js/performer-room.mjs?v=20261117-booking-assets');
   }
   assert.equal(map.imports['./js/live-booking-notifications.mjs?v=20261113-one-action-release'],
-    './js/live-booking-notifications.mjs?v=20261117-booking-assets');
+    './js/live-booking-notifications.mjs?v=20261126-worker-gas-gauge');
   assert.equal(map.imports['./js/radio-schedule-ui.mjs?v=20261025-community-reminder'],
     './js/radio-schedule-ui.mjs?v=20261124-public-personal');
   assert.equal(map.imports['./js/fund-display.mjs?v=20261024-djuke-labels'],

@@ -75,7 +75,6 @@ function startNotifications() {
  let generation = 0;
  let timer;
  let queued = false;
- let workerAction = null;
  const observed = new WeakSet();
  const actions = () => {
   const pending = new Set((state.bookings || []).filter(b =>
@@ -88,7 +87,7 @@ function startNotifications() {
  const update = () => {
   queued = false;
   const counts = actions();
-  const adminCount = counts.admin.length + (isAdminWallet() && workerAction ? 1 : 0);
+  const adminCount = counts.admin.length;
   const visit = root => {
    if (!observed.has(root)) {
     observed.add(root);
@@ -157,7 +156,6 @@ function startNotifications() {
   }
  }
  document.addEventListener('live-booking-state-updated', event => { state = event.detail.state; scheduleUpdate(); });
- document.addEventListener('worker-gas-state-updated', event => { workerAction = event.detail?.action || null; scheduleUpdate(); });
  document.addEventListener('wallet-connected', reset);
  document.addEventListener('wallet-disconnected', reset);
  document.addEventListener('live-booking-acknowledged', refresh);
