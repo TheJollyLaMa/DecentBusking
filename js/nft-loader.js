@@ -1,5 +1,6 @@
 const CACHE_TTL_MS = 60 * 60 * 1000;
 import { dmtvExperienceVideo } from './dmtv.mjs';
+import { memberships, catalogAlbums } from './release-albums.mjs';
 
 export function audioCid(value) {
   return String(value || '').match(/^ipfs:\/\/(?:ipfs\/)?([^/?#]+)/)?.[1] || String(value || '').match(/\/ipfs\/([^/?#]+)/)?.[1] || '';
@@ -71,7 +72,7 @@ export function nftMatchesQuery(nft, query = '') {
   const terms = Array.isArray(query) ? query : nftSearchTerms(query);
   if (!terms.length) return true;
   const text = searchText([nft?.name, nft?.title, nftArtistLabel(nft || {}), nft?.artistName, nft?.uploader,
-    nft?.artist, nft?.creator, nft?.djukeAlbumTitle, nft?.tokenId].filter(value => value != null && value !== '').join(' '));
+    nft?.artist, nft?.creator, nft?.djukeAlbumTitle, ...memberships(nft).map(m => m.album), nft?.tokenId].filter(value => value != null && value !== '').join(' '));
   return terms.every(term => text.includes(term));
 }
 
@@ -92,8 +93,9 @@ export function nftCatalogPage(nfts, { query = '', artist = '', wallet = '', bef
   }).sort((a, b) => (Date.parse(b.mintedAt) || 0) - (Date.parse(a.mintedAt) || 0) || b.tokenId - a.tokenId ||
     a.contractAddress.localeCompare(b.contractAddress));
   const page = catalogPage(matching, paging);
+  const albums = catalogAlbums(matching);
   return { nfts: page.items.map(nft => ({ ...nft, nftId: nftIdentity(nft) })),
-    total: page.total, nextOffset: page.nextOffset, artists };
+    total: page.total, nextOffset: page.nextOffset, artists, ...(albums.length ? { albums } : {}) };
 }
 
 export async function fetchNftCatalogPage({ config, offset = 0, query = '', artist = '', before = '', after = '',

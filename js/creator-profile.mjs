@@ -1136,6 +1136,23 @@ export function initCreatorProfile() {
 
     } finally { publicProvider.destroy(); }
   };
+  const albumShelf = dialog.querySelector('[data-release-profile]');
+  const loadAlbumShelf = async () => {
+    if (!albumShelf?.open || !address) return;
+    const target = address, check = revision, items = albumShelf.querySelector('[data-release-profile-items]');
+    items.textContent = 'Loading published albums…';
+    try {
+      const response = await fetch(`${service()}/api/nfts?${new URLSearchParams({ wallet: target, limit: 1 })}`, { signal: AbortSignal.timeout(15000) });
+      if (!response.ok) throw Error(`Catalog returned ${response.status}`);
+      const { albums = [] } = await response.json();
+      const { albumButton } = await import('./release-album-card.mjs');
+      if (check !== revision) return;
+      const own = albums.filter(m => m.wallet === target.toLowerCase());
+      items.replaceChildren(...own.map(albumButton));
+      if (!own.length) items.textContent = 'No published release albums yet.';
+    } catch (error) { if (check === revision) items.textContent = `Could not load albums: ${error.message}`; }
+  };
+  albumShelf?.addEventListener('toggle', loadAlbumShelf);
   const open = async detail => {
     const target = detail?.address || window._wallet?.address;
     if (!/^0x[0-9a-fA-F]{40}$/.test(target || '')) { message('Connect your wallet in the page header'); if (!dialog.open) dialog.showModal(); return; }
@@ -1164,6 +1181,7 @@ export function initCreatorProfile() {
     clearDiscordLinkTimers();
     discordLinkExpiryAt = 0;
     const check = ++revision;
+    void loadAlbumShelf();
     feeSpotlight.replaceChildren();
     feeSpotlight.hidden = true;
     livePerformances.hidden = false;

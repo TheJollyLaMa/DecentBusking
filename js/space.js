@@ -23,6 +23,7 @@
 //   • OrbitControls  (from three@0.128.0 examples)
 
 import { renderNFTCard } from './nft-card.js?v=20261118-artist-artwork';
+import { openReleaseAlbum } from './release-album-card.mjs';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 import { setNowPlaying } from './stage.js?v=20261030-ad-cutoff';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
@@ -997,7 +998,7 @@ async function _runSceneSearch(query) {
     _sceneSearchRetries = 0;
     const artists = matchCatalogArtists(page.artists, query);
     const songs = page.nfts.filter(isMusicNft);
-    _renderSceneSearch({ query, artists, songs, total: page.total });
+    _renderSceneSearch({ query, artists, songs, albums: page.albums || [], total: page.total });
     const auto = autoHighlightArtist(artists, query);
     if (auto) {
       if (auto.value !== _highlightArtist) void _highlightArtistSongs(auto);
@@ -1063,6 +1064,10 @@ function _renderSceneSearch(result) {
           artist.value === _highlightArtist ? 'Latest 10 lit up' : `Light up latest ${ARTIST_HIGHLIGHT_LIMIT}`);
       }
     }
+    if (result.albums?.length) {
+      addHeading('Albums');
+      for (const release of result.albums) addOption({ type: 'album', release }, release.album, 'Open album card');
+    }
     if (result.songs.length) {
       addHeading(result.total > result.songs.length ? `Songs (${result.songs.length} of ${result.total})` : 'Songs');
       for (const nft of result.songs) addOption({ type: 'song', nft }, nft.name || `Token #${nft.tokenId}`, nftArtistLabel(nft));
@@ -1099,6 +1104,8 @@ function _chooseSceneSearchOption(option) {
   _setSceneSearchOpen(false);
   if (option.type === 'artist') {
     void _highlightArtistSongs(option.artist);
+  } else if (option.type === 'album') {
+    void openReleaseAlbum(option.release);
   } else {
     _flyToSearchSong(option.nft);
   }

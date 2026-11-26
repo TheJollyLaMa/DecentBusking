@@ -812,6 +812,7 @@ function _setRadioScheduleStatus(message, isError = false) {
       name: track.title,
       description: `Shared through DecentJukebox by ${track.uploader}`,
       animation_url: `ipfs://${track.ipfsCid}`,
+      ...(track.releaseAlbums?.length ? { releaseAlbums: track.releaseAlbums } : {}),
       audioUrl: `ipfs://${track.ipfsCid}`,
       ...(track.mediaType ? { mediaType: track.mediaType } : {}),
       ...(track.mediaType === 'video/mp4' ? { videoUrl: `ipfs://${track.ipfsCid}` } : {}),
