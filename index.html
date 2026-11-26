@@ -24,7 +24,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261126-pinner-dashboard" />
+  <link rel="stylesheet" href="css/styles.css?v=20261126-playback-help" />
   <link rel="stylesheet" href="css/dmtv.css?v=20261118-dmtv-escrow" />
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth" />
   <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback" />
@@ -88,7 +88,7 @@
       "./js/fund-guide.mjs?v=20261124-fund-bunny-keys":"./js/fund-guide.mjs?v=20261125-pinner-rewards",
       "./js/referral-campaign-editor.mjs?v=20261126-eth-gifts":"./js/referral-campaign-editor.mjs?v=20261126-referral-match",
       "./js/referral-campaign-editor.mjs?v=20261124-admin-funds":"./js/referral-campaign-editor.mjs?v=20261126-referral-match",
-      "./js/fund-header.mjs?v=20261124-visible-payments":"./js/fund-header.mjs?v=20261124-fund-bunny-keys",
+      "./js/fund-header.mjs?v=20261124-visible-payments":"./js/fund-header.mjs?v=20261126-playback-help",
       "./js/fund-contribution.mjs":"./js/fund-contribution.mjs?v=20261124-admin-funds",
       "./js/fund-contribution.mjs?v=20261124-verified-funds":"./js/fund-contribution.mjs?v=20261124-admin-funds",
       "./js/fund-contribution.mjs?v=20261124-fund-bunny":"./js/fund-contribution.mjs?v=20261124-admin-funds",
@@ -420,8 +420,13 @@
         <div class="fund-breakdown-titlebar">
           <h3 id="fund-breakdown-title">Fund breakdown</h3>
           <details class="fund-payment-info">
-            <summary aria-label="About pending fund payments">i</summary>
-            <p class="fund-pending-notice">Payments are marked Pending because rankings and estimated amounts change with votes, plays, and funding throughout the week. They freeze at Sunday/Monday midnight in New York (America/New_York). Frozen allocations still await payment; only confirmed transactions are recorded on-chain.</p>
+            <summary aria-label="How weekly fund payouts work">i</summary>
+            <p class="fund-pending-notice" data-payment-info="dbusk-top10">Payments are marked Pending because rankings and estimated amounts change with votes, plays, and funding throughout the week. They freeze at Sunday/Monday midnight in New York (America/New_York). Frozen allocations still await payment; only confirmed transactions are recorded on-chain.</p>
+            <section class="fund-pending-notice" data-payment-info="dbusk-playback" aria-label="How Playback Fund payouts work" tabindex="0" hidden>
+              <p><strong>Airplay earns a share, not uploads.</strong> Each time the radio airs at least 30 audible seconds of a recording, it counts as one play. Minting a song or listing it on two albums adds no plays. Votes can change the shuffle order, and shows or DJuke requests can give a song more airtime. Only the airings count.</p>
+              <p><strong>Your share of plays is your share of the weekly pot.</strong> If your songs get 20 of the station’s 100 qualifying plays, they earn 20% of the pot: 20 USDC from a 100 USDC pot, before collaborator splits. Adding unplayed songs does not reduce anyone’s share.</p>
+              <p><strong>When does it settle?</strong> Estimates freeze at midnight Sunday into Monday, New York time. The pot uses the fund’s USDC not already reserved for earlier weeks. Song splits are applied and earnings are added up by wallet. Shares below 0.01 USDC or without a linked wallet at cutoff stay in the fund. A frozen share is not a payment; confirmed payouts appear below after the owner pays.</p>
+            </section>
           </details>
         </div>
         <button id="fund-us-button" type="button"><span aria-hidden="true">⚸ ✨</span> Fund Us <span aria-hidden="true">✨ ⚸</span></button>
@@ -970,19 +975,46 @@
       <h2 id="radio-history-title">Playback Tally</h2>
       <button id="radio-history-close" type="button" aria-label="Close playback tally">✕</button>
     </header>
-    <p class="radio-history-note">Completed Discord plays with at least 30 audible seconds · New York payout weeks</p>
-    <div class="radio-history-toolbar">
-      <label class="radio-history-search-label">Search <input id="radio-history-search" type="search" placeholder="Songs, artists or adverts" autocomplete="off" /></label>
-      <label>Show <select id="radio-history-view">
-        <option value="">Everything</option>
-        <option value="songs">Songs</option>
-        <option value="artists">Artists</option>
-        <option value="adverts">Adverts</option>
-        <option value="funding">Funding estimates</option>
+    <div class="playback-nav">
+      <span id="radio-history-context" class="radio-history-note"></span>
+      <label><span class="sr-only">Tally view</span><select id="radio-history-view">
+        <option value="trends">Airplay trends</option>
+        <option value="songs">Song totals</option>
+        <option value="artists">Artist totals</option>
+        <option value="adverts">Advert totals</option>
+        <option value="funding" hidden>My funding estimates</option>
       </select></label>
+    </div>
+    <section id="playback-explorer" aria-label="Airplay trends" hidden>
+      <div class="playback-controls">
+        <label>Show<select id="playback-scope">
+          <option value="all">Station mix</option><option value="songs">Choose songs</option>
+          <option value="album">Album</option><option value="artist">Artist / wallet</option>
+        </select></label>
+        <label>Measure<select id="playback-metric"><option value="plays">Radio plays</option><option value="votes">Net votes</option></select></label>
+        <label>Period<select id="playback-range">
+          <option value="daily">Daily</option><option value="4">4 weeks</option><option value="8" selected>8 weeks</option>
+          <option value="12">12 weeks</option><option value="monthly">Monthly</option><option value="all-time">All time</option>
+        </select></label>
+      </div>
+      <label id="playback-subject-label" hidden><span id="playback-subject-name"></span><select id="playback-subject"></select></label>
+      <details id="playback-picker" hidden>
+        <summary id="playback-selection">Select songs</summary>
+        <input type="search" id="playback-search" aria-label="Find songs to include" placeholder="Find a song or artist…" autocomplete="off">
+        <div id="playback-options" role="group" aria-label="Songs to include"></div>
+      </details>
+      <div id="playback-output"></div>
+      <details class="playback-help"><summary>How to read this</summary>
+        <p>One airing with at least 30 audible seconds counts as one play, not one listener. The finish time sets its New York date. Daily shows 14 days; Monthly shows 12 calendar months. Weeks start Monday. Net votes are upvotes minus downvotes; Discord changes count when observed.</p>
+        <p>A dash means no dated history, not zero. A striped bar is partial or still counting. Older whole weeks count toward a month only if they fit inside it. All time shows lifetime totals and rankings, including older Discord counts; its bars span the available dated weeks.</p>
+        <p>A song counts once in a group, even when it appears on two albums.</p>
+      </details>
+    </section>
+    <div class="radio-history-toolbar" id="radio-history-snapshot" hidden>
+      <label class="radio-history-search-label">Search <input id="radio-history-search" type="search" placeholder="Songs, artists or adverts" autocomplete="off" /></label>
       <label>Period <select id="radio-history-week"></select></label>
     </div>
-    <details class="radio-history-more-filters">
+    <details class="radio-history-more-filters" id="radio-history-extra" hidden>
       <summary>More filters</summary>
       <div class="radio-history-filters">
         <label>Artist <select id="radio-history-artist"><option value="">All artists</option></select></label>
@@ -991,7 +1023,7 @@
       </div>
     </details>
     <section id="radio-history-rewards" aria-label="Current weekly funding and provisional artist shares" hidden></section>
-    <div id="radio-history-content" aria-live="polite">Loading playback tally…</div>
+    <div id="radio-history-content" aria-live="polite"></div>
   </dialog>
 
   <dialog id="radio-schedule-dialog" aria-labelledby="radio-schedule-title">
@@ -1384,10 +1416,11 @@
 
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
   <script type="module" src="js/payroll.js?v=20261126-pinner-dashboard"></script>
-  <script type="module" src="js/radio-history.js?v=20261029-tally-sections"></script>
+  <link rel="stylesheet" href="css/playback-trends.css?v=20261126">
+  <script type="module" src="js/radio-history.js?v=20261126-airplay-trends"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261124-public-personal"></script>
   <link rel="stylesheet" href="css/fund-tour.css?v=20261124-fund-bunny">
-  <script type="module" src="js/fund-header.mjs?v=20261124-fund-bunny-keys"></script>
+  <script type="module" src="js/fund-header.mjs?v=20261126-playback-help"></script>
   <script type="module" src="js/fund-tour.mjs?v=20261124-visible-payments"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261123-song-splits"></script>
   <script type="module" src="js/djuke.mjs?v=20261112-playlist-continuity"></script>

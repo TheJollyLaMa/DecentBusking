@@ -65,13 +65,21 @@ test('all pending payments display directly without a dropdown', async () => {
     assert.equal((html.match(/class="fund-pending-row"/g) || []).length, 10);
     assert.doesNotMatch(html, /<details|more pending payments/);
   }
+});
+
+test('the existing fund info disclosure separates airplay shares from pending chart prizes', () => {
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /Payments are marked Pending because/);
-  assert.match(html, /Sunday\/Monday midnight in New York/);
-  assert.match(html, /Frozen allocations still await payment/);
-  assert.match(html, /<details class="fund-payment-info">\s*<summary aria-label="About pending fund payments">i<\/summary>\s*<p class="fund-pending-notice">/);
-  assert.equal((html.match(/class="fund-pending-notice"/g) || []).length, 1);
-  assert.doesNotMatch(html, /<details class="fund-payment-info" open/);
+  const info = html.match(/<details class="fund-payment-info">([\s\S]*?)<\/details>/)?.[1];
+  assert.ok(info, 'fund information is collapsed by default');
+  assert.match(info, /<summary aria-label="[^"]+">i<\/summary>/);
+  const playback = info.match(/data-payment-info="dbusk-playback"[^>]*>([\s\S]*?)<\/section>/)?.[1];
+  assert.match(playback, /30 audible seconds/);
+  assert.match(playback, /20 USDC from a 100 USDC pot, before collaborator splits/);
+  assert.match(playback, /Adding unplayed songs does not reduce anyone’s share/);
+  const top = info.match(/data-payment-info="dbusk-top10"[^>]*>([\s\S]*?)<\/p>/)?.[1];
+  assert.match(top, /rankings and estimated amounts change with votes/);
+  assert.match(top, /Frozen allocations still await payment/);
+  assert.doesNotMatch(top, /30 audible seconds/);
 });
 
 test('archive markup distinguishes scheduled and paid amounts and surfaces unmatched payments', async () => {

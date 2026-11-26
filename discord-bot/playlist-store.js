@@ -16,7 +16,8 @@ import { randomUUID } from 'node:crypto';
 import { isEligibleRadioMusic } from '../js/radio-playlists.mjs';
 import { recordingDurationProof, recordingSampleRangeProof, recordingMediaIdentity, recordingDurationReason,
   expectedRecordingMs, radioCompletionDiagnostics } from '../js/radio-duration.mjs';
-import { currentPayrollPeriod, payrollPeriodFromKey, payrollPeriods } from '../js/payroll-week.mjs';
+import { currentPayrollPeriod, newYorkDay, payrollPeriodFromKey, payrollPeriods } from '../js/payroll-week.mjs';
+import { countDatedAirplay, seedDatedAirplay } from './airplay-calendar.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STORE_PATH = process.env.JUKELOOP_PLAYLIST_PATH || join(__dirname, 'jukeloop-playlist.json');
@@ -70,6 +71,20 @@ export function configureContentOverlay(overlay) {
 export function getPlaybackPlaylist() {
   return _playlist.map(_contentOverlay);
 }
+
+// Catalog metadata is sent once per dashboard request, not repeated in every payroll week.
+export function buildRadioHistoryCatalog(playlist, { wallet } = {}) {
+  return playlist.filter(track => isEligibleRadioMusic(track) &&
+    (!wallet || track.mintRecipient?.toLowerCase() === wallet.toLowerCase())).map(track => {
+    const legacy = (track.albums || []).filter(name => typeof name === 'string')
+      .map(name => name.trim().replace(/^Jones(?:Drive|Dr)Sessions_([A-Z]{2})$/, 'Jones Dr Sessions $1'));
+    const names = [...(track.releaseAlbums || []).map(entry => entry?.album), ...legacy, track.albumTitle]
+      .filter(name => typeof name === 'string' && name.trim())
+      .map(name => name.trim());
+    return { trackId: track.trackId, title: track.title, artist: track.uploader, wallet: track.mintRecipient || null,
+      albums: [...new Set(names)] };
+  });
+}
 let _remoteSaver = null;
 let _remoteScheduler = null;
 let _remoteFlusher = null;
@@ -90,11 +105,17 @@ function _normalizePlaylist(playlist) {
 }
 
 /** Load the playlist from a restored snapshot or the local runtime cache. */
-export function loadPlaylist(restoredPlaylist = null) {
+export function loadPlaylist(restoredPlaylist = null, { journal = [], now = Date.now() } = {}) {
   _pendingRadioReleases.clear();
   _pendingHistoryEvents = [];
+  const trackingStart = new Date(now).toISOString();
+  function load(tracks, events) {
+    _playlist = _normalizePlaylist(tracks);
+    if (events?.length) seedDatedAirplay(_playlist, events);
+    for (const track of _playlist) track.airplayTrackingSince ||= trackingStart;
+  }
   if (Array.isArray(restoredPlaylist)) {
-    _playlist = _normalizePlaylist(restoredPlaylist);
+    load(restoredPlaylist, journal);
     console.log(`[playlist-store] Restored ${_playlist.length} track(s) from IPFS`);
     try {
       writeFileSync(STORE_PATH, JSON.stringify(_playlist, null, 2), 'utf8');
@@ -104,7 +125,7 @@ export function loadPlaylist(restoredPlaylist = null) {
   } else if (existsSync(STORE_PATH)) {
     try {
       const raw = readFileSync(STORE_PATH, 'utf8');
-      _playlist = _normalizePlaylist(JSON.parse(raw));
+      load(JSON.parse(raw));
       console.log(`[playlist-store] Loaded ${_playlist.length} track(s) from ${STORE_PATH}`);
     } catch (err) {
       console.error('[playlist-store] Failed to parse playlist file, starting empty:', err.message);
@@ -132,7 +153,11 @@ export function waitForRemotePersistence() {
 function _save({ routine = false, events = [] } = {}) {
   events = [..._pendingHistoryEvents, ...events];
   _pendingHistoryEvents = [];
-  for (const track of _playlist) track.payrollTrackingStartedAt ||= new Date().toISOString();
+  const timestamp = new Date().toISOString();
+  for (const track of _playlist) {
+    track.payrollTrackingStartedAt ||= timestamp;
+    track.airplayTrackingSince ||= timestamp;
+  }
   try {
     writeFileSync(STORE_PATH, JSON.stringify(_playlist, null, 2), 'utf8');
   } catch (err) {
@@ -695,6 +720,7 @@ export function applyRating(trackId, newLikes, newDislikes, messageId, { initial
     const payrollWeek = currentPayrollPeriod(now).week;
     track.payrollVotes ||= {};
     track.payrollVotes[payrollWeek] = (track.payrollVotes[payrollWeek] || 0) + delta;
+    countDatedAirplay(track, newYorkDay(now), 'votes', delta);
   }
   track.likes = Math.max(0, (track.likes || 0) + (legacy ? 0 : likes - (previous?.likes || 0)));
   track.dislikes = Math.max(0, (track.dislikes || 0) + (legacy ? 0 : dislikes - (previous?.dislikes || 0)));
@@ -723,6 +749,7 @@ export function applySiteVote(trackId, vote, { now = Date.now() } = {}) {
   const payrollWeek = currentPayrollPeriod(now).week;
   track.payrollVotes ||= {};
   track.payrollVotes[payrollWeek] = (track.payrollVotes[payrollWeek] || 0) + vote;
+  countDatedAirplay(track, newYorkDay(now), 'votes', vote);
   _save({ routine: true, events: [{ id: randomUUID(), type: 'vote', source: 'site', trackId, vote,
     observedAt: new Date(now).toISOString(), occurredAt: new Date(now).toISOString() }] });
   return track;
@@ -797,6 +824,7 @@ export function recordAudiblePlay(trackId, { playId, startedAt, endedAt, audible
   const payrollWeek = currentPayrollPeriod(endedAt).week;
   track.payrollPlays ||= {};
   track.payrollPlays[payrollWeek] = (track.payrollPlays[payrollWeek] || 0) + 1;
+  countDatedAirplay(track, newYorkDay(endedAt), 'plays', 1);
   track.plays = (track.plays || 0) + 1;
   if (announcementId) track.audibleMessageIds = [...new Set([...(track.audibleMessageIds || []), announcementId])].slice(-5000);
   track.weeklyPlayIds[week].push(playId);

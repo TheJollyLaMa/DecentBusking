@@ -112,6 +112,11 @@ opened, then each selected week's income, actual payouts and frozen allocation
 receipts on demand. Funding-only weeks are included. BaseScan links remain
 available for both income and payouts; an allocation is not proof of payment.
 
+Open **Playback fund → ⓘ** for the weekly share calculation. For example, 20 of
+the station’s 100 qualifying plays earn 20% of the unreserved pot before song
+splits. The denominator is plays, not uploads, NFT mints, album listings or votes.
+The Top 10 pill has separate help for its pending prizes.
+
 The centered **Fund Us** button and About's matching button open the same
 contribution modal. Opening About no longer fetches the complete ledger or
 resolves its wallets. Fund Us lazily reads the Base router through the shared

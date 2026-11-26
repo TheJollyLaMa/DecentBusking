@@ -6,6 +6,11 @@ function parts(epoch) {
   return Object.fromEntries(formatter.formatToParts(new Date(epoch)).filter(part => part.type !== 'literal').map(part => [part.type, Number(part.value)]));
 }
 
+export function newYorkDay(epoch) {
+  const { year, month, day } = parts(epoch);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 function midnight(civil) {
   const target = civil.getTime();
   let epoch = target;

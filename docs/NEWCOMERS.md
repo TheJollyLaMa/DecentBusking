@@ -109,7 +109,7 @@ Click **Archive** near the upper-right of the music space for the song list, or 
 
 The **hat** opens the tip form. A tip is a real wallet payment, not a free interaction. Check the destination, token, amount, network, and wallet fees before confirming. You do not need to send a tip to keep exploring.
 
-The **Left Ankh** at the top opens the public **Playback Tally**. This is the whole station's activity, not just your songs. Admin and Payroll entries are owner tools; ordinary listeners do not need them.
+The **Left Ankh → Playback Tally** opens the station’s weekly airplay chart. Use **Show** to choose individual songs, a group, an album, or an artist/wallet. Switch between plays and net votes; tap or focus a bar for its exact value. Open **Song ranking** to sort least or most first and pick a song to graph. These are station airings, not unique listeners.
 
 **You have reached this step when:** you can tell the difference between an archive song, the live radio, and the public tally.
 
@@ -155,9 +155,13 @@ You can request that we stop future playlist playback or unpin our copy; that do
 1. Connect the **same artist wallet used to receive your music NFT**.
 2. Click the **Right Ankh** at the top-right of the title.
 3. Choose **My Playbacks**. This opens **My Playback Tally**, filtered to the connected artist wallet.
-4. Start with **All Time**, then choose a UTC week to inspect qualified weekly plays. Use song, artist, and upload-date filters to narrow the list.
+4. Start with **My songs**, then use **Choose songs** or **Album** to narrow the graph. Both **My Playbacks** and the public **Playback Tally** have the same **Period** filter: **Daily** (14 days), **4 / 8 / 12 weeks**, **Monthly** (12 months), or **All time**. Switching periods keeps your selection. A song in two albums still counts once.
 
-The song rows show **Plays**, **Likes**, and **Dislikes**. Those like/dislike columns are lifetime totals even when you select a week. Playback payroll uses qualified weekly plays; Top 10 prize calculations separately use new weekly net-vote buckets. Weekly buckets start fresh on Monday UTC while lifetime totals remain.
+Dates use New York time. An airing counts on the date it **finishes** after at least 30 audible seconds. Weeks start Monday. A dash means no dated history, not zero; a striped bar is partial or in progress. Older weekly totals count toward a month only when the entire week fits. Net votes reflect site votes and observed Discord reaction changes, not a listener count.
+
+Daily history starts with the retained checkpoint’s dated events and fills in as the station plays. Opening the chart does not scan old archives or use start times to guess missing finishes.
+
+**All time** shows the lifetime count and song ranking, including older Discord activity. The bars beneath it span all available dated weeks; they need not add up to the lifetime count. **Song totals** still shows lifetime likes and dislikes. **My funding estimates** is a separate view, not a playback metric or a payment receipt.
 
 **You have reached this step when:** you can find your own song and distinguish its lifetime activity from the selected week's qualified plays. If the list is empty, check the wallet, the date/search filters, and **All Time** first. Counts are not a withdrawable balance; owner-reviewed payments need a funded budget.
 

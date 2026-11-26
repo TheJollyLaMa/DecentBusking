@@ -3755,6 +3755,9 @@ decent-foot {
 .fund-payment-info > summary:hover, .fund-payment-info[open] > summary { background: #4b3567; }
 .fund-payment-info > summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 .fund-payment-info .fund-pending-notice { position: absolute; top: 100%; left: 0; z-index: 3; width: min(380px, 100%); box-sizing: border-box; margin: 8px 0 0; padding: 12px; border: 1px solid var(--panel-border); border-radius: 8px; background: #141720; box-shadow: 0 8px 22px #0009; }
+.fund-payment-info section.fund-pending-notice { width: min(46ch, 100%); max-height: 60dvh; overflow-y: auto; overscroll-behavior: contain; font-size: .875rem; }
+.fund-payment-info section p { margin: 0; }
+.fund-payment-info section p + p { margin-top: .7em; }
 #fund-breakdown-close { width: 32px; height: 32px; color: var(--text-primary); background: #141720; border: 1px solid var(--panel-border); border-radius: 4px; }
 #fund-breakdown-summary, #fund-breakdown-note { margin: 0 0 10px; color: var(--text-dim); font-size: .82rem; line-height: 1.4; overflow-wrap: anywhere; }
 #fund-breakdown-summary { display: block; }

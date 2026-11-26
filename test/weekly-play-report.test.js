@@ -89,6 +89,46 @@ test('New York payout buckets roll four hours after UTC midnight without deletin
   assert.equal(store.getWeeklyPlayReport('2026-W42').totalPlays, 2);
 });
 
+test('dated airplay survives restore, counts finishes across midnight and both DST hours, never backdates legacy votes', async t => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'jukeloop-calendar-'));
+  process.env.JUKELOOP_PLAYLIST_PATH = path.join(temp, 'playlist.json');
+  t.after(() => { delete process.env.JUKELOOP_PLAYLIST_PATH; fs.rmSync(temp, { recursive: true, force: true }); });
+  const store = await import(`${storeModule}?calendar`);
+  const { buildAirplayCalendar } = await import('../discord-bot/airplay-calendar.js');
+  const ended = '2026-10-31T23:59:50-04:00', cutover = Date.parse('2026-11-01T00:00:05-04:00');
+  const saved = { id: 'play:prior', playId: 'prior', type: 'play', trackId: 'song', qualified: true, audibleMs: 30_000, endedAt: ended };
+  const journal = [saved, { ...saved, id: 'repeat' }, { ...saved, playId: 'short', audibleMs: 29999 }];
+  store.loadPlaylist([{ trackId: 'song', title: 'Song', plays: 500, likes: 3, dislikes: 0 },
+    { trackId: 'other', title: 'Other', mintRecipient: 'another', plays: 0 }], { now: cutover, journal });
+  const play = (id, end, duration = 30000) => store.recordAudiblePlay('song', {
+    playId: id, endedAt: Date.parse(end), startedAt: Date.parse(end) - duration, audibleMs: duration,
+  });
+  play('midnight', '2026-11-01T00:00:10-04:00');
+  play('first-hour', '2026-11-01T01:30:00-04:00');
+  play('second-hour', '2026-11-01T01:30:00-05:00');
+  play('short', '2026-11-01T01:31:00-05:00', 29999);
+  play('second-hour', '2026-11-01T01:30:00-05:00');
+  const voteAt = { now: Date.parse('2026-11-02T00:01:00-05:00') };
+  store.applySiteVote('song', -1, voteAt);
+  store.applyRating('song', 0, 2, 'reaction', voteAt);
+  store.applyRating('song', 0, 2, 'reaction', voteAt);
+  store.applyRating('song', 5, 0, 'reconciled', { ...voteAt, weekly: false });
+  store.loadPlaylist(JSON.parse(fs.readFileSync(process.env.JUKELOOP_PLAYLIST_PATH)), { journal, now: cutover });
+  const now = Date.parse('2026-11-04T12:00:00-05:00');
+  const { daily, monthly } = buildAirplayCalendar(store.getPlaylist(), { now });
+  const day = date => daily.find(bucket => bucket.date === date);
+  assert.deepEqual(day('2026-10-31').tracks, [{ trackId: 'song', plays: 1 }]);
+  assert.deepEqual(day('2026-10-31').coverage, { plays: 'partial', votes: 'missing' });
+  assert.deepEqual(day('2026-11-01').tracks, [{ trackId: 'song', plays: 3 }]);
+  assert.equal(day('2026-11-02').tracks[0].votes, -3);
+  assert.equal(day('2026-11-02').coverage.plays, 'tracked'); // no plays on an observed voting day
+  assert.equal(day('2026-11-03').coverage.plays, 'missing');
+  assert.equal(day('2026-11-04').current, true);
+  assert.equal(monthly.at(-2).tracks[0].plays, 1);
+  assert.equal(monthly.at(-1).tracks[0].plays, 3);
+  assert.equal(store.getAllTimePlayReport().totalPlays, 503);
+});
+
 test('first-week track gets one extra spaced slot and consumes its bonus only after qualifying', async (t) => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'jukeloop-boost-'));
   process.env.JUKELOOP_PLAYLIST_PATH = path.join(temp, 'playlist.json');
