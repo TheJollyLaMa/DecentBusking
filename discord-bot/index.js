@@ -124,6 +124,7 @@ import { createSubmissionIntake, buildWalletButtons } from './submission-intake.
 import { mediaTypeFor, normalizeMediaCid, MEDIA_TYPES, DISCORD_UPLOAD_MAX_BYTES, isDiscordAttachmentWithinLimit } from './media.js';
 import { shouldHandleDevertLoopSubmission } from './submission-routing.js';
 import { fetchTrackList, createSession, getSession } from './radio.js';
+import { buildAirplayCalendar } from './airplay-calendar.js';
 import {
   loadPlaylist,
   configureRemotePersistence,
@@ -138,6 +139,7 @@ import {
   getTrackId,
   getPlaylist,
   getPlaybackPlaylist,
+  buildRadioHistoryCatalog,
   configureContentOverlay,
   getMintBacklog,
   getMintRequests,
@@ -2474,6 +2476,14 @@ async function main() {
     },
     getDevertLoopState: () => _devertLoopWorker?.getState() || { ready: false, nowPlaying: null, voiceConnected: false },
     onDevertLoopVote: payload => _devertLoopWorker ? _devertLoopWorker.submitVote(payload) : Promise.reject(new Error('VertLoop is not ready')),
+    getAirplayCalendar: options => {
+      if (!playlistReady) throw new Error('Radio history is still loading');
+      return buildAirplayCalendar(getPlaylist(), options);
+    },
+    getRadioHistoryCatalog: options => {
+      if (!playlistReady) throw new Error('Radio catalog is still loading');
+      return buildRadioHistoryCatalog(getPlaybackPlaylist(), options);
+    },
     getRadioHistory: async ({ weeks, wallet, includeAllTime, calendar }) => {
       const reports = getWeeklyPlayHistory({ weeks, wallet, includeAllTime, calendar });
       if (wallet || calendar !== 'new-york') return reports;
@@ -2606,7 +2616,7 @@ async function main() {
     });
     restoredPlaylist = recovery.playlist;
     if (recovery.recovered) console.log(`[playlist-recovery] Restored approved 2026-10-15 22:33:36 baseline; checkpoint ${recovery.uri}.`);
-    loadPlaylist(restoredPlaylist);
+    loadPlaylist(restoredPlaylist, { journal: recovery.recovered ? [] : stateStore.getLatestDayEvents() });
     configureRemotePersistence(stateStore.save, { schedule: stateStore.schedule, flush: stateStore.flush });
     const payrollRecoveryCids = restoredPlaylist.some(track => track.playlistBaselineCid)
       ? [] : (process.env.JUKELOOP_PAYROLL_RECOVERY_CID || PAYROLL_RECOVERY_CIDS.join(','))

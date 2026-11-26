@@ -615,6 +615,7 @@ export function createPinataStateStore({
   }
 
   return { restore, restoreCid, save, schedule, flush, close,
+    getLatestDayEvents: () => [...(dayEvents.get(latestDay)?.values() || [])].map(entry => entry.event),
     getPersistenceState: () => ({ pending: !!pendingRoutines.size, retentionPending }),
     getLatestSnapshotUri: () => latestSnapshotUri,
     getLatestSnapshotSavedAt: () => latestSnapshotSavedAt };

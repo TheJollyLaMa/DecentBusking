@@ -1,5 +1,6 @@
 // Public totals from the Left Ankh and connected-wallet history from the Right Ankh.
 import { formatUsdcUnits as usdc } from './usdc-format.mjs?v=20261017-mercury-release';
+import { mountPlaybackExplorer } from './playback-trends.mjs';
 
 let dialog;
 let weekSelect;
@@ -15,6 +16,7 @@ let fromInput;
 let toInput;
 let rewardsEl;
 let viewSelect;
+let explorer, explorerEl, historyReady;
 let fundingState = null;
 const openSections = new Map();
 let requestId = 0;
@@ -121,7 +123,7 @@ function renderFunding() {
       : BigInt(second.estimatedPlaybackUnits || '0') < BigInt(first.estimatedPlaybackUnits || '0') ? -1 : first.title.localeCompare(second.title));
   body.append(renderFundingTable(songs.map(song => [song.title, String(song.plays), String(song.votes), `${usdc(song.estimatedPlaybackUnits || '0')} USDC`]),
     ['Song', 'Plays', 'Net votes', 'Est. playback share'], 'radio-history-song-estimates'));
-  body.append(element('p', 'radio-history-note', 'Top 10 prize estimates are per artist wallet, ranked by weekly net votes; they are not per-song playback amounts. All estimates are provisional, not accrued debt or claimable funds. Activity, available funds and earlier commitments can change the result. Owner review and wallet-confirmed payout are required after close. The tally period below is separate.'));
+  body.append(element('p', 'radio-history-note', 'Top 10 ranks songs by weekly net votes. Estimates are not accrued debt or claimable funds. Payments require a funded budget and owner confirmation.'));
   rewardsEl.replaceChildren(details);
 }
 
@@ -162,7 +164,7 @@ function renderWeek() {
   content.append(element('p', 'radio-history-total', countMessage));
   content.append(element('p', 'radio-history-note', allTime
     ? 'All-time plays, likes, and dislikes. Historical plays include legacy Discord announcement counts.'
-    : 'Likes and dislikes are all-time totals; plays are for the selected UTC week.'));
+    : 'Likes and dislikes are all-time totals; plays are for the selected New York week.'));
 
   const artistTotals = new Map();
   for (const track of filtered) {
@@ -254,8 +256,19 @@ function renderWeek() {
 }
 
 function refresh() {
-  renderWeek();
-  renderFunding();
+  const view = viewSelect.value, snapshots = ['songs', 'artists', 'adverts'].includes(view);
+  explorerEl.hidden = !historyReady || view !== 'trends';
+  document.getElementById('radio-history-snapshot').hidden = !historyReady || view === 'trends';
+  document.getElementById('radio-history-extra').hidden = !historyReady || !['songs', 'artists'].includes(view);
+  weekSelect.parentElement.hidden = view === 'funding';
+  rewardsEl.hidden = !historyReady || view !== 'funding' || mode !== 'personal';
+  content.hidden = historyReady && !snapshots;
+  if (!historyReady) return;
+  if (snapshots) renderWeek();
+  if (!rewardsEl.hidden) {
+    if (fundingState) renderFunding();
+    else return loadArtistFunding(window.DecentConfig.ipfsUploadServiceUrl.replace(/\/$/, ''), requestId, wallet);
+  }
 }
 
 async function openHistory(event) {
@@ -264,38 +277,41 @@ async function openHistory(event) {
   wallet = mode === 'personal' ? String(window._wallet?.address || '') : '';
   reports = [];
   fundingState = null;
+  historyReady = false;
+  explorer.clear();
   openSections.clear();
   weekSelect.replaceChildren();
   searchInput.value = '';
   if (viewSelect) {
-    viewSelect.value = '';
+    viewSelect.value = 'trends';
     viewSelect.querySelector?.('option[value="funding"]')?.toggleAttribute?.('hidden', mode !== 'personal');
+    viewSelect.querySelector?.('option[value="adverts"]')?.toggleAttribute?.('hidden', mode === 'personal');
   }
   artistSelect.value = '';
   fromInput.value = '';
   toInput.value = '';
   if (!dialog.open) dialog.showModal();
+  refresh();
   content.textContent = 'Loading playback tally…';
   if (titleEl) titleEl.textContent = mode === 'personal' ? 'My Playback Tally' : 'Playback Tally';
   if (rewardsEl) {
-    rewardsEl.hidden = mode !== 'personal' || !/^0x[0-9a-fA-F]{40}$/.test(wallet);
     rewardsEl.replaceChildren();
   }
   if (noteEl) noteEl.textContent = mode === 'personal'
-    ? `Playback tally for connected wallet ${wallet.slice(0, 6)}…${wallet.slice(-4)}`
-    : 'Community playback tally';
+    ? `My songs${wallet ? ` · ${wallet.slice(0, 6)}…${wallet.slice(-4)}` : ''}` : 'Station-wide';
   try {
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
     if (!service) throw new Error('Playback tally service is not configured');
     if (mode === 'personal' && !/^0x[0-9a-fA-F]{40}$/.test(wallet)) throw new Error('Connect your wallet to view My Playback Tally.');
-    const query = new URLSearchParams({ weeks: '12', includeAllTime: '1' });
+    const query = new URLSearchParams({ weeks: '12', includeAllTime: '1', catalog: '1', periods: '1' });
     query.set('calendar', 'new-york');
     if (wallet) query.set('wallet', wallet);
-    const response = await fetch(`${service}/api/radio/history?${query}`, { cache: 'no-store' });
+    const response = await fetch(`${service}/api/radio/history?${query}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) });
     const result = await response.json();
     if (currentRequest !== requestId) return;
     if (!response.ok) throw new Error(result.error || `History unavailable (${response.status})`);
-    reports = Array.isArray(result.weeks) ? result.weeks : [];
+    if (!Array.isArray(result.weeks)) throw new Error('Invalid radio history response');
+    reports = result.weeks;
     weekSelect.replaceChildren(...reports.slice().reverse().map((report) => {
       const option = document.createElement('option');
       option.value = report.week;
@@ -307,8 +323,9 @@ async function openHistory(event) {
       return;
     }
     weekSelect.value = (reports.find(report => report.week === 'all-time') || reports.at(-1)).week;
-    renderWeek();
-    if (mode === 'personal') await loadArtistFunding(service, currentRequest, wallet);
+    explorer.load(reports, result.catalog, wallet, result.periods);
+    historyReady = true;
+    refresh();
   } catch (error) {
     if (currentRequest === requestId) content.textContent = error.message;
   }
@@ -319,16 +336,18 @@ function init() {
   weekSelect = document.getElementById('radio-history-week');
   content = document.getElementById('radio-history-content');
   titleEl = document.getElementById('radio-history-title');
-  noteEl = dialog?.querySelector('.radio-history-note');
+  noteEl = document.getElementById('radio-history-context');
   searchInput = document.getElementById('radio-history-search');
   artistSelect = document.getElementById('radio-history-artist');
   fromInput = document.getElementById('radio-history-from');
   toInput = document.getElementById('radio-history-to');
   rewardsEl = document.getElementById('radio-history-rewards');
   viewSelect = document.getElementById('radio-history-view');
-  if (!dialog || !weekSelect || !content) return;
+  explorerEl = document.getElementById('playback-explorer');
+  if (!dialog || !weekSelect || !content || !explorerEl) return;
+  explorer = mountPlaybackExplorer(explorerEl);
   setInterval(() => {
-    if (!dialog.open || mode !== 'personal' || !wallet) return;
+    if (!dialog.open || !historyReady || viewSelect.value !== 'funding' || mode !== 'personal' || !wallet) return;
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
     if (service) loadArtistFunding(service, requestId, wallet, false);
   }, 15000);
@@ -339,15 +358,26 @@ function init() {
   document.addEventListener('wallet-disconnected', () => {
     if (mode !== 'personal') return;
     ++requestId;
+    historyReady = false;
+    explorer.clear();
     reports = [];
     wallet = '';
     fundingState = null;
     content.replaceChildren();
     weekSelect.replaceChildren();
     if (rewardsEl) rewardsEl.hidden = true;
+    rewardsEl?.replaceChildren();
     if (dialog.open) dialog.close();
   });
   document.getElementById('radio-history-close')?.addEventListener('click', () => dialog.close());
+  dialog.addEventListener('close', () => {
+    if (dialog.open) return;
+    ++requestId;
+    historyReady = false;
+    explorer.clear();
+    fundingState = null;
+    reports = [];
+  });
   weekSelect.addEventListener('change', renderWeek);
   searchInput?.addEventListener('input', refresh);
   viewSelect?.addEventListener('change', refresh);

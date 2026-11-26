@@ -1884,6 +1884,8 @@ test('weekly radio history is public and clamps the requested range', async () =
     allowedOrigins: [],
     ownerWallet: '0x1111111111111111111111111111111111111111',
     getRadioHistory: async ({ weeks, wallet, includeAllTime }) => { receivedWeeks = weeks; receivedWallet = wallet; receivedAllTime = includeAllTime; return [{ week: '2026-W41', totalPlays: 4 }]; },
+    getRadioHistoryCatalog: ({ wallet }) => [{ trackId: 'song-a', wallet, albums: ['Shared set'] }],
+    getAirplayCalendar: ({ wallet }) => { assert.equal(wallet, receivedWallet); return { daily: [], monthly: [], history: [] }; },
   });
   await withServer(handler, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/radio/history?weeks=500&wallet=0x1111111111111111111111111111111111111111`, { headers: { origin: 'http://localhost:8765' } });
@@ -1892,6 +1894,10 @@ test('weekly radio history is public and clamps the requested range', async () =
     assert.deepEqual(await response.json(), { weeks: [{ week: '2026-W41', totalPlays: 4 }] });
     assert.equal(receivedWeeks, 52);
     assert.equal(receivedWallet, '0x1111111111111111111111111111111111111111');
+    const catalog = await fetch(`${baseUrl}/api/radio/history?catalog=1&periods=1&wallet=${receivedWallet}`);
+    const dashboard = await catalog.json();
+    assert.deepEqual(dashboard.catalog, [{ trackId: 'song-a', wallet: receivedWallet, albums: ['Shared set'] }]);
+    assert.deepEqual(dashboard.periods, { daily: [], monthly: [], history: [] });
     assert.equal(receivedAllTime, false);
     const allTime = await fetch(`${baseUrl}/api/radio/history?includeAllTime=1&wallet=0x1111111111111111111111111111111111111111`);
     assert.equal(allTime.status, 200);

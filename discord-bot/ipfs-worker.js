@@ -308,6 +308,8 @@ export function createWorkerRequestHandler({
   dmtvRadioVerification,
   authorizeDmtvRadioVerifier,
   getRadioHistory,
+  getRadioHistoryCatalog,
+  getAirplayCalendar,
   getWeeklyPayflow,
   getPaymentLedger,
   getTipLedger,
@@ -1468,7 +1470,12 @@ export function createWorkerRequestHandler({
         if (wallet && !/^0x[0-9a-fA-F]{40}$/.test(wallet)) throw new Error('Invalid wallet filter');
         const includeAllTime = requestUrl.searchParams.get('includeAllTime') === '1';
         const calendar = requestUrl.searchParams.get('calendar') === 'new-york' ? 'new-york' : undefined;
-        sendJson(response, 200, { weeks: await getRadioHistory({ weeks, wallet, includeAllTime, ...(calendar ? { calendar } : {}) }) }, '*');
+        const history = await getRadioHistory({ weeks, wallet, includeAllTime, ...(calendar ? { calendar } : {}) });
+        const catalog = requestUrl.searchParams.get('catalog') === '1' && getRadioHistoryCatalog
+          ? await getRadioHistoryCatalog({ wallet }) : undefined;
+        const periods = requestUrl.searchParams.get('periods') === '1' && getAirplayCalendar
+          ? await getAirplayCalendar({ wallet }) : undefined;
+        sendJson(response, 200, { weeks: history, catalog, periods }, '*');
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/mint-queue/pending-count') {
