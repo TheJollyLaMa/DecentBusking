@@ -1147,6 +1147,32 @@ Wallet addresses submitted in Discord are community claims, not cryptographic pr
 
 ### MP4 Videos and CID Submissions
 
+**Release batches (songs, albums, or several albums).** In the site's briefcase select
+**Submit several songs or albums together**. Browse/drop files, browse an album
+folder, drop several album folders, or paste a release sheet. Review the rows in
+track order. The signer is the recipient and tip wallet for every song in this flow;
+use the individual form for collaborators or custom payouts. One media authorization
+is needed per new file and one final signature covers the release sheet. Existing
+file CIDs do not need to be uploaded again. Limits: 20 unique recordings and 40
+membership rows per batch; artist upload/intake quotas still apply. Uploaded CIDs
+replace local file references as uploads finish, so keep the sheet if a quota
+requires a later retry. Web tracks stay off radio until verified mint.
+
+In Discord, link your wallet in your creator profile, then use **`/jukebox submit-batch`**
+in the Jukebox channel. Attach a UTF-8 `.txt` sheet via `sheet` (or use `rows`
+for short entries). Discord uses your linked wallet and profile artwork. Each line is
+`Album | Title | Format | File CID`. Leave Album blank for singles. Repeat the
+same title, format and CID under another album to reference it without a second
+mint request. Album order is the order in the sheet. Submission does not mint,
+alter on-chain album ownership or guarantee a radio play.
+
+For native Discord uploads, browse or drop the audio files into the channel.
+After their normal song intake has pinned them, use `post:<message ID>` and
+optional `album:<title>`. For multiple upload posts/albums, a sheet line may
+be `Album | | post | message ID`. Only your own channel posts are accepted.
+On success the bot attaches a receipt listing every stable track ID. Keep it
+for verification. Retrying the same release does not create new entries.
+
 Discord audio and MP4 attachments are accepted up to and including 10 MB; larger attachments are rejected before playlist ingestion or IPFS pinning. Restart backfill also discovers older MP4 posts within that cap. Attachments enter the artist's `/jukebox backlog`, not the mint queue automatically: use `/jukebox request-mint` to supply the artist wallet, or have the owner run `/jukeloop queue-uploads uploader:<artist> wallet:<artist Base wallet>` for the full pinned backlog. FFmpeg extracts only the audio (`-vn`) for the JukeLoop Discord voice channel. DecentBusking plays the MP4 video above the NFT scene at 84% opacity, with the same synchronized position and radio mute/volume controls. The video button hides or shows the picture without creating a second audio stream. Use H.264 video with AAC audio for broad browser compatibility; silent videos have no voice-channel audio, and other MP4 codecs may not play in every browser.
 
 For files over the 10 MB Discord attachment limit, pin the file to IPFS and use:

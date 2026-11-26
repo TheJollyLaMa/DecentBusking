@@ -1,4 +1,6 @@
 import { liveAuthorization } from '../js/live-bookings.mjs';
+import { releaseAuthorization } from '../js/release-batch.mjs';
+import { prepareMediaRelease } from './release-batch.js';
 import { AbiCoder, Contract, Interface, JsonRpcProvider, keccak256, toUtf8Bytes, verifyMessage, verifyTypedData } from 'ethers';
 import { Readable } from 'node:stream';
 import { createRequire } from 'node:module';
@@ -322,6 +324,7 @@ export function createWorkerRequestHandler({
   onRadioVote,
   promotions,
   onMediaSubmission,
+  onReleaseBatch,
   artworkUpdateQueue,
   creatorSplitUpdateQueue,
   onCreatorSplitUpdate,
@@ -370,20 +373,21 @@ export function createWorkerRequestHandler({
     return consumedSignatures.has(signature);
   }
   const artistLimits = new Map();
+  const batchTrackLimits = new Map();
   const splitProposalLimits = new Map();
   const pinnerLimits = new Map();
   const paymentLimits = new Map();
-  function limitWalletOperation(limits, address, message) {
+  function limitWalletOperation(limits, address, message, cost = 1) {
     const time = now();
     for (const [key, entry] of limits) {
       if (entry.until <= time) limits.delete(key);
     }
     const key = address.toLowerCase();
     const entry = limits.get(key) || { count: 0, until: time + 60 * 60 * 1000 };
-    if (entry.count >= 20 || (!limits.has(key) && limits.size >= 2000)) {
+    if (entry.count + cost > 20 || (!limits.has(key) && limits.size >= 2000)) {
       throw new Error(message);
     }
-    entry.count++;
+    entry.count += cost;
     limits.set(key, entry);
   }
   const limitArtist = address => limitWalletOperation(artistLimits, address, 'Artist submission limit reached; try again later');
@@ -1644,6 +1648,25 @@ export function createWorkerRequestHandler({
         if (recovered !== body.address.toLowerCase() || recovered !== expectedOwner) throw new Error('Album-import authorization is not from the configured owner');
         consumedSignatures.set(body.signature, now() + MAX_SIGNATURE_AGE_MS);
         sendJson(response, 200, await onReviewedAlbumImport(), corsOrigin);
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/media/submit-batch') {
+        if (!corsOrigin || !onReleaseBatch) throw Error('Batch submissions unavailable from this origin');
+        const body = await readJson(request);
+        const { address, issuedAt, signature, artist, rows, artworkCid = '' } = body;
+        if (!/^0x[0-9a-f]{40}$/i.test(address) || body.origin !== origin || typeof signature !== 'string' ||
+            !Number.isFinite(Date.parse(issuedAt)) || Math.abs(now() - Date.parse(issuedAt)) > MAX_SIGNATURE_AGE_MS ||
+            typeof artist !== 'string' || !artist.trim() || artist.length > 80) throw Error('Invalid batch authorization or artist');
+        const tracks = prepareMediaRelease(rows);
+        const image = artworkCid ? normalizeMediaCid(artworkCid) : '';
+        if (verifyMessage(releaseAuthorization({ ...body, origin }), signature).toLowerCase() !== address.toLowerCase() ||
+            hasConsumedSignature(signature)) throw Error('Invalid or already-used batch signature');
+        limitArtist(address);
+        limitWalletOperation(batchTrackLimits, address, 'Batch recording limit reached; try again later', tracks.length);
+        consumedSignatures.set(signature, now() + MAX_SIGNATURE_AGE_MS);
+        const results = await onReleaseBatch(tracks, { source: 'site', wallet: address, uploaderId: `wallet:${address.toLowerCase()}`,
+          uploader: artist.trim(), artworkCid: image });
+        sendJson(response, 200, { results }, corsOrigin);
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/media/submit') {

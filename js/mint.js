@@ -1,4 +1,5 @@
 import { fetchNFTMetaById } from './space.js?v=20261030-ad-cutoff';
+import { mountReleaseBriefcase } from './release-briefcase.mjs';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { submitMediaForApproval } from './mint-submission.js?v=20261017-mercury-release';
 import { detectSubmissionMedia, mediaFilename, evenCreatorSplits, validateCreatorSplits } from './submission-media.mjs';
@@ -369,6 +370,8 @@ async function updateParentPreview(value) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  mountReleaseBriefcase(document.getElementById('release-batch'), { inspectMedia, fileCid,
+    lock(value) { if (value && pending) return false; pending = value; return true; } });
   const modal = document.getElementById('mint-modal');
   document.getElementById('mint-form')?.addEventListener('submit', handleSubmission);
   const close = () => {
@@ -386,7 +389,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (modal.classList.contains('hidden') || document.getElementById('submission-policy-dialog')?.open) return;
     if (event.key === 'Escape') close();
     if (event.key === 'Tab') {
-      const focusable = [...modal.querySelectorAll('input:not(:disabled), button:not(:disabled), summary, audio[controls], video[controls]')]
+      const focusable = [...modal.querySelectorAll('input:not(:disabled), textarea:not(:disabled), button:not(:disabled), summary, audio[controls], video[controls]')]
         .filter(node => node.getClientRects().length);
       const first = focusable[0];
       const last = focusable.at(-1);

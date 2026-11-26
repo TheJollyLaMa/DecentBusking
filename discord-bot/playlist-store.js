@@ -186,6 +186,24 @@ export function addTrack(track) {
   return true;
 }
 
+export async function submitReleaseBatch(tracks, actor) {
+  const { planRelease } = await import('./release-batch.js');
+  const { updates, results } = planRelease(_playlist, tracks, actor);
+  const events = [];
+  for (const { existing, track } of updates) {
+    if (existing) Object.assign(existing, track);
+    else {
+      _playlist.push(track);
+      events.push({ id: `submission:${track.trackId}`, type: 'submission', occurredAt: track.addedAt,
+        observedAt: track.addedAt, trackId: track.trackId, source: track.source, title: track.title,
+        mediaType: track.mediaType, ipfsCid: track.ipfsCid, isDevertAd: false });
+    }
+  }
+  _save({ events });
+  await waitForRemotePersistence();
+  return results;
+}
+
 export function submitMediaTrack({ address, title, artist, ipfsCid, mediaType, filename, recipient, artworkCid, tipWallet, parentTokenId, isDevertAd = false, creatorSplits }) {
   const trackId = `site:${address.toLowerCase()}:${ipfsCid}`;
   const existing = _playlist.find(track => track.trackId === trackId);
