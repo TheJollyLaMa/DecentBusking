@@ -455,6 +455,11 @@ async function initializeFundHeader() {
     if (activeFund !== fund) {
       renderVersion++;
       dialogElements().body.replaceChildren();
+      const info = dialog.querySelector('.fund-payment-info');
+      info.open = false;
+      for (const notice of info.querySelectorAll('[data-payment-info]')) {
+        notice.hidden = notice.dataset.paymentInfo !== slug;
+      }
     }
     activeFund = fund;
     const cached = lastDetails.get(slug);

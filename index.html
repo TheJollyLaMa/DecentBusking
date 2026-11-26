@@ -24,7 +24,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261126-pinner-dashboard" />
+  <link rel="stylesheet" href="css/styles.css?v=20261126-playback-help" />
   <link rel="stylesheet" href="css/dmtv.css?v=20261118-dmtv-escrow" />
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth" />
   <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback" />
@@ -88,7 +88,7 @@
       "./js/fund-guide.mjs?v=20261124-fund-bunny-keys":"./js/fund-guide.mjs?v=20261125-pinner-rewards",
       "./js/referral-campaign-editor.mjs?v=20261126-eth-gifts":"./js/referral-campaign-editor.mjs?v=20261126-referral-match",
       "./js/referral-campaign-editor.mjs?v=20261124-admin-funds":"./js/referral-campaign-editor.mjs?v=20261126-referral-match",
-      "./js/fund-header.mjs?v=20261124-visible-payments":"./js/fund-header.mjs?v=20261124-fund-bunny-keys",
+      "./js/fund-header.mjs?v=20261124-visible-payments":"./js/fund-header.mjs?v=20261126-playback-help",
       "./js/fund-contribution.mjs":"./js/fund-contribution.mjs?v=20261124-admin-funds",
       "./js/fund-contribution.mjs?v=20261124-verified-funds":"./js/fund-contribution.mjs?v=20261124-admin-funds",
       "./js/fund-contribution.mjs?v=20261124-fund-bunny":"./js/fund-contribution.mjs?v=20261124-admin-funds",
@@ -420,8 +420,13 @@
         <div class="fund-breakdown-titlebar">
           <h3 id="fund-breakdown-title">Fund breakdown</h3>
           <details class="fund-payment-info">
-            <summary aria-label="About pending fund payments">i</summary>
-            <p class="fund-pending-notice">Payments are marked Pending because rankings and estimated amounts change with votes, plays, and funding throughout the week. They freeze at Sunday/Monday midnight in New York (America/New_York). Frozen allocations still await payment; only confirmed transactions are recorded on-chain.</p>
+            <summary aria-label="How weekly fund payouts work">i</summary>
+            <p class="fund-pending-notice" data-payment-info="dbusk-top10">Payments are marked Pending because rankings and estimated amounts change with votes, plays, and funding throughout the week. They freeze at Sunday/Monday midnight in New York (America/New_York). Frozen allocations still await payment; only confirmed transactions are recorded on-chain.</p>
+            <section class="fund-pending-notice" data-payment-info="dbusk-playback" aria-label="How Playback Fund payouts work" tabindex="0" hidden>
+              <p><strong>Airplay earns a share, not uploads.</strong> Each time the radio airs at least 30 audible seconds of a recording, it counts as one play. Minting a song or listing it on two albums adds no plays. Votes can change the shuffle order, and shows or DJuke requests can give a song more airtime. Only the airings count.</p>
+              <p><strong>Your share of plays is your share of the weekly pot.</strong> If your songs get 20 of the station’s 100 qualifying plays, they earn 20% of the pot: 20 USDC from a 100 USDC pot, before collaborator splits. Adding unplayed songs does not reduce anyone’s share.</p>
+              <p><strong>When does it settle?</strong> Estimates freeze at midnight Sunday into Monday, New York time. The pot uses the fund’s USDC not already reserved for earlier weeks. Song splits are applied and earnings are added up by wallet. Shares below 0.01 USDC or without a linked wallet at cutoff stay in the fund. A frozen share is not a payment; confirmed payouts appear below after the owner pays.</p>
+            </section>
           </details>
         </div>
         <button id="fund-us-button" type="button"><span aria-hidden="true">⚸ ✨</span> Fund Us <span aria-hidden="true">✨ ⚸</span></button>
@@ -1415,7 +1420,7 @@
   <script type="module" src="js/radio-history.js?v=20261126-airplay-trends"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261124-public-personal"></script>
   <link rel="stylesheet" href="css/fund-tour.css?v=20261124-fund-bunny">
-  <script type="module" src="js/fund-header.mjs?v=20261124-fund-bunny-keys"></script>
+  <script type="module" src="js/fund-header.mjs?v=20261126-playback-help"></script>
   <script type="module" src="js/fund-tour.mjs?v=20261124-visible-payments"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261123-song-splits"></script>
   <script type="module" src="js/djuke.mjs?v=20261112-playlist-continuity"></script>
