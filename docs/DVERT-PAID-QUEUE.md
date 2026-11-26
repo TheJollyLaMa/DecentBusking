@@ -308,9 +308,10 @@ funds and top up the shared DJuke/DVert worker with native ETH on Base.
 
 Reuse: the v0.2 contract extends the existing DeVert scheduling and settlement
 implementation; checkout reuses Base approvals and duplicate-term checks.
-Worker balance checks and admin funding alerts reuse DJuke's manual-funding policy.
-Checkout pauses below 0.001 ETH; the existing admin alert warns below 0.002 ETH
-and suggests a 0.003 ETH target. The worker is verified against both contracts.
+Worker balance checks and the admin gas gauge reuse DJuke's manual-funding policy.
+Checkout pauses below 0.001 ETH; the Admin Community Calendar's gauge turns red
+below 0.002 ETH and fills to a 0.003 ETH tank. The worker is verified against
+both contracts.
 
 Do not point a sponsored checkout at the legacy campaign contract: it still
 requires ETH. The new contract rejects attached ETH from stale clients.

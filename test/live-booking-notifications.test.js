@@ -151,7 +151,7 @@ test('notification polling starts on connection, runs at five minutes, and ignor
  assert.equal(updates.length, 1);
 });
 
-test('worker funding and booking badges aggregate only at admin anchors', async () => {
+test('booking badges aggregate only at admin anchors; worker gas never adds a badge', async () => {
  const { claimState, LIVE_PILOT_POLICY, LIVE_ASSET_VERSION } = await import('../js/live-bookings.mjs');
  const listeners = new Map(), badges = new Map();
  const target = () => ({
@@ -190,12 +190,9 @@ test('worker funding and booking badges aggregate only at admin anchors', async 
  document.dispatchEvent({ type: 'live-booking-state-updated', detail: { state: state({ ...booking, acknowledged: true }) } });
  document.dispatchEvent({ type: 'worker-gas-state-updated', detail: { action: { id: 'worker-gas', label: 'Top up' } } });
  await new Promise(resolve => setImmediate(resolve));
- assert.equal(ankh.badge.textContent, '2');
- assert.equal(admin.badge.textContent, '2');
- assert.equal(bookingPanel.badge.textContent, '1', 'worker funding is not a booking action');
- document.dispatchEvent({ type: 'worker-gas-state-updated', detail: { action: null } });
- await new Promise(resolve => setImmediate(resolve));
- assert.equal(admin.badge.textContent, '1', 'funding recovery preserves the booking action');
+ assert.equal(ankh.badge.textContent, '1', 'low worker gas shows on the calendar gauge, not the menu badge');
+ assert.equal(admin.badge.textContent, '1');
+ assert.equal(bookingPanel.badge.textContent, '1');
  isAdmin = false;
  context.window._wallet = {};
  document.dispatchEvent({ type: 'wallet-disconnected' });

@@ -24,7 +24,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261125-pinner-rewards" />
+  <link rel="stylesheet" href="css/styles.css?v=20261126-worker-gas-gauge" />
   <link rel="stylesheet" href="css/dmtv.css?v=20261118-dmtv-escrow" />
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth" />
   <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback" />
@@ -56,7 +56,7 @@
       "./js/live-bookings.mjs":"./js/live-bookings.mjs?v=20261117-booking-assets",
       "./js/live-bookings.mjs?v=20261108-live-audio-pilot":"./js/live-bookings.mjs?v=20261117-booking-assets",
       "./js/live-bookings.mjs?v=20261114-tip-provenance":"./js/live-bookings.mjs?v=20261117-booking-assets",
-      "./js/live-booking-notifications.mjs?v=20261113-one-action-release":"./js/live-booking-notifications.mjs?v=20261117-booking-assets",
+      "./js/live-booking-notifications.mjs?v=20261113-one-action-release":"./js/live-booking-notifications.mjs?v=20261126-worker-gas-gauge",
       "./js/performer-room.mjs?v=20261110-wallet-practice":"./js/performer-room.mjs?v=20261117-booking-assets",
       "./js/performer-room.mjs?v=20261114-allocated-stage":"./js/performer-room.mjs?v=20261117-booking-assets",
       "./js/performer-room.mjs?v=20261116-curtain":"./js/performer-room.mjs?v=20261117-booking-assets",
@@ -91,7 +91,7 @@
       "./js/fund-contribution.mjs?v=20261124-fund-bunny-keys":"./js/fund-contribution.mjs?v=20261124-admin-funds"
     }}
   </script>
-  <link rel="stylesheet" href="css/radio-programming.css?v=20261126-referral-match" />
+  <link rel="stylesheet" href="css/radio-programming.css?v=20261126-worker-gas-gauge" />
   <link rel="stylesheet" href="css/dbusk-calendar.css?v=20261124-public-personal" />
   <link rel="stylesheet" href="css/fund-admin.css?v=20261124-admin-funds" />
   <link rel="stylesheet" href="css/profile-inbox.css?v=20261126-eth-gifts" />
@@ -973,9 +973,10 @@
     <div class="radio-programming-header">
       <h2 id="radio-programming-title">☿ Admin Community Calendar</h2>
       <button id="radio-programming-close-btn" type="button" aria-label="Close Admin Community Calendar" autofocus>✕</button>
-    </div>
-    <div class="radio-programming-wallet">
-      <span id="radio-programming-connected-addr" class="admin-addr"></span>
+      <div class="radio-programming-wallet">
+        <span id="radio-programming-connected-addr" class="admin-addr"></span>
+      </div>
+      <button id="worker-gas-gauge" class="worker-gas-gauge" type="button" aria-haspopup="dialog" aria-controls="worker-gas-dialog" aria-label="Worker gas — open top-up" data-level="unknown" hidden></button>
     </div>
     <div id="radio-programming-status" class="admin-status" role="status"></div>
     <section id="admin-radio-schedule" class="hidden" aria-label="Radio programming calendar">
@@ -1007,6 +1008,32 @@
         <ul id="admin-radio-schedule-events" class="admin-schedule-events"></ul>
         </details>
     </section>
+  </dialog>
+
+  <dialog id="worker-gas-dialog" class="worker-gas-dialog" aria-labelledby="worker-gas-title">
+    <header class="rc-head">
+      <span class="rc-badge" aria-hidden="true">⛽</span>
+      <h3 id="worker-gas-title" class="rc-title">Worker gas tank</h3>
+      <button class="rc-pill" type="button" data-worker-gas-close aria-label="Close">✕</button>
+    </header>
+    <div class="worker-gas-preview" data-worker-gas-preview></div>
+    <p class="worker-gas-reading" data-worker-gas-reading role="status"></p>
+    <form class="worker-gas-form" data-worker-gas-form>
+      <div class="worker-gas-presets" role="group" aria-label="Fill to">
+        <button class="rc-pill" type="button" data-worker-gas-preset="1">Fill</button>
+        <button class="rc-pill" type="button" data-worker-gas-preset="2">2×</button>
+        <button class="rc-pill" type="button" data-worker-gas-preset="3">3×</button>
+        <button class="rc-pill" type="button" data-worker-gas-preset="5">5×</button>
+      </div>
+      <label class="rc-money is-eth worker-gas-amount"><input data-worker-gas-amount type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="Top-up amount in ETH" /> ETH</label>
+      <input class="worker-gas-slider" data-worker-gas-slider type="range" min="0.0005" max="0.03" step="0.0005" value="0.003" aria-label="Top-up amount slider" />
+      <p class="worker-gas-to">To <a data-worker-gas-explorer target="_blank" rel="noopener noreferrer" hidden></a> on Base</p>
+      <p class="rc-status" data-worker-gas-status role="status" aria-live="polite"></p>
+      <div class="rc-foot">
+        <button class="rc-pill" type="button" data-worker-gas-close>Cancel</button>
+        <button class="rc-run" type="submit" data-worker-gas-send disabled>Send</button>
+      </div>
+    </form>
   </dialog>
 
   <!-- Admin role-grant modal -->
@@ -1047,12 +1074,6 @@
         <button id="admin-devert-refresh" type="button" class="admin-btn admin-btn-secondary">Refresh campaigns</button>
         <p id="admin-devert-status" class="admin-status" role="status"></p>
         <ul id="admin-devert-list"></ul>
-      </details>
-      <details id="admin-worker-funding" class="admin-tool-section worker-gas-notice">
-        <summary><span>⛽ Worker funding</span><small>ETH on Base, balance checks, and manual top-ups</small></summary>
-        <p id="admin-worker-alert" class="worker-gas-state" role="status" aria-live="polite" hidden></p>
-        <p>Manual top-ups use <strong>ETH on Base</strong>, not Ethereum mainnet. Worker wallet: <code>0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F</code>. Verify this address after the balance check below. <a data-worker-explorer target="_blank" rel="noopener noreferrer">View verified worker on Base</a>. No automatic top-ups are enabled. Mint gas comes from your wallet.</p>
-        <p id="admin-payment-ledger-status" class="admin-status" role="status">Payment proofs not loaded.</p>
       </details>
       <details id="admin-role-section" class="admin-tool-section hidden">
         <summary><span>🔑 Contract Roles</span><small>Grant contract permissions to a wallet</small></summary>
@@ -1308,10 +1329,10 @@
 
   <!-- Admin role-grant panel -->
   <link rel="stylesheet" href="css/live-performance.css?v=20261121-action-status">
-  <script type="module" src="js/live-booking-notifications.mjs?v=20261117-booking-assets"></script>
+  <script type="module" src="js/live-booking-notifications.mjs?v=20261126-worker-gas-gauge"></script>
   <script type="module" src="js/live-performance-admin.mjs?v=20261121-typed-review"></script>
   <link rel="stylesheet" href="css/promotions.css?v=20261116-promotions">
-  <script type="module" src="js/admin.js?v=20261126-eth-gifts"></script>
+  <script type="module" src="js/admin.js?v=20261126-worker-gas-gauge"></script>
   <link rel="stylesheet" href="css/content-review.css?v=20261107-flags">
   <script type="module" src="js/content-review-ui.mjs?v=20261107-flags"></script>
 
@@ -1330,7 +1351,7 @@
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/djuke-playlists-ui.mjs?v=20261025-scheduling-info"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261126-pinner-onboarding"></script>
-  <script type="module" src="js/worker-gas.mjs?v=20261024-admin-sections"></script>
+  <script type="module" src="js/worker-gas.mjs?v=20261126-worker-gas-gauge"></script>
   <script type="module" src="js/panel-equalizers.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/top-ten-live-meter.mjs?v=20261025-seamless-handoff"></script>
   <script type="module">
