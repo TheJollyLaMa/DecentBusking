@@ -157,7 +157,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('open-admin', _openModal);
   document.addEventListener('open-radio-programming', () => _openModal({ detail: { section: 'radio-programming' } }));
   document.addEventListener('promotions-changed', () => { if (_radioOpen) void _loadRadioSchedule(); });
-  document.addEventListener('payroll-ledger-synced', event => _showPaymentLedger(event.detail));
   document.addEventListener('wallet-connected', () => {
     _resetAdminWallet();
     if (_adminOpen) _connectWallet();
@@ -179,32 +178,9 @@ async function _openModal(event) {
   _statusEl = document.getElementById(_radioOpen ? 'radio-programming-status' : 'admin-status');
   _adminOpen = true;
   if (_radioOpen) _radioModal.showModal();
-  else {
-    _modal?.classList.remove('hidden');
-    _refreshPaymentLedger();
-  }
+  else _modal?.classList.remove('hidden');
   _setStatus('Verifying your admin wallet...');
   await _connectWallet();
-}
-
-function _showPaymentLedger(ledger) {
-  const status = document.getElementById('admin-payment-ledger-status');
-  if (!status || !isAdminWallet()) return;
-  const verified = (ledger.entries || []).filter(entry => entry.verification === 'verified').length;
-  status.textContent = ledger.ready ? `${verified} verified Base payments · compared ${ledger.lastCheckedAt || 'pending'} · ${ledger.backupPending || !ledger.snapshotUri ? 'IPFS backup pending' : 'IPFS backup saved'}` : 'Payment ledger restoring.';
-}
-
-async function _refreshPaymentLedger() {
-  const status = document.getElementById('admin-payment-ledger-status');
-  if (!status) return;
-  try {
-    const service = window.DecentConfig?.ipfsUploadServiceUrl;
-    if (!service) return;
-    const response = await fetch(`${service.replace(/\/$/, '')}/api/payroll/ledger`, { cache: 'no-store' });
-    if (!response.ok) throw new Error('Payment proofs not available yet');
-    const ledger = await response.json();
-    if (_adminOpen) _showPaymentLedger(ledger);
-  } catch (error) { if (_adminOpen && isAdminWallet()) status.textContent = error.message; }
 }
 
 function _closeModal() {

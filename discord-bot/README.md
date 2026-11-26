@@ -1209,13 +1209,14 @@ A true one-confirmation batch is possible through a separately deployed `BatchPr
 
 Admin reuses the wallet connected in the site header; opening the panel checks the on-chain admin role without another connection request or message signature. NFT Requests starts collapsed: expanding it loads the private queue and requests its owner-wallet message signature, since a public address alone is not proof of ownership. Closing that section does not sign. That authorization is reused in memory for four minutes (within the worker's five-minute validity window), then refreshed when needed. It is cleared on account/network changes or disconnect and never stored in browser storage. Upload authorizations and on-chain mint transactions remain separate approvals.
 
-The Admin sections appear in this order: Radio Programming, NFT Requests, Live
-Performance, DVert, Worker funding, Contract Roles. The connected wallet reuses
-the creator-profile four-icon identity label, with `DEFAULT_ADMIN_ROLE` beside it
-below the header divider. Balance warnings and verified Base funding details stay
-inside Worker funding; a low balance does not force the section open and never
-initiates a transfer. The balance, threshold and runway remain live readings, not
-hardcoded display values.
+The Admin sections appear in this order: NFT Requests, Live Performance, DVert,
+Contract Roles. Radio Programming opens separately as the Admin Community
+Calendar. The connected wallet reuses the creator-profile four-icon identity
+label, with `DEFAULT_ADMIN_ROLE` beside it below the header divider. Worker gas
+is a small semicircle gauge under the calendar's ✕, not an Admin section or menu
+badge. Clicking it opens a top-up dialog; a low balance never initiates a
+transfer, and nothing is sent until the admin confirms in their wallet. The
+balance, threshold and runway remain live readings, not hardcoded display values.
 
 ---
 
