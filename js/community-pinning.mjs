@@ -54,7 +54,7 @@ export function initCommunityPinning({ fetchImpl = fetch } = {}) {
       manifest = value;
       summary.textContent = `${value.entryCount} unique CIDs · shared playlist, songs and albums`;
       rewardStatus.textContent = value.rewardStatus === 'active'
-        ? 'Shared Pinata stays primary. Join the approved pinner program below to earn verified weekly rewards.'
+        ? 'Shared Pinata stays primary. Open My node & rewards to join the approved pinner program.'
         : `Shared Pinata stays primary. Pinner reward status: ${value.rewardStatus}.`;
       start.disabled = !value.entryCount;
     } catch (error) { summary.textContent = `Manifest unavailable: ${error.message}`; }
@@ -88,7 +88,7 @@ export function initCommunityPinning({ fetchImpl = fetch } = {}) {
         ipfsApiUrl: window.DecentConfig?.ipfsApiUrl || 'http://127.0.0.1:5001', fetchImpl,
         onProgress: ({ completed, total }) => { progress.textContent = `Pinned ${completed} of ${total} CIDs…`; } });
       progress.textContent = `Pinned ${result.successes.length} of ${manifest.entryCount}. ${result.failures.length ? `${result.failures.length} could not be pinned; try again later.` : 'All selected CIDs are pinned.'}`;
-      rewardStatus.textContent = 'Your pins add a community copy. Enroll below; only approved nodes with qualifying independent checks earn weekly awards.';
+      rewardStatus.textContent = 'Your pins add a community copy. Enroll in My node & rewards; only approved nodes with qualifying independent checks earn weekly awards.';
     } catch (error) { progress.textContent = error.message; }
     finally { key.value = ''; busy = false; updateProvider(); }
     await rewardsView?.load();

@@ -119,10 +119,10 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   host.id = 'dbusker-companion';
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `
-    <link rel="stylesheet" href="${new URL('../css/dbusker.css?v=20261116-studio-dock', import.meta.url).href}">
+    <link rel="stylesheet" href="${new URL('../css/dbusker.css?v=20261126-composer', import.meta.url).href}">
     <div class="greeting" hidden><span>How can I help you, Earthling?</span><button type="button" class="dismiss" aria-label="Dismiss DBusker greeting">Not now</button></div>
     <button type="button" class="launcher" aria-label="Ask DBusker, AI community guide" aria-expanded="false" aria-controls="dbusker-chat">
-      <span class="launcher-portrait"><img src="${new URL('../img/D_Busker.jpeg', import.meta.url).href}" alt="" width="58" height="58"></span><span><small>A friendly signal</small>Ask DBusker</span><span class="signal-dot" aria-hidden="true"></span>
+      <span class="launcher-portrait"><img src="${new URL('../img/D_Busker.jpeg', import.meta.url).href}" alt="" width="58" height="58"></span><span>Ask DBusker</span><span class="signal-dot" aria-hidden="true"></span>
     </button>
     <section id="dbusker-chat" role="dialog" aria-labelledby="dbusker-title" hidden>
       <header class="cabin-header"><span class="station-mark" aria-hidden="true">${mark('beacon')}</span><h2 id="dbusker-title">DBusker <small>AI guide / invited pilot</small></h2><div class="cabin-controls"><button type="button" class="sound" aria-label="Enable DBusker chimes" aria-pressed="false" title="Optional chimes. Quiet while the radio plays.">Sound off</button><button type="button" class="close" aria-label="Close DBusker chat" title="Close chat">Close</button></div></header>
@@ -153,7 +153,6 @@ export function initDBusker({ document = globalThis.document, window = globalThi
           <span class="garden-bunny" aria-hidden="true"><span class="nibbling-bunny">🐇</span><span class="carrot">🥕</span></span>
         </div>
       </details>
-      <p class="role-note">An AI guide, not a human steward. No transactions or automatic posting. When enabled, read-only Base evidence covers named contracts and blocks, not all activity. Chat access does not enroll you for rewards.</p>
       <button type="button" class="report-issue">Report a bug on GitHub</button>
       <p>Ask me for wording, then review it in the local report helper. You submit on GitHub; a maintainer approves reward labels.</p>
       <label class="consent"><input type="checkbox"> I agree to send my questions, recent chat context and requested public-chain evidence to OpenAI.
@@ -161,18 +160,22 @@ export function initDBusker({ document = globalThis.document, window = globalThi
         Don't share secrets. Chat is kept in server memory for up to 15 minutes; the provider's own retention policy also applies.
         The steward keeps private per-wallet credit/token totals, not full conversation logs. If DBusker can't answer, that question and its reply are saved with your wallet for up to 30 days of steward review (you can delete them below); a separate share preview lets you submit any other exchange. Human review, not automatic training.
         <a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">Provider data policy</a></label>
+      <details class="privacy-info" hidden><summary aria-label="About DBusker privacy and access">i</summary>
+        <p>Questions, recent chat and requested public Base evidence go to OpenAI, including wallet addresses and payment details when relevant. Don't share secrets. Chat stays in server memory for up to 15 minutes; OpenAI's retention policy also applies. Usage is counted against the claimed wallet, which is not verified. Private review records are unavailable in this mode, and unanswered questions are not saved for review. <a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">Provider data policy</a></p>
+      </details>
       <div class="actions"><button type="button" class="signin">Sign in with wallet</button><button type="button" class="signout" hidden>Clear chat &amp; sign out</button></div>
       <p class="status" role="status" aria-live="polite">Invite-only. Connect through the site header, then sign in here on Base. No gas or payment.</p>
-      <label class="mode-label" for="dbusker-mode">How shall we travel?<select id="dbusker-mode" aria-describedby="dbusker-mode-note">
-        <option value="efficient">Efficient / one light pass</option>
-        <option value="balanced" selected>Balanced / automatic triage</option>
-        <option value="deep">Deep dive / stronger model</option>
-      </select></label>
-      <p class="mode-note" id="dbusker-mode-note" role="status" aria-live="polite">For your next question: Balanced chooses a model locally and may make one deeper pass. Changing mode does not resend a question.</p>
       <p class="route-result" role="status" aria-live="polite"></p>
       <p class="usage-note" role="status" aria-live="polite"></p>
       <div class="transcript" role="log" aria-label="DBusker conversation" aria-live="polite" tabindex="0"></div>
-      <form><label for="dbusker-question">Your question</label><textarea id="dbusker-question" maxlength="2000" rows="3" required disabled></textarea><button type="submit" class="send" disabled>Ask DBusker</button></form>
+      <form><label for="dbusker-question">Your question</label><textarea id="dbusker-question" maxlength="2000" rows="3" required disabled></textarea>
+        <div class="composer-actions"><label class="mode-label" for="dbusker-mode">Answer style<select id="dbusker-mode" aria-describedby="dbusker-mode-note">
+          <option value="efficient">Efficient</option>
+          <option value="balanced" selected>Automatic</option>
+          <option value="deep">Deep dive</option>
+        </select></label><button type="submit" class="send" disabled>Ask DBusker</button></div>
+        <p class="mode-note" id="dbusker-mode-note" role="status" aria-live="polite">For your next question: Balanced chooses a model locally and may make one deeper pass. Changing mode does not resend a question.</p>
+      </form>
       <details class="review-share" hidden>
         <summary>Help DBusker improve: preview an exchange for the steward</summary>
         <p>Optional. Only this question, answer, linked sources and model/handoff receipt are shared, together with your signed-in wallet and sharing time. No earlier turns or raw chain lookup are included. Keep for up to 30 days; delete from the active inbox below. Provider/operator backups have their own retention policies. Clearing chat does not delete a shared exchange. This is human review, not automatic model training. Don't share secrets.</p>
@@ -183,7 +186,9 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       <div class="shared-reviews" aria-label="Your shared exchanges"></div>
       <p class="handoff"></p>
       </div>
-      <div class="cabin-foot" aria-hidden="true"><span>Earth Village / open frequencies</span><span class="speaker-grille"></span><span class="foot-light"></span></div>
+      <div class="cabin-foot"><div class="budget-meter"><span class="budget-label" role="status">DBusker budget unavailable</span><progress class="budget-progress" max="100" aria-label="DBusker monthly budget remaining"></progress></div>
+        <details class="budget-info"><summary aria-label="About the shared DBusker budget">i</summary><p>OpenAI's DBusker project spending is shared by invited wallets. Reporting may lag. Remaining means the configured monthly target minus reported spending, not the prepaid balance or a guaranteed spending cap. The target must be updated if the project limit changes.</p></details>
+      </div>
     </section>`;
   host.hidden = true;
   document.body.append(host);
@@ -210,8 +215,8 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   };
   mode.addEventListener('change', () => { find('.mode-note').textContent = modeNotes[mode.value]; });
   let credential = null, wallet = null, expiresAt = 0, pending = false, generation = 0;
-  let controller = null, expiryTimer = null, dismissed = false, returnFocus = null;
-  let invited = false, invitationAddress = null, invitationGeneration = 0, invitationController = null;
+  let controller = null, expiryTimer = null, budgetTimer = null, dismissed = false, returnFocus = null;
+  let invited = false, invitationAddress = null, invitationGeneration = 0, invitationController = null, accessMode = 'signed';
   let exchangeId = null, reviewPending = false;
   const sound = find('.sound');
   const chime = createCompanionChime(window, document, error => {
@@ -231,10 +236,14 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     catch (error) { console.warn('[dbusker] greeting preference could not be saved:', error.message); }
   }
   function controls() {
-    signin.hidden = Boolean(credential);
-    signin.disabled = pending || !consent.checked;
+    const addressOnly = accessMode === 'address-only';
+    find('.consent').hidden = addressOnly;
+    find('.privacy-info').hidden = !addressOnly;
+    signin.hidden = Boolean(credential) || addressOnly;
+    signin.disabled = pending || (!addressOnly && !consent.checked);
     signout.hidden = !credential;
-    question.disabled = pending || reviewPending || !credential || !consent.checked;
+    signout.textContent = addressOnly ? 'Clear chat' : 'Clear chat & sign out';
+    question.disabled = pending || reviewPending || (addressOnly ? !invited : !credential || !consent.checked);
     send.disabled = question.disabled;
     mode.disabled = pending;
     find('.share-exchange').disabled = pending || reviewPending || !credential || !exchangeId;
@@ -244,7 +253,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     panel.classList.toggle('is-thinking', pending);
     panel.classList.toggle('is-connected', Boolean(credential));
   }
-  function clear(message = 'Chat cleared. Sign in again when ready.') {
+  function clear(message = accessMode === 'address-only' ? 'Chat cleared.' : 'Chat cleared. Sign in again when ready.') {
     generation++;
     controller?.abort();
     controller = null;
@@ -262,6 +271,8 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     find('.review-preview').textContent = '';
     find('.review-status').textContent = '';
     find('.usage-note').textContent = '';
+    find('.budget-label').textContent = 'DBusker budget unavailable';
+    find('.budget-progress').removeAttribute('value');
     find('.shared-reviews').replaceChildren();
     status.textContent = message;
     controls();
@@ -274,7 +285,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     });
     const data = await response.json();
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) clear(data.error || 'Please sign in again.');
+      if ((response.status === 401 || response.status === 403) && auth && auth === credential) clear(data.error || 'Please sign in again.');
       throw new Error(data.error || `DBusker request failed (${response.status}).`);
     }
     return data;
@@ -291,6 +302,27 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       if (attempt === generation) showUsage(usage);
     } catch (error) {
       if (attempt === generation) find('.usage-note').textContent = `Usage totals unavailable: ${error.message}`;
+    }
+  }
+  async function refreshBudget(attempt) {
+    try {
+      const value = await request('/budget', null, { method: 'GET' });
+      if (attempt !== generation) return;
+      if (value.currency !== 'usd' || !Number.isFinite(value.spent) ||
+          !Number.isFinite(value.monthlyBudget) || value.monthlyBudget <= 0 ||
+          value.month !== new Date().toISOString().slice(0, 7) || !Number.isFinite(Date.parse(value.updatedAt))) {
+        throw new Error('Invalid budget response.');
+      }
+      const remaining = Math.max(0, value.monthlyBudget - value.spent);
+      const money = amount => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+      find('.budget-label').textContent = `${money(remaining)} left of ${money(value.monthlyBudget)} monthly target`;
+      find('.budget-progress').value = Math.max(0, Math.min(100, 100 * remaining / value.monthlyBudget));
+    } catch (error) {
+      if (attempt === generation) {
+        find('.budget-label').textContent = 'DBusker budget unavailable';
+        find('.budget-progress').removeAttribute('value');
+        console.warn('[dbusker] budget unavailable:', error.message);
+      }
     }
   }
   async function refreshReviews(attempt) {
@@ -349,11 +381,16 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     launcher.setAttribute('aria-expanded', 'true');
     find('.close').focus();
     void chime.play();
+    if (accessMode === 'address-only' && !credential && !pending) void startSession();
+    window.clearInterval(budgetTimer);
+    budgetTimer = window.setInterval(() => { if (credential) void refreshBudget(generation); }, 60_000);
   }
   function hide() {
     panel.hidden = true;
     launcher.hidden = false;
     launcher.setAttribute('aria-expanded', 'false');
+    window.clearInterval(budgetTimer);
+    budgetTimer = null;
     chime.stop();
     if (returnFocus?.isConnected && returnFocus !== document.body) returnFocus.focus();
     else launcher.focus();
@@ -401,6 +438,8 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   document.addEventListener('play', () => chime.stop(), true);
   document.addEventListener('visibilitychange', () => { if (document.hidden) chime.stop(); });
   window.addEventListener('pagehide', event => {
+    window.clearInterval(budgetTimer);
+    budgetTimer = null;
     if (event.persisted) chime.stop();
     else chime.dispose();
   });
@@ -411,7 +450,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       route.setAttribute('aria-pressed', String(route === button));
     });
     void chime.play();
-    status.textContent = credential
+    status.textContent = credential || accessMode === 'address-only'
       ? 'Question drafted. Edit it if you like, then choose Ask DBusker.'
       : 'Question drafted, not sent. Review the data notice and sign in with an invited wallet when ready.';
     if (!question.disabled) question.focus();
@@ -424,10 +463,11 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     if (!consent.checked) signout.click();
     controls();
   });
-  signin.addEventListener('click', async () => {
-    if (!consent.checked || pending) return;
+  async function startSession() {
+    const addressOnly = accessMode === 'address-only';
+    if ((!addressOnly && !consent.checked) || pending) return;
     const current = window._wallet;
-    if (!current?.address || !current.signer) {
+    if (!current?.address || (!addressOnly && !current.signer)) {
       status.textContent = 'Connect your wallet using the site header first; chat will not open a wallet prompt automatically.';
       return;
     }
@@ -436,11 +476,11 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     const address = current.address;
     pending = true; controls();
     controller = new AbortController();
-    status.textContent = 'Checking your invitation. Signing proves wallet ownership; it does not authorize payment.';
+    status.textContent = addressOnly ? 'Checking your invitation.' : 'Checking your invitation. Signing proves wallet ownership; it does not authorize payment.';
     try {
       const { message } = await request('/challenge', { address, chainId: current.chainId }, { signal: controller.signal });
       if (attempt !== generation) return;
-      const signature = await current.signer.signMessage(message);
+      const signature = addressOnly ? undefined : await current.signer.signMessage(message);
       if (attempt !== generation) return;
       const session = await request('/session', { message, signature }, { signal: controller.signal });
       if (attempt !== generation) {
@@ -448,6 +488,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
         return;
       }
       credential = session.token; wallet = session.wallet; expiresAt = session.expiresAt;
+      void refreshBudget(attempt);
       if (session.usage) showUsage(session.usage);
       if (session.capabilities?.reviews) {
         try { await refreshReviews(attempt); }
@@ -458,13 +499,14 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       }
       expiryTimer = window.setTimeout(() => signout.click(), Math.max(0, expiresAt - Date.now()));
       find('.handoff').textContent = `Public source ${session.handoff.commit.slice(0, 8)} · handoff ${session.handoff.digest.slice(0, 8)}. ${session.capabilities?.chain ? 'Read-only Base evidence enabled; each answer has coverage limits.' : 'No live-state access.'}`;
-      status.textContent = 'Signed in. Ask about getting started, the public code, or hosting your own community.';
+      status.textContent = addressOnly ? 'Ready to chat.' : 'Signed in. Ask about getting started, the public code, or hosting your own community.';
     } catch (error) {
       if (attempt === generation) status.textContent = error.message;
     } finally {
       if (attempt === generation) { pending = false; controller = null; controls(); }
     }
-  });
+  }
+  signin.addEventListener('click', startSession);
   signout.addEventListener('click', () => {
     const old = credential;
     clear();
@@ -476,12 +518,14 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   });
   find('form').addEventListener('submit', async event => {
     event.preventDefault();
-    if (!credential || !consent.checked || pending || reviewPending || !question.value.trim()) return;
+    if (pending || reviewPending || !question.value.trim()) return;
+    if (!credential && accessMode === 'address-only') await startSession();
+    if (!credential || (accessMode !== 'address-only' && !consent.checked)) return;
     if (Date.now() >= expiresAt) { signout.click(); return; }
     const message = question.value.trim(), attempt = generation;
     pending = true; controls();
     controller = new AbortController();
-    status.textContent = `${mode.options[mode.selectedIndex].text}. Reading approved sources and checking the answer; Balanced may take one deeper pass.`;
+    status.textContent = 'Thinking...';
     find('.route-result').textContent = '';
     exchangeId = null;
     find('.review-share').hidden = true;
@@ -489,7 +533,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     find('.review-preview').textContent = '';
     append('You', message);
     try {
-      const answer = await request('/chat', { message, consent: true, mode: mode.value }, { signal: controller.signal });
+      const answer = await request('/chat', { message, ...(accessMode === 'signed' ? { consent: true } : {}), mode: mode.value }, { signal: controller.signal });
       if (attempt !== generation) return;
       append('DBusker', answer.answer, answer.sources);
       if (answer.captured) {
@@ -515,7 +559,8 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       if (attempt === generation) status.textContent = `${mode.options[mode.selectedIndex].text} did not return an answer: ${error.message}`;
     } finally {
       if (attempt === generation) { pending = false; controller = null; controls(); question.focus(); }
-      if (attempt === generation) await refreshUsage(attempt);
+      if (attempt === generation && accessMode === 'signed') await refreshUsage(attempt);
+      if (attempt === generation && credential) void refreshBudget(attempt);
     }
   });
   const walletChanged = () => {
@@ -537,6 +582,8 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     if (host.hidden !== blocked) host.hidden = blocked;
     if (blocked && !panel.hidden) {
       chime.stop();
+      window.clearInterval(budgetTimer);
+      budgetTimer = null;
       panel.hidden = true;
       launcher.hidden = false;
       launcher.setAttribute('aria-expanded', 'false');
@@ -565,8 +612,11 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       if (attempt !== invitationGeneration || window._wallet?.address !== address ||
           window._wallet?.chainId !== 8453) return;
       if (typeof result.invited !== 'boolean') throw new Error('Invalid DBusker invitation response.');
+      if (result.accessMode && !['signed', 'address-only'].includes(result.accessMode)) throw new Error('Invalid DBusker access mode.');
+      accessMode = result.accessMode || 'signed';
       invited = result.invited;
       invitationAddress = address;
+      if (invited && !credential && accessMode === 'address-only') status.textContent = 'Ready to chat.';
       if (!invited && credential) signout.click();
     } catch (error) {
       if (attempt !== invitationGeneration) return;
@@ -575,7 +625,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       if (credential) signout.click();
     } finally {
       window.clearTimeout(timeout);
-      if (attempt === invitationGeneration) { invitationController = null; syncVisibility(); }
+      if (attempt === invitationGeneration) { invitationController = null; syncVisibility(); controls(); }
     }
   }
   // Hide the companion when existing dialogs or the tour need the screen.

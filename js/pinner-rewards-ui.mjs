@@ -87,7 +87,7 @@ export function createPinnerRewardsView({ root, enrollment = false, fetchImpl = 
       const wallet = window._wallet?.address?.toLowerCase();
       const mine = state.participants.find(pinner => pinner.wallet === wallet);
       const steps = element('ol', '', 'pinner-steps');
-      for (const text of ['Pin the shared data above.', 'Join with your linked Discord wallet; we pin a private node-ownership marker locally.', 'After admin approval, keep IPFS Desktop running and publicly reachable.']) {
+      for (const text of ['Open Keep a copy to pin the shared data.', 'Join with your linked Discord wallet; we pin a private node-ownership marker locally.', 'After admin approval, keep IPFS Desktop running and publicly reachable.']) {
         steps.append(element('li', text));
       }
       root.append(steps);

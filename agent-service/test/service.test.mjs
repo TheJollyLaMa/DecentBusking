@@ -30,6 +30,7 @@ async function fixture(t, options = {}) {
   });
   let time = Date.now();
   const server = createAgentServer(settings, { modelCall, ...(options.chainRead ? { chainRead: options.chainRead } : {}),
+    ...(options.billingFetch ? { billingFetch: options.billingFetch } : {}),
     now: () => time, logger: { error: message => logs.push(message) } });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -67,6 +68,52 @@ test('pilot fails closed when disabled or handoff is not approved', async t => {
   writeFileSync(f.settings.approvalFile, '{"digest":"outdated"}');
   assert.equal((await f.request('/challenge', { address: f.wallet.address, chainId: 8453 })).status, 503);
   assert.equal(f.calls.length, 0);
+});
+
+test('address-only sessions do not expose or capture private review records', async t => {
+  const f = await fixture(t);
+  const signed = await f.login();
+  const previous = await f.request('/chat', { message: f.wallet.address.slice(2), consent: true }, signed.token);
+  assert.ok(previous.body.captured?.id);
+
+  f.settings.accessMode = 'address-only';
+  const challenge = await f.request('/challenge', { address: f.wallet.address, chainId: 8453 });
+  assert.equal(challenge.body.accessMode, 'address-only');
+  const session = await f.request('/session', { message: challenge.body.message });
+  assert.equal(session.status, 200);
+  assert.equal(session.body.capabilities.reviews, false);
+  assert.equal(session.body.usage, undefined);
+  assert.equal((await f.request('/session', { message: challenge.body.message })).status, 401);
+  assert.equal((await f.request('/reviews', null, session.body.token, 'GET')).status, 403);
+  assert.equal((await f.request('/usage', null, session.body.token, 'GET')).status, 403);
+  assert.equal((await f.request(`/review/${previous.body.captured.id}`, null, session.body.token, 'DELETE')).status, 403);
+  const unknown = await f.request('/chat', { message: f.other.address.slice(2) }, session.body.token);
+  assert.equal(unknown.status, 200);
+  assert.equal(unknown.body.captured, undefined);
+  assert.doesNotMatch(unknown.body.answer, /noted|saved/i);
+
+  const db = new DatabaseSync(f.settings.stateFile, { readOnly: true });
+  assert.equal(db.prepare('SELECT count(*) AS count FROM shared_reviews').get().count, 1);
+  db.close();
+  f.access({ enabled: true, wallets: [f.other.address] });
+  assert.equal((await f.request('/chat', { message: 'Explain playlists' }, session.body.token)).status, 403);
+});
+
+test('budget endpoint requires a session and returns only configured project totals', async t => {
+  const f = await fixture(t, { settings: { billingKey: 'test-key', billingProject: 'proj_test', monthlyBudget: 50 },
+    billingFetch: async (url, init) => {
+      assert.equal(new URL(url).searchParams.get('project_ids[]'), 'proj_test');
+      assert.equal(init.headers.Authorization, 'Bearer test-key');
+      return Response.json({ data: [{ results: [{ project_id: 'proj_test', amount: { currency: 'usd', value: 2 } }] }],
+        has_more: false, next_page: null });
+    } });
+  assert.equal((await f.request('/budget', null, null, 'GET')).status, 401);
+  const session = await f.login();
+  const response = await f.request('/budget', null, session.token, 'GET');
+  assert.equal(response.status, 200);
+  assert.equal(response.body.spent, 2);
+  assert.equal(response.body.monthlyBudget, 50);
+  assert.equal(JSON.stringify(response.body).includes('test-key'), false);
 });
 
 test('wallet accounting counts both Balanced passes, exposes only self totals and retains no exchanges automatically', async t => {
@@ -124,7 +171,7 @@ test('questions DBusker cannot answer are captured for steward review, owner-vis
   assert.equal(answer.status, 200);
   assert.equal(answer.body.abstained, true);
   assert.equal(answer.body.captured.id, answer.body.exchangeId);
-  const none = await f.request('/chat', { message: 'zyxqv987654321', consent: true }, (await f.login()).token);
+  const none = await f.request('/chat', { message: Wallet.createRandom().address.slice(2), consent: true }, (await f.login()).token);
   assert.equal(none.body.routing.attempts, 0);
   assert.match(none.body.answer, /I don't know that one yet/);
   assert.ok(none.body.captured);
@@ -212,15 +259,15 @@ test('invitation visibility check returns no roster or credentials and does not 
   const address = f.wallet.address;
   const invited = await f.request('/invitation', { address, chainId: 8453 });
   assert.equal(invited.status, 200);
-  assert.deepEqual(invited.body, { invited: true });
+  assert.deepEqual(invited.body, { invited: true, accessMode: 'signed' });
   assert.deepEqual((await f.request('/invitation', { address: Wallet.createRandom().address, chainId: 8453 })).body,
-    { invited: false });
-  assert.deepEqual((await f.request('/invitation', { address, chainId: 1 })).body, { invited: false });
+    { invited: false, accessMode: 'signed' });
+  assert.deepEqual((await f.request('/invitation', { address, chainId: 1 })).body, { invited: false, accessMode: 'signed' });
   assert.equal((await f.request('/invitation', { address: 'invalid', chainId: 8453 })).status, 400);
   assert.equal((await f.request('/invitation', { address, chainId: 8453 }, null, 'POST', 'https://evil.example')).status, 403);
   assert.equal((await f.request('/chat', { message: 'Hello', consent: true })).status, 401);
   f.access({ enabled: true, wallets: [] });
-  assert.deepEqual((await f.request('/invitation', { address, chainId: 8453 })).body, { invited: false });
+  assert.deepEqual((await f.request('/invitation', { address, chainId: 8453 })).body, { invited: false, accessMode: 'signed' });
   f.access({ enabled: false, wallets: [address] });
   assert.equal((await f.request('/invitation', { address, chainId: 8453 })).status, 503);
   assert.equal(f.calls.length, 0);
@@ -502,7 +549,7 @@ test('Efficient and Deep dive make only one pass and do not silently escalate', 
 test('missing evidence costs no provider call; invalid modes cannot select arbitrary models', async t => {
   const f = await fixture(t);
   const session = await f.login();
-  const response = await f.request('/chat', { message: 'zyxqv987654321', consent: true }, session.token);
+  const response = await f.request('/chat', { message: Wallet.createRandom().address.slice(2), consent: true }, session.token);
   assert.equal(response.status, 200);
   assert.equal(response.body.abstained, true);
   assert.equal(response.body.routing.attempts, 0);

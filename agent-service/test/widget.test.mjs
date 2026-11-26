@@ -12,10 +12,10 @@ test('public pilot configuration contains only the separate service URL and enab
   assert.equal(window.DecentConfig.dbusker.serviceUrl, 'https://decentbusking-dbusker.onrender.com');
   assert.equal(Object.keys(window.DecentConfig.dbusker).sort().join(','), 'enabled,serviceUrl');
   const index = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
-  assert.match(index, /decent\.config\.js\?v=20261027-dbusker-invited/);
-  assert.match(index, /js\/main\.js\?v=20261029-dbusker-signpost/);
+  assert.match(index, /decent\.config\.js\?v=[^"']+/);
+  assert.match(index, /js\/main\.js\?v=[^"']+/);
   assert.match(readFileSync(new URL('../../js/main.js', import.meta.url), 'utf8'),
-    /dbusker\.mjs\?v=20261029-signpost/);
+    /dbusker\.mjs\?v=[^"']+/);
 });
 
 async function fixture(t, enabled = true, connected = true) {
@@ -141,7 +141,6 @@ test('rabbit dropdown contains only a tutorial list and decorative, inaccessible
   assert.equal(trails.querySelector('.garden-bunny').getAttribute('aria-hidden'), 'true');
   assert.equal(trails.querySelector('.rabbit-invitation').getAttribute('aria-hidden'), 'true');
   assert.equal(trails.querySelector('a[href*="issues"]'), null);
-  assert.match(root.querySelector('.role-note').textContent, /AI guide.*No transactions/);
 });
 
 test('greeting is dismissible; opening and closing does not fetch or alter radio', async t => {
@@ -209,6 +208,37 @@ test('consent is required and the widget reuses the site wallet without connecti
   assert.equal(f.calls.length, 0);
 });
 
+test('address-only chat checks the invitation and opens a session without a wallet signature', async t => {
+  const { root, window, document } = await fixture(t);
+  const calls = [];
+  window.fetch = async (url, init) => {
+    calls.push({ url, init });
+    if (url.endsWith('/invitation')) return Response.json({ invited: true, accessMode: 'address-only' });
+    if (url.endsWith('/challenge')) return Response.json({ message: 'challenge', accessMode: 'address-only' });
+    if (url.endsWith('/session')) return Response.json({
+      token: 'a'.repeat(64), wallet: window._wallet.address, expiresAt: Date.now() + 60000,
+      capabilities: { reviews: false }, handoff: { commit: '1'.repeat(40), digest: '2'.repeat(64) },
+    });
+    if (url.endsWith('/budget')) return Response.json({ spent: 5, monthlyBudget: 50, currency: 'usd',
+      month: new Date().toISOString().slice(0, 7), updatedAt: new Date().toISOString() });
+    if (url.endsWith('/chat')) return Response.json({ answer: 'Hello', sources: [] });
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  document.dispatchEvent(new window.Event('wallet-connected'));
+  await new Promise(resolve => window.setTimeout(resolve, 5));
+  assert.equal(root.querySelector('.consent').hidden, true);
+  assert.equal(root.querySelector('.signin').hidden, true);
+  assert.equal(root.querySelector('.privacy-info').hidden, false);
+  root.querySelector('textarea').value = 'Hello';
+  root.querySelector('form').dispatchEvent(new window.Event('submit', { cancelable: true }));
+  await new Promise(resolve => window.setTimeout(resolve, 10));
+  assert.equal(root.querySelector('.transcript').textContent.includes('Hello'), true);
+  assert.match(root.querySelector('.budget-label').textContent, /\$45\.00 left of \$50\.00/);
+  assert.equal(root.querySelector('.budget-progress').value, 90);
+  assert.deepEqual(JSON.parse(calls.find(call => call.url.endsWith('/session')).init.body), { message: 'challenge' });
+  assert.equal(calls.some(call => call.url.endsWith('/reviews') || call.url.endsWith('/usage')), false);
+});
+
 test('community routes draft editable questions without sending, signing, or connecting a wallet', async t => {
   const f = await fixture(t), { root } = f;
   assert.equal(root.querySelectorAll('[data-starter]').length, 7);
@@ -227,6 +257,7 @@ test('community routes draft editable questions without sending, signing, or con
 
 test('portrait welcome and illustrated paths preserve readable accessible names', async t => {
   const { root } = await fixture(t);
+  assert.doesNotMatch(root.querySelector('.launcher').textContent, /friendly signal/i);
   assert.equal(root.querySelector('.hello').textContent, 'How can I help you, Earthling?');
   assert.match(root.querySelector('.greeting').textContent, /How can I help you, Earthling\?/);
   assert.match(root.querySelector('.portrait-port img').alt, /DBusker/);
@@ -239,6 +270,7 @@ test('portrait welcome and illustrated paths preserve readable accessible names'
 test('mode selection defaults to Balanced and changes only the compute explanation, without requests or persistence', async t => {
   const { root, window, calls } = await fixture(t);
   const mode = root.querySelector('#dbusker-mode');
+  assert.ok(root.querySelector('form').contains(mode));
   assert.equal(mode.value, 'balanced');
   assert.deepEqual([...mode.options].map(option => option.value), ['efficient', 'balanced', 'deep']);
   mode.value = 'efficient';
