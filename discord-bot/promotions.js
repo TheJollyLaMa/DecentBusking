@@ -6,7 +6,8 @@ import { PROMOTIONS_FUND, REFERRALS_FUND, referralCampaignTitle, PROMOTIONS_USDC
   MUSICIAN_REFERRAL_PILOT, isMusicianReferralCampaign, CAMPAIGN_ASSETS, campaignAsset, campaignGifts, campaignGiftReserveUnits,
   campaignGiftWinners, musicianReferralLegs, musicianReferralConfig, SUPPORTER_REWARD, SUPPORTER_REWARD_ABI,
   campaignSupporterRewards, supporterRewardKey, REFERRAL_SETTLEMENT_VERSION, referralFundMatchUnits, referralFundMatchQueue,
-  isPromotionsFund, promotionAnnouncementDraft, promotionAuthorization, promotionWorkReference } from '../js/promotions.mjs';
+  isPromotionsFund, promotionAnnouncementDraft, promotionAuthorization, promotionWorkReference,
+  PINNER_PROMOTION_DRAFT, pinnerPromotionAmounts } from '../js/promotions.mjs';
 
 const address = value => {
   if (!isAddress(value) || /^0x0{40}$/i.test(value)) throw new Error('A valid nonzero wallet is required');
@@ -122,6 +123,12 @@ export function validatePromotionCheckpoint(value) {
         !Number.isSafeInteger(c.maxAwards) || c.maxAwards < 1 || c.maxAwards > 10000) fail();
     text(c.title, 'Checkpoint title', 100); text(c.criteria, 'Checkpoint criteria'); text(c.terms, 'Checkpoint terms');
     units(c.rewardUnits); units(c.budgetUnits);
+    if (c.template === 'pinner' && (!['draft', 'archived'].includes(c.status) || c.asset !== 'eth' ||
+        c.maxAwards !== PINNER_PROMOTION_DRAFT.maxAwards ||
+        JSON.stringify(c.pinnerPilot) !== JSON.stringify(PINNER_PROMOTION_DRAFT) ||
+        !validDate(c.draftQuote?.quotedAt) ||
+        c.rewardUnits !== pinnerPromotionAmounts(c.draftQuote?.ethUsdMicros).rewardUnits ||
+        c.budgetUnits !== pinnerPromotionAmounts(c.draftQuote?.ethUsdMicros).budgetUnits)) fail();
     if (c.template === 'album' && (!Number.isSafeInteger(c.minOriginalTracks) || c.minOriginalTracks < 1 || c.minOriginalTracks > 1000) ||
         c.template === 'referral' && (!Number.isSafeInteger(c.requiredReferrals) || c.requiredReferrals < 2 || c.requiredReferrals > 100 ||
           !PROMOTION_ACTIVITY_WINDOWS.some(window => window.id === c.activityWindow)) ||
@@ -143,7 +150,7 @@ export function validatePromotionCheckpoint(value) {
         !Array.isArray(c.supporterToken.eligibleWallets) ||
         c.supporterToken.eligibleWallets.some(w => !validWallet(w)))) fail();
     if (c.curatedReferrers && c.curatedReferrers.some(w => !validWallet(w))) fail();
-    if (c.asset !== undefined && (!['usdc', 'eth'].includes(c.asset) || c.asset === 'eth' && !isMusicianReferralCampaign(c))) fail();
+    if (c.asset !== undefined && (!['usdc', 'eth'].includes(c.asset) || c.asset === 'eth' && !isMusicianReferralCampaign(c) && c.template !== 'pinner')) fail();
     if (c.gifts !== undefined && (!isMusicianReferralCampaign(c) || JSON.stringify(campaignGifts(c.gifts)) !== JSON.stringify(c.gifts))) fail();
     validateReferralSettlement(c);
     if (c.giftAwards !== undefined) {
@@ -514,6 +521,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
     next.campaigns.filter(c => sameBucket(c, campaign)).flatMap(c => c.giftAwards || [])
       .filter(a => a.status !== 'paid').reduce((n, a) => n + BigInt(a.amountUnits), 0n);
   async function assertPublishable(next, campaign) {
+    if (campaign.template === 'pinner') throw new Error('Pinner promotion is draft-only: review 30-day qualification accounting, ETH conversion terms and the NFT reward before launch');
     validateReferralSettlement(campaign);
     if (campaign.settlementVersion) {
       if (campaign.status === 'draft' && campaignAsset(campaign).id === 'eth' &&
@@ -1065,7 +1073,13 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
               return [...new Set(input.curatedReferrers.map(address))];
             })();
           let qualification = {};
-          if (input.template === 'album') {
+          if (input.template === 'pinner') {
+            const amounts = pinnerPromotionAmounts(input.draftQuote?.ethUsdMicros);
+            if (input.maxAwards !== 5 || rewardUnits !== amounts.rewardUnits || budgetUnits !== amounts.budgetUnits ||
+                input.asset !== 'eth') throw new Error('Pinner draft must use five $5 ETH awards and a $25 total at its recorded draft quote');
+            qualification = { asset: 'eth', pinnerPilot: { ...PINNER_PROMOTION_DRAFT },
+              draftQuote: { ethUsdMicros: input.draftQuote.ethUsdMicros, quotedAt: timestamp(input.draftQuote.quotedAt, 'Draft quote') } };
+          } else if (input.template === 'album') {
             if (!Number.isSafeInteger(input.minOriginalTracks) || input.minOriginalTracks < 1 || input.minOriginalTracks > 1000) {
               throw new Error('Album offers need a minimum of 1–1000 original tracks');
             }

@@ -87,9 +87,9 @@
   },
   {
     "question": "Can I earn IPFS pinning rewards by keeping a copy of the community music?",
-    "expect": "Explain supported additional-copy pinning without asking for keys. Explicitly say rewards are not active at the source baseline; allocation code/funding is not an operating payout program.",
-    "retrieval": [["js/pinner-rewards.mjs"], ["js/community-pinning.mjs"]],
-    "evidence": ["not-active", "Rewards are not active yet"]
+    "expect": "Guide IPFS Desktop setup, keeping a copy, Discord-linked wallet, node ownership, admin approval and public reachability. Source documents weekly rewards; use the live IPFS panel for current service status. Explain 20 checks, 90% availability, recent verification, weighted pot and owner-signed Base USDC payroll. No guaranteed income, Pinata-only reward or invented promotional bonus.",
+    "retrieval": [["wiki/Earn-by-Pinning.md"], ["docs/PINNER-NETWORK.md", "js/pinner-rewards-ui.mjs"]],
+    "evidence": ["20", "90%", "Base USDC"]
   },
   {
     "question": "How do Top10 and Playback funds differ, and does an allocation mean I was paid?",

@@ -77,6 +77,15 @@ service detects edits and refuses new answers; restart with the newly approved
 pack. Approval is an operator workflow, not a cryptographic defense against a
 server administrator who can edit both the pack and its approval.
 
+The refreshed public snapshot includes the live pinner program and Earn by
+Pinning guide. The pinning route distinguishes enrollment, admin approval,
+independent checks and owner-signed weekly payment; unpublished bonuses are
+never offers. Markdown section boundaries retain complete short procedures,
+and reviewed code anchors keep nearby guard lines within the follow-up budget.
+Run both retrieval evaluation and knowledge/routing tests after refreshing:
+snapshot generation alone does not update the live assistant. Steward review,
+fresh approval and the agent service's separate manual deployment are required.
+
 ### First-conversation regression
 
 The newcomer route reuses the public README introduction and

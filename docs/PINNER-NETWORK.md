@@ -40,8 +40,8 @@ reward proofs never use any of those secrets and do not trust mirror acks.
    enrolling a second wallet after relinking Discord. To change wallets, ask
    the admin to suspend the old node first; old frozen awards remain owed to
    their original wallet.
-3. Open the header **IPFS** button, choose **IPFS Desktop** and pin shared data.
-   Choose **Join pinner rewards**. Sign the enrollment message (no gas or
+3. Open the header **IPFS** button → **Keep a copy**, choose **IPFS Desktop** and pin shared data.
+   In **My node & rewards**, choose **Join pinner rewards**. Sign the enrollment message (no gas or
    transfer); the browser detects the local peer ID and pins a random ownership
    marker on that node. Marker bytes are not uploaded to shared Pinata.
 4. Ask the admin to select **Verify node & approve** in the IPFS panel or
@@ -70,6 +70,21 @@ reward proofs never use any of those secrets and do not trust mirror acks.
 
 ### Reachability and browser setup
 
+The IPFS landing page shows registered membership, recent verification, weekly
+qualification and the available/reserved pot. Its lines are not measured swarm
+connections or geography. **Keep a copy** holds the existing pin controls;
+**My node & rewards** holds enrollment and personal evidence/earnings.
+An optional cost calculator uses your incremental electricity and hosting
+estimates; neither byte coverage nor profitability is inferred.
+
+On the node host, `node discord-bot/community-pinner-client.js --setup` makes
+a private, exclusive backup before adding the exact site origin and HTTP
+methods to existing CORS settings and enabling Kubo's built-in NAT port mapping.
+It refuses non-loopback APIs and wildcard CORS, preserves other settings and
+pins, and requires a manual IPFS restart. Backups contain node identity:
+never publish them. `--diagnose` checks AutoNAT reachability afterward. This
+cannot bypass native permissions, configure every router or resolve CGNAT.
+
 Rewards require a publicly reachable **TCP or QUIC IPFS swarm address**, normally
 port 4001. The worker discovers advertised public numeric addresses via the
 standard IPFS HTTP peer-routing API, then connects directly to that peer.
@@ -86,6 +101,15 @@ Changing CORS requires a Kubo restart. A lost ownership marker can be replaced
 with **Reset lost node marker** (or **Retry node setup** while pending),
 followed by fresh owner approval. Resetting returns the node to pending;
 previous frozen awards remain intact.
+
+### Album roots blocked by a gateway
+
+The AW album root currently receives Pinata's `ERR_ID:00023` HTML-content
+restriction when requesting its CAR. Extra HTML/index content can trigger this
+gateway policy; it does not demonstrate corrupt audio. Do not remove files or
+rewrite minted references. A dedicated gateway or separately published
+music-only derivative requires explicit review; removing a file changes the
+root CID. Keep the original root and pins until a replacement is verified.
 
 ### Weekly terms and evidence
 

@@ -2,6 +2,7 @@ import { radioCalendarOccurrences, utcToNewYorkInput, newYorkInputToUtc } from '
 import { RADIO_PLAYLISTS } from './radio-playlists.mjs?v=20261116-longform';
 import { upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, validateRadioProgrammingConflicts } from './radio-schedule.mjs?v=20261116-longform';
 import { openReferralCampaignEditor, referralTemplateFrom } from './referral-campaign-editor.mjs?v=20261126-eth-gifts';
+import { openPromotionCalendarEditor } from './promotions-ui.mjs?v=20261126-pinner-dashboard';
 
 const zone = 'America/New_York';
 const dateLabel = new Intl.DateTimeFormat('en-US', { timeZone: zone, weekday: 'short', month: 'short', day: 'numeric' });
@@ -232,7 +233,7 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
       chip.addEventListener('dragstart', e => { drag = { preset: preset.id }; e.dataTransfer.setData('text/plain', preset.id); });
       palette.append(chip);
     }
-    const referralTemplates = [...new Map((data().promotionEvents || []).filter(item => item.campaign)
+    const referralTemplates = [...new Map((data().promotionEvents || []).filter(item => item.campaign?.template === 'musician-referral')
       .sort((a, b) => Date.parse(b.startUtc) - Date.parse(a.startUtc))
       .map(item => [item.title, item])).values()].slice(0, 3);
     for (const source of [null, ...referralTemplates]) {
@@ -248,10 +249,13 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
       referral.addEventListener('dragstart', e => { drag = { referral: true, template }; e.dataTransfer.setData('text/plain', 'referral'); });
       palette.append(referral);
     }
-    palette.append(button('+ Live block', () => edit(null, null, 'live')));
+    palette.append(button('+ Live block', () => edit(null, null, 'live')),
+      button('◇ Pinner pilot draft', () => openPromotionCalendarEditor({ template: 'pinner',
+        startsAt: newYorkInputToUtc(`${selectedDay}T09:00`) })),
+      button('All promotions & drafts', () => openPromotionCalendarEditor()));
     root.append(palette, node('p', 'Drag a preset onto a time, or click any slot. Drag a show to move it; click to edit. Background time is normal rotation. Weekly cards repeat; dated cards play once.', 'radio-calendar-hint'));
     status = node('p', data().promotionEventsError
-      ? `Referral campaigns unavailable: ${data().promotionEventsError}`
+      ? `Promotions unavailable: ${data().promotionEventsError}`
       : data().reminders?.error
         ? `Discord reminder needs attention: ${data().reminders.error}`
         : 'Automatic @everyone reminders: 5 minutes before each show, unless switched off.', 'radio-calendar-status');
@@ -260,10 +264,10 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
     status.setAttribute('aria-live', 'polite');
     root.append(status);
     const lane = node('div', undefined, 'radio-calendar-allday');
-    lane.setAttribute('aria-label', 'Referral campaigns this week');
+    lane.setAttribute('aria-label', 'Promotions and drafts this week');
     const laneRows = [];
     const lastDay = dates[dates.length - 1];
-    for (const event of (data().promotionEvents || []).filter(item => item.status === 'published')) {
+    for (const event of (data().promotionEvents || []).filter(item => ['draft', 'published', 'paused', 'closed'].includes(item.status))) {
       const first = utcToNewYorkInput(event.startUtc).slice(0, 10);
       const last = utcToNewYorkInput(new Date(Date.parse(event.endUtc) - 1).toISOString()).slice(0, 10);
       if (last < dates[0] || first > lastDay) continue;
@@ -272,7 +276,9 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
       let laneRow = laneRows.findIndex(end => end < from);
       if (laneRow < 0) laneRow = laneRows.push(-1) - 1;
       laneRows[laneRow] = to;
-      const bar = button('', e => openReferralCampaignEditor({ campaign: event.campaign || {
+      const bar = button('', e => event.campaign?.template !== 'musician-referral'
+        ? openPromotionCalendarEditor({ campaignId: event.id })
+        : openReferralCampaignEditor({ campaign: event.campaign || {
         id: event.id, title: event.title, startsAt: event.startUtc, endsAt: event.endUtc, remainingAwards: event.remainingAwards,
       }, anchor: { x: e.clientX, y: e.clientY } }));
       bar.className = 'radio-calendar-campaign-bar';
@@ -283,8 +289,8 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
       bar.style.gridColumn = `${from + 1} / ${to + 2}`;
       bar.style.gridRow = String(laneRow + 1);
       bar.title = `${event.title} · ${dateLabel.format(new Date(event.startUtc))} → ${dateLabel.format(new Date(event.endUtc))}`;
-      bar.append(node('span', '🤝', 'radio-calendar-campaign-icon'), node('strong', event.title),
-        node('small', `🎯 ${event.remainingAwards ?? 0} open`));
+      bar.append(node('span', event.campaign?.template === 'pinner' ? '◇' : '🤝', 'radio-calendar-campaign-icon'), node('strong', event.title),
+        node('small', event.status === 'draft' ? 'DRAFT · not an offer' : event.status === 'published' ? `🎯 ${event.remainingAwards ?? 0} open` : event.status));
       lane.append(bar);
     }
     const syncLane = () => lane.querySelectorAll('.radio-calendar-campaign-bar').forEach(bar => {

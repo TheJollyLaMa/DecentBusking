@@ -120,7 +120,15 @@ test('topics point to indexed public evidence and small follow-ups keep the prio
   }
   const source = retrieve('And how do I get approved?', [{ role: 'user', content: 'I want repo dev bounties' }]);
   assert.ok(source.some(item => item.file === '.github/ISSUE_TEMPLATE/whitelist-request.yml'));
-  assert.deepEqual(retrieve('zzzzzzzzzzzzzzzzzzzz'), [], 'No matches must not silently become the first source');
+  assert.deepEqual(retrieve('z'.repeat(100)), [], 'No matches must not silently become the first source');
+});
+
+test('Markdown headings start bounded evidence chunks rather than splitting a short procedure', () => {
+  const intro = 'Introductory context. '.repeat(60);
+  const procedure = '## Website route\n' + 'Submit, then wait for owner review. '.repeat(30);
+  const chunks = chunkSource('guide.md', `${intro}\n${procedure}`, pack.commit);
+  assert.ok(chunks.some(source => source.text === procedure));
+  assert.ok(chunks.every(source => Buffer.byteLength(source.text) <= 1800));
 });
 
 test('all supplied founder aliases and independence/governance paths receive reviewed stewardship guidance', () => {

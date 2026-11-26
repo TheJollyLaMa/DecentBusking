@@ -1183,8 +1183,16 @@ A true one-confirmation batch is possible through a separately deployed `BatchPr
 
 Admin reuses the wallet connected in the site header; opening the panel checks the on-chain admin role without another connection request or message signature. NFT Requests starts collapsed: expanding it loads the private queue and requests its owner-wallet message signature, since a public address alone is not proof of ownership. Closing that section does not sign. That authorization is reused in memory for four minutes (within the worker's five-minute validity window), then refreshed when needed. It is cleared on account/network changes or disconnect and never stored in browser storage. Upload authorizations and on-chain mint transactions remain separate approvals.
 
-The Admin sections appear in this order: NFT Requests, Live Performance, DVert,
-Contract Roles. Radio Programming opens separately as the Admin Community
+The Admin sections include NFT Requests, Live Performance, DVert
+and Contract Roles. Promotions are managed from the Admin Community Calendar's
+**All promotions & drafts** workspace, rather than a separate mint-menu section.
+Draft campaign records remain public under the existing IPFS disclosure policy;
+they appear as drafts only on the admin calendar, never as public-calendar offers.
+The **Pinner pilot draft** preset is capped at five $5-equivalent ETH bonuses
+($25 total), after 30 qualifying days, with an unconfigured NFT award.
+It cannot be published until qualification accounting and final reward terms are
+implemented and reviewed; the recorded ETH quote is indicative only.
+Radio Programming opens separately as the Admin Community
 Calendar. The connected wallet reuses the creator-profile four-icon identity
 label, with `DEFAULT_ADMIN_ROLE` beside it below the header divider. Worker gas
 is a small semicircle gauge under the calendar's ✕, not an Admin section or menu

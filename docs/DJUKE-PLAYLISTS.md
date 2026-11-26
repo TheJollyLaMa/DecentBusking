@@ -309,16 +309,19 @@ quotes. No keys, automatic transfers, contract deployment or production
 financial cutover are authorized by the funding policy. The connected admin sees
 a semicircle worker gas gauge under the ✕ of the Admin Community Calendar. It is
 red and blinking when low, amber below one tank, green when full, and shows 2×,
-3×… at its base when holding several tanks. There is no menu badge or Admin
+3×… above its actual ETH balance when holding several tanks. The shared breathing
+ETH/ENS symbol and a cool mint-green shimmer identify a funded tank. There is no menu badge or Admin
 section. The gauge reads the active contract's `gasWorker()` balance on Base
 when the calendar opens and every minute while the calendar or top-up dialog is
 open and the page is visible; it is not an offline Discord/email notification.
 An unavailable balance shows a grey "unavailable" gauge, never a healthy result.
-Wallet disconnect/change invalidates in-flight reads. Clicking the gauge opens a
+Wallet disconnect/change invalidates in-flight reads. Clicking the gauge opens a centered
 top-up dialog: Fill, 2×, 3×, 5× or a custom amount, capped at 0.1 ETH per send
 as a typo guard. Each send re-reads `gasWorker()` and stops if the address
 changed, switches to Base, checks the signer is an admin, then waits for the
-admin to confirm the ETH transfer in their wallet.
+admin to confirm the ETH transfer in their wallet. The info button explains the
+worker's on-chain jobs and Base gas costs. Only the faint arc and After line
+preview a top-up; the needle, tank multiple and ETH amount always show actual holdings.
 
 For v0.5, warn below **0.002 ETH**, use a **0.003 ETH** tank, and pause
 sponsored quotes below **0.001 ETH** or when twice the estimated execution

@@ -11,11 +11,11 @@
 .worker-gas-gauge, .worker-gas-preview { --wg-color: #7d8aa5; --wg-after-color: #7d8aa5; }
 :is(.worker-gas-gauge, .worker-gas-preview)[data-level=low] { --wg-color: #ff4d5e; }
 :is(.worker-gas-gauge, .worker-gas-preview)[data-level=reserve] { --wg-color: #f2b84b; }
-:is(.worker-gas-gauge, .worker-gas-preview)[data-level=full] { --wg-color: #48d597; }
+:is(.worker-gas-gauge, .worker-gas-preview)[data-level=full] { --wg-color: #50edca; }
 .worker-gas-preview[data-after-level=low] { --wg-after-color: #ff4d5e; }
 .worker-gas-preview[data-after-level=reserve] { --wg-after-color: #f2b84b; }
-.worker-gas-preview[data-after-level=full] { --wg-after-color: #48d597; }
-.worker-gas-gauge { justify-self: end; width: 76px; padding: 4px 6px 2px; border: 1px solid #ffffff1f; border-radius: 14px; background: #ffffff08; color: #e8f1fb; line-height: 0; cursor: pointer; transition: background .2s, border-color .2s; }
+.worker-gas-preview[data-after-level=full] { --wg-after-color: #50edca; }
+.worker-gas-gauge { justify-self: end; width: 96px; padding: 4px 6px 2px; border: 1px solid #ffffff1f; border-radius: 14px; background: linear-gradient(145deg, #ffffff18, #ffffff03 55%, #50edca0a); color: #e8f1fb; line-height: 0; cursor: pointer; transition: background .2s, border-color .2s; }
 .worker-gas-gauge[hidden] { display: none; }
 .worker-gas-gauge:hover { background: #ffffff14; border-color: var(--wg-color); }
 .worker-gas-gauge:focus-visible { outline: 2px solid #a0e0ff; outline-offset: 2px; }
@@ -24,19 +24,28 @@
 .wg-track { stroke: #ffffff1c; }
 .wg-fill { stroke: var(--wg-color); stroke-dasharray: 0 100; filter: drop-shadow(0 0 3px var(--wg-color)); transition: stroke-dasharray .9s cubic-bezier(.2, .8, .2, 1), stroke .3s; }
 .wg-after { stroke: var(--wg-after-color); stroke-dasharray: 0 100; opacity: .45; transition: stroke-dasharray .5s ease, stroke .3s; }
+.wg-shine { fill: none; stroke: #eafffa; stroke-width: 2; stroke-linecap: round; stroke-dasharray: 4 96; opacity: .7; pointer-events: none; }
+[data-level=full] .wg-shine { animation: wg-shimmer 5s ease-in-out infinite; }
+[data-level=unknown] .wg-shine, [data-level=low] .wg-shine, [data-level=reserve] .wg-shine { display: none; }
+@keyframes wg-shimmer { from { stroke-dashoffset: 0; opacity: 0; } 20%, 70% { opacity: .85; } to { stroke-dashoffset: -96; opacity: 0; } }
 .wg-needle { stroke: #f4f7fb; stroke-width: 3; stroke-linecap: round; transform-box: view-box; transform-origin: 50px 50px; transform: rotate(-90deg); transition: transform .9s cubic-bezier(.3, 1.35, .5, 1); }
 .wg-pivot { fill: #f4f7fb; stroke: #0b1220; stroke-width: 1.5; }
 .wg-mark { fill: #c3d0df; font: 700 10px system-ui, sans-serif; }
 .wg-pump { font-size: 13px; opacity: .85; }
 .wg-times { fill: var(--wg-color); font: 800 13px system-ui, sans-serif; }
-.worker-gas-preview[data-after-level] .wg-times { fill: var(--wg-after-color); }
+.wg-balance { fill: #e8fff9; font: 700 10px system-ui, sans-serif; font-variant-numeric: tabular-nums; }
 [data-level=unknown] .wg-needle { opacity: .45; }
 .worker-gas-gauge[data-level=low] { border-color: #ff4d5e; animation: wg-glow 1.2s ease-in-out infinite; }
 .worker-gas-gauge[data-level=low] :is(.wg-fill, .wg-pump) { animation: wg-blink 1.2s ease-in-out infinite; }
 @keyframes wg-glow { 50% { box-shadow: 0 0 0 2px #ff4d5e55, 0 0 16px #ff4d5e99; } }
 @keyframes wg-blink { 50% { opacity: .2; } }
 .worker-gas-dialog { --rc-ink: #eef4fb; --rc-soft: #c3d0df; box-sizing: border-box; width: min(360px, 94vw); max-height: 92dvh; padding: 0; overflow: auto; color: var(--rc-ink); background: linear-gradient(160deg, #1b2c3ecc, #13283099), #131d2c; border: 1px solid #a0e0ff66; border-radius: 26px; box-shadow: 0 18px 50px #000a, 0 0 0 6px #a0e0ff14; font-family: system-ui, sans-serif; }
+.worker-gas-dialog { position: fixed; inset: 0; margin: auto; }
 .worker-gas-dialog[open] { animation: rc-pop .18s ease-out; }
+.worker-gas-dialog .rc-head { grid-template-columns: auto 1fr auto auto; }
+.worker-gas-info { padding: 0; width: 25px; height: 25px; border: 1px solid #a0e0ff88; border-radius: 50%; background: #ffffff0a; cursor: pointer; }
+.worker-gas-help { margin: 0 18px 14px; color: var(--rc-soft); font-size: .85rem; line-height: 1.5; }
+.worker-gas-dialog .worker-gas-eth { width: 20px; height: 20px; vertical-align: middle; object-fit: contain; }
 .worker-gas-dialog::backdrop { background: #03071166; }
 .worker-gas-dialog button, .worker-gas-dialog input { font: inherit; color: inherit; }
 .worker-gas-dialog :focus-visible { outline: 2px solid #f4d380; outline-offset: 2px; }
@@ -55,7 +64,7 @@
 .worker-gas-dialog .rc-status a { color: #a0e0ff; }
 .worker-gas-dialog .rc-foot { padding: 2px 0 14px; }
 @media (prefers-reduced-motion: reduce) {
-  .worker-gas-gauge, .worker-gas-gauge :is(.wg-fill, .wg-pump), .worker-gas-dialog[open] { animation: none !important; }
+  .worker-gas-gauge, .worker-gas-gauge :is(.wg-fill, .wg-pump), .wg-shine, .worker-gas-dialog[open] { animation: none !important; }
   .wg-fill, .wg-after, .wg-needle { transition: none !important; }
   .worker-gas-gauge[data-level=low] { box-shadow: 0 0 0 2px #ff4d5e; }
 }

@@ -16,12 +16,12 @@ import { completeCreatorSplitProposal, fetchCreatorSplitProposal, rejectCreatorS
 import { isAdminWallet } from './admin-access.mjs';
 import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261025-community-reminder';
 import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261116-longform';
-import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?v=20261126-eth-gifts';
+import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?v=20261126-pinner-dashboard';
 import { renderAdminRadioAnnouncements, requestRadioAnnouncement } from './admin-radio-announcements.mjs';
 import { removeDevertCampaign } from './devert-campaigns.mjs';
 import { renderWallet } from './wallet-label.mjs';
 import { renderCreatorSplitPie } from './creator-split-pie.mjs?v=20261123-split-admin-pies';
-import { mountAdminPromotions, mountPublicPromotion } from './promotions-ui.mjs?v=20261126-eth-gifts';
+import { mountPublicPromotion } from './promotions-ui.mjs?v=20261126-pinner-dashboard';
 
 const ROLE_GRANT_ABI = [
   'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
@@ -86,7 +86,6 @@ document.addEventListener('DOMContentLoaded', () => {
   _radioWeeklyForm = document.getElementById('admin-radio-weekly-form');
 
   if (!_modal) return; // guard: panel HTML not present
-  mountAdminPromotions(document.getElementById('admin-promotions'));
   mountPublicPromotion();
 
   _grantBtn?.addEventListener('click', _grantRole);
@@ -248,7 +247,6 @@ async function _connectWallet() {
     _mintSection?.classList.remove('hidden');
     _roleSection?.classList.remove('hidden');
     document.getElementById('admin-devert-campaigns')?.classList.remove('hidden');
-    document.getElementById('admin-promotions')?.classList.remove('hidden');
     await _loadDevertCampaigns();
   } catch (err) {
     if (checkId === _walletCheckId) _setStatus(`❌ ${err.message || 'Wallet verification failed'}`, true);
@@ -279,7 +277,6 @@ function _resetAdminWallet() {
   _programmingCalendar = null;
   document.getElementById('admin-programming-calendar')?.replaceChildren();
   document.getElementById('admin-devert-campaigns')?.classList.add('hidden');
-  document.getElementById('admin-promotions')?.classList.add('hidden');
   document.getElementById('admin-devert-list')?.replaceChildren();
   _radioScheduleEventsEl?.replaceChildren();
   _radioScheduleSection?.querySelector('[data-radio-announcements]')?.remove();
@@ -357,7 +354,7 @@ async function _loadRadioSchedule() {
       const promotionsResponse = await fetch(`${service.replace(/\/$/, '')}/api/promotions`, { cache: 'no-store' });
       const promotions = await promotionsResponse.json();
       payload.promotionEvents = promotionsResponse.ok ? (promotions.campaigns || [])
-        .filter(campaign => campaign.template === 'musician-referral' && ['published', 'paused', 'closed'].includes(campaign.status))
+        .filter(campaign => ['draft', 'published', 'paused', 'closed'].includes(campaign.status))
         .map(campaign => ({ id: campaign.id, title: campaign.title, status: campaign.status,
           startUtc: campaign.startsAt, endUtc: campaign.endsAt, remainingAwards: campaign.remainingAwards, campaign })) : [];
       if (!promotionsResponse.ok) payload.promotionEventsError = promotions.error || `Promotions unavailable (${promotionsResponse.status})`;

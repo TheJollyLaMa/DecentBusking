@@ -39,6 +39,7 @@ export function chunkSource(file, text, commit) {
     parts = []; bytes = 0;
   };
   text.split('\n').forEach((line, index) => {
+    if (file.endsWith('.md') && /^#{1,6} /.test(line)) flush();
     // Bound even minified/generated single lines without splitting UTF-8 characters.
     let segment = '', segmentBytes = 0;
     const segments = [];
@@ -129,8 +130,20 @@ export function createRetriever(sources, topics = []) {
         const file = topic.entryFiles?.[index];
         const evidence = topic.entryEvidence?.[file];
         for (const anchor of Array.isArray(evidence) ? evidence : [evidence]) {
-          if (file) select(ranked.find(item => item.source.file === file &&
-            (!anchor || item.source.text.includes(anchor)))?.source);
+          if (!file) continue;
+          let source = ranked.find(item => item.source.file === file &&
+            (!anchor || item.source.text.includes(anchor)))?.source;
+          if (!source && anchor) source = sources.find(item => item.file === file && item.text.includes(anchor));
+          // Keep the reviewed code guard and its surrounding lines within the second-pass budget.
+          if (source && anchor && /\.m?js$/.test(file)) {
+            const lines = source.text.split('\n');
+            const at = lines.findIndex(line => line.includes(anchor));
+            const start = Math.max(0, at - 4), end = Math.min(lines.length, at + 5);
+            if (at >= 0) source = { ...source, line: source.line + start,
+              endLine: source.line + end - 1, url: source.url.replace(/#L\d+$/, `#L${source.line + start}`),
+              text: lines.slice(start, end).join('\n') };
+          }
+          select(source);
         }
       }
     }

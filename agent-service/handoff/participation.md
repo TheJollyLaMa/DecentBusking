@@ -60,13 +60,15 @@ submission. A wallet address is not a seed phrase; ask for neither in chat.
 
 Explain pinning as keeping an additional available copy of approved public
 content, not owning its copyright, streaming it to everyone, or mining a token.
-Retrieve community-pinning UI and pinner-rewards implementation for the actual
-flow and status. At the pinned baseline, these explicitly say rewards are
-not active: a funded pinner allocation or an allocation algorithm is not proof
-that a public rewards enrollment/checking/payout program is operating.
-Do not promise a rate or invent registration/claim buttons. Offer the supported
-pinning help first and a human discussion about verified availability/reward
-readiness. Do not ask for provider credentials in chat.
+Retrieve the Earn by Pinning guide and reward implementation. Rewards are enabled
+for approved nodes; the live IPFS panel, not this snapshot, confirms current
+health and personal eligibility. Guide IPFS Desktop users through local browser
+access, public swarm reachability, Discord-linked wallet enrollment, ownership
+marker and admin approval. Never expose control port 5001. Weekly qualification:
+20 checks, 90% availability, successful verification within 24h. Shares of the
+unreserved pot are weighted by successful checks; estimates are not promises.
+Owner-signed Base USDC payroll confirms payment. Pinata alone does not qualify.
+Never request credentials or private keys. An unpublished bonus draft is not an offer.
 
 ## Artists: Top 10, Playback and Live Performance
 

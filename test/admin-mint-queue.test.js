@@ -308,7 +308,8 @@ test('admin section order and identity stay scoped; worker gas lives on the cale
   assert.match(admin, /<span>📣 DVert<\/span>/);
   assert.doesNotMatch(admin, /id="admin-mint-section"[^>]*\bopen\b/);
   assert.doesNotMatch(admin, /worker-gas|admin-worker-funding|admin-payment-ledger-status/);
-  assert.equal((admin.match(/class="admin-tool-section/g) || []).length, 5);
+  assert.equal((admin.match(/class="admin-tool-section/g) || []).length, 4);
+  assert.doesNotMatch(admin, /id="admin-promotions"/);
   const calendar = html.slice(html.indexOf('id="radio-programming-modal"'), html.indexOf('id="admin-modal"'));
   const header = calendar.slice(0, calendar.indexOf('id="radio-programming-status"'));
   assert.ok(header.indexOf('id="worker-gas-gauge"') > header.indexOf('id="radio-programming-close-btn"'));
