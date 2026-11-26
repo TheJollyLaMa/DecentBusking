@@ -96,6 +96,44 @@ test('node ownership bytes stay local and a mismatched marker CID fails setup', 
   await assert.rejects(pinPinnerOwnership({ ownership, fetchImpl: async () => new Response('{"Hash":"wrong"}') }), /different ownership marker CID/);
 });
 
+test('local pinning imports a hash-verified gateway CAR when the DHT cannot find new content', async () => {
+  const { pinCommunityManifest } = await import(moduleUrl);
+  const manifest = { schemaVersion: 1, entries: [{ cid: root }] };
+  const car = new Uint8Array([0x3a, 0xa2, 0x65, 0x72, 0x6f, 0x6f, 0x74, 0x73]);
+  const run = async ({ importedRoot = root, carGatewayUrl } = {}) => {
+    const requests = [];
+    let pinned = false;
+    const result = await pinCommunityManifest({ manifest, provider: 'local', carGatewayUrl, fetchImpl: async (url, options = {}) => {
+      requests.push(url);
+      if (url.includes('/pin/add')) throw new Error('The operation was aborted due to timeout');
+      if (url.startsWith('https://gateway.pinata.cloud/ipfs/')) {
+        return new Response(car, { headers: { 'content-type': 'application/vnd.ipld.car; version=1' } });
+      }
+      if (url.includes('/dag/import')) {
+        assert.equal(options.duplex, 'half');
+        const body = new Uint8Array(await new Response(options.body).arrayBuffer());
+        const boundary = options.headers['content-type'].split('boundary=')[1];
+        assert.match(new TextDecoder().decode(body), new RegExp(`^--${boundary}\r\nContent-Disposition: form-data; name="file"`));
+        assert.ok(Buffer.from(body).includes(Buffer.from(car)));
+        pinned = importedRoot === root;
+        return new Response(`${JSON.stringify({ Root: { Cid: { '/': importedRoot }, PinErrorMsg: '' } })}\n`);
+      }
+      if (url.includes('/pin/ls')) return new Response(JSON.stringify({ Keys: pinned ? { [root]: { Type: 'recursive' } } : {} }));
+      throw new Error(`Unexpected request ${url}`);
+    } });
+    return { result, requests };
+  };
+  const imported = await run();
+  assert.deepEqual(imported.result.successes, [root]);
+  assert.ok(imported.requests.includes(`https://gateway.pinata.cloud/ipfs/${root}?format=car&dag-scope=all`));
+  assert.ok(imported.requests.some(url => url === 'http://127.0.0.1:5001/api/v0/dag/import?pin-roots=true'));
+  const wrongRoot = await run({ importedRoot: 'bafkreiafo5gq6gwkoyvpeg4omvgxvo2dcj3s3wbh2m4qtld5jk4mjhpv4u' });
+  assert.match(wrongRoot.result.failures[0].error, /timeout; verified gateway copy failed: gateway CAR root does not match/);
+  const disabled = await run({ carGatewayUrl: '' });
+  assert.equal(disabled.result.failures[0].error, 'The operation was aborted due to timeout');
+  assert.ok(!disabled.requests.some(url => url.includes('gateway')));
+});
+
 test('the community sync helper pins new manifest content and fails explicitly when the manifest is unavailable', async () => {
   const { createCommunityPinnerClient } = await import('../discord-bot/community-pinner-client.js');
   const poll = createCommunityPinnerClient({ fetchImpl: async url => {

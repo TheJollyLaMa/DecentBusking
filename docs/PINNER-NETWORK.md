@@ -1,5 +1,8 @@
 # Community Pinner Network
 
+New pinners: start with the plain-language [Earn by pinning guide](../wiki/Earn-by-Pinning.md).
+This page is the technical design and operator reference.
+
 Status: **manifest-pinner rewards implemented, deployment-gated**. Set
 `PINNER_REWARDS_ENABLED=true` on the hosted worker to open enrollment after the
 matching code is deployed. The header reports the actual service state. No
@@ -10,7 +13,7 @@ fan-out and K-of-N durability remain future work in #497.
 
 | Piece | Code | What it does now |
 | --- | --- | --- |
-| Checkpoint mirror service | `discord-bot/checkpoint-mirror.js` (`createCheckpointMirror`) | In-memory job queue on the Render worker. `mirror(bytes, { required })` enqueues exact checkpoint bytes; `claimWait` long-polls (10 s); `acknowledge` resolves the job when the client returns the expected CID with `recursivePinned: true`. Available = polled within 30 s. |
+| Checkpoint mirror service | `discord-bot/checkpoint-mirror.js` (`createCheckpointMirror`) | In-memory job queue on the Render worker. `mirror(bytes, { required })` enqueues exact checkpoint bytes up to `CHECKPOINT_MIRROR_MAX_BYTES` (16 MiB; the playlist checkpoint passed 5 MB in November 2026), and queued best-effort jobs share a 32 MiB budget so Render memory stays bounded; `claimWait` long-polls (10 s); `acknowledge` resolves the job when the client returns the expected CID with `recursivePinned: true`. Available = polled within 30 s. |
 | HTTP routes | `discord-bot/ipfs-worker.js` `POST /api/checkpoint-mirror/claim\|ack` | Bearer auth with one shared `CHECKPOINT_MIRROR_SECRET`. |
 | Mirror client | `discord-bot/checkpoint-mirror-client.js --watch` | Operator Mac. Verifies the CID, allowlists checkpoint shapes, imports into loopback Kubo, verifies the recursive pin, then acks. |
 | Save policy | `discord-bot/ipfs-state.js` (`requireLocalMirror`) | **Required** stores (DJuke playlist batches, DeVert paid journal, DMTv radio, DCal rewards, some live-audio state) call `beforeUpload(..., { required: true })` *before* the Pinata upload and fail if the mirror is offline. Other stores upload to Pinata first and mirror best-effort. |
@@ -58,6 +61,12 @@ reward proofs never use any of those secrets and do not trust mirror acks.
    enrolls you, removes pins or claims a reward. For a different hosted worker,
    set `DBUSK_SERVICE_URL`; `IPFS_API_URL` must remain loopback. Keep the helper
    and IPFS Desktop running; arrange your own login/startup service if needed.
+   New Pinata uploads are often not advertised on the DHT. When `pin/add` does
+   not finish within 30 s, the helper (and the browser's local pin flow) fetches
+   a trustless CAR from `https://gateway.pinata.cloud/ipfs/<cid>?format=car`,
+   imports it with `dag/import?pin-roots=true` (Kubo hash-verifies every block)
+   and requires the CAR root to equal the manifest CID. Set
+   `PINNER_CAR_GATEWAY` to use another trustless gateway.
 
 ### Reachability and browser setup
 

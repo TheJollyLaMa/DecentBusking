@@ -23,8 +23,10 @@ export function buildCommunityPinManifest({ checkpointCid = '', tracks = [], alb
     rewardStatus, rewardPolicy: 'Admin-approved pinners earn shares from independently verified availability checks, not from clicking Pin. Weekly awards require owner-signed Base USDC payroll.' };
 }
 
+export const COMMUNITY_CAR_GATEWAY = 'https://gateway.pinata.cloud';
+
 export async function pinCommunityManifest({ manifest, provider, pinataJwt = '', ipfsApiUrl = 'http://127.0.0.1:5001',
-  fetchImpl = fetch, onProgress = () => {} }) {
+  carGatewayUrl = COMMUNITY_CAR_GATEWAY, carTimeoutMs = 30 * 60000, fetchImpl = fetch, onProgress = () => {} }) {
   if (!manifest || manifest.schemaVersion !== 1 || !Array.isArray(manifest.entries) || manifest.entries.length > 1000) {
     throw new Error('Invalid community pin manifest');
   }
@@ -43,10 +45,17 @@ export async function pinCommunityManifest({ manifest, provider, pinataJwt = '',
       if (provider === 'local') {
         const base = localIpfsBase(ipfsApiUrl);
         const query = new URLSearchParams({ arg: cid, recursive: 'true' });
-        const response = await fetchImpl(`${base}/api/v0/pin/add?${query}`, {
-          method: 'POST', signal: AbortSignal.timeout(30000),
-        });
-        if (!response.ok) throw new Error(`IPFS Desktop returned ${response.status}`);
+        try {
+          const response = await fetchImpl(`${base}/api/v0/pin/add?${query}`, {
+            method: 'POST', signal: AbortSignal.timeout(30000),
+          });
+          if (!response.ok) throw new Error(`IPFS Desktop returned ${response.status}`);
+        } catch (pinError) {
+          if (!carGatewayUrl) throw pinError;
+          // New uploads are often not advertised to the DHT yet; a CAR import still hash-verifies every block.
+          try { await importVerifiedCar({ cid, base, carGatewayUrl, carTimeoutMs, fetchImpl }); }
+          catch (carError) { throw new Error(`${pinError.message}; verified gateway copy failed: ${carError.message}`); }
+        }
         const verify = await fetchImpl(`${base}/api/v0/pin/ls?${new URLSearchParams({ arg: cid, type: 'recursive' })}`, {
           method: 'POST', signal: AbortSignal.timeout(15000),
         });
@@ -68,6 +77,54 @@ export async function pinCommunityManifest({ manifest, provider, pinataJwt = '',
     onProgress({ completed: index + 1, total: manifest.entries.length, cid });
   }
   return { provider, successes, failures, rewardStatus: manifest.rewardStatus };
+}
+
+async function importVerifiedCar({ cid, base, carGatewayUrl, carTimeoutMs, fetchImpl }) {
+  const gateway = new URL(carGatewayUrl);
+  if (gateway.protocol !== 'https:' || gateway.username || gateway.password) throw new Error('CAR gateway must use HTTPS');
+  const signal = AbortSignal.timeout(carTimeoutMs);
+  const car = await fetchImpl(`${gateway.origin}/ipfs/${cid}?format=car&dag-scope=all`, {
+    headers: { accept: 'application/vnd.ipld.car' }, redirect: 'error', signal,
+  });
+  if (!car.ok || !car.body) throw new Error(`gateway returned ${car.status}`);
+  if (!(car.headers.get('content-type') || '').startsWith('application/vnd.ipld.car')) throw new Error('gateway did not return a CAR');
+  const response = await fetchImpl(`${base}/api/v0/dag/import?pin-roots=true`, {
+    method: 'POST', signal, ...await carImportBody(car, cid),
+  });
+  if (!response.ok) throw new Error(`IPFS Desktop import returned ${response.status}`);
+  const roots = (await response.text()).trim().split('\n').filter(Boolean).map(line => JSON.parse(line).Root).filter(Boolean);
+  if (roots.length !== 1 || roots[0].Cid?.['/']?.toLowerCase() !== cid.toLowerCase()) throw new Error('gateway CAR root does not match');
+  if (roots[0].PinErrorMsg) throw new Error(roots[0].PinErrorMsg);
+}
+
+async function carImportBody(car, cid) {
+  if (!globalThis.process?.versions?.node) {
+    // Browsers cannot stream request bodies to loopback HTTP/1.1; large Blobs are disk-backed.
+    const form = new FormData();
+    form.append('file', await car.blob(), `${cid}.car`);
+    return { body: form };
+  }
+  // Node streams the CAR so a large album is never held in memory.
+  const boundary = `dbusk-${crypto.randomUUID()}`;
+  const encoder = new TextEncoder();
+  const reader = car.body.getReader();
+  let stage = 0;
+  const body = new ReadableStream({
+    async pull(controller) {
+      if (stage === 0) {
+        stage = 1;
+        controller.enqueue(encoder.encode(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${cid}.car"\r\n` +
+          'Content-Type: application/vnd.ipld.car\r\n\r\n'));
+        return;
+      }
+      const { done, value } = await reader.read();
+      if (!done) { controller.enqueue(value); return; }
+      controller.enqueue(encoder.encode(`\r\n--${boundary}--\r\n`));
+      controller.close();
+    },
+    cancel: reason => reader.cancel(reason),
+  });
+  return { body, duplex: 'half', headers: { 'content-type': `multipart/form-data; boundary=${boundary}` } };
 }
 
 function localIpfsBase(value) {

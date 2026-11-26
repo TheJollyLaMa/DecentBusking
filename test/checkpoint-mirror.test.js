@@ -55,6 +55,38 @@ test('checkpoint mirror times out and rejects oversized jobs without publication
   await assert.rejects(bridge.mirror(Buffer.alloc(9)), /size limit/);
   await assert.rejects(bridge.mirror(Buffer.from('small')), /timed out/);
   assert.equal(bridge.status().pending, 0);
+  const budgeted = createCheckpointMirror({ secret, timeoutMs: 10, maxBytes: 8, maxOptionalBytes: 10 });
+  budgeted.claim(`Bearer ${secret}`);
+  const first = budgeted.mirror(Buffer.alloc(6), { key: 'playlist' });
+  await assert.rejects(budgeted.mirror(Buffer.alloc(6), { key: 'hype' }), /queue is full/);
+  await assert.rejects(first, /timed out/);
+});
+
+test('a multi-megabyte playlist checkpoint passes the worker queue and the Mac client end to end', async () => {
+  const { createCheckpointMirror, checkpointContentCid } = await import('../discord-bot/checkpoint-mirror.js');
+  const { createLocalCheckpointMirrorClient } = await import('../discord-bot/checkpoint-mirror-client.js');
+  const bridge = createCheckpointMirror({ secret });
+  const authorization = `Bearer ${secret}`;
+  bridge.claim(authorization);
+  const bytes = Buffer.from(JSON.stringify({ schemaVersion: 1, playlist: [{ title: 'x'.repeat(3 * 1024 * 1024) }] }));
+  const cid = await checkpointContentCid(bytes);
+  const pending = bridge.mirror(bytes, { key: 'playlist' });
+  let pinned = false;
+  const poll = createLocalCheckpointMirrorClient({ serviceUrl: 'https://worker.example', secret,
+    fetchImpl: async (url, options) => {
+      if (url.endsWith('/claim')) return new Response(JSON.stringify({ job: await bridge.claimWait(authorization, 1000) }));
+      if (url.includes('/api/v0/add')) {
+        assert.equal((await options.body.get('file').arrayBuffer()).byteLength, bytes.length);
+        return new Response(JSON.stringify({ Hash: cid }));
+      }
+      if (url.includes('/pin/add')) { pinned = true; return new Response('{}'); }
+      if (url.includes('/pin/ls')) return new Response(JSON.stringify({ Keys: pinned ? { [cid]: { Type: 'recursive' } } : {} }));
+      if (url.endsWith('/ack')) return new Response(JSON.stringify(bridge.acknowledge(authorization, JSON.parse(options.body))));
+      throw new Error('Unexpected request');
+    } });
+  assert.equal((await poll()).cid, cid);
+  assert.equal(await pending, cid);
+  assert.equal(bridge.status().pending, 0);
 });
 
 test('a rejected required checkpoint cannot starve another required paid journal or become an acknowledged success', async () => {

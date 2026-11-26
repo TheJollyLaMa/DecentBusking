@@ -9,7 +9,8 @@ for admin-approved musicians and listeners with Discord-linked wallets. Independ
 node-ownership and IPFS availability checks qualify weekly Base USDC shares;
 closed-week awards enter owner-signed Payroll. The approved budget is 100% of the
 unreserved closing pinner fund, not funds already owed. Pin clicks and shared
-Pinata copies are not reward proofs. See [node setup, terms and deployment](docs/PINNER-NETWORK.md).
+Pinata copies are not reward proofs. New pinners: start with the [Earn by pinning guide](wiki/Earn-by-Pinning.md).
+See [node setup, terms and deployment](docs/PINNER-NETWORK.md) for the technical design.
 
 Between tracks, the radio's waiting or up-next message uses the song-title ticker.
 On mobile, compact votes are centered between Discord and the watchlist eyes;
