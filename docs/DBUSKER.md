@@ -7,9 +7,33 @@ Tracking: [issue #291](https://github.com/TheJollyLaMa/DecentBusking/issues/291)
 
 **Invited pilot, not open community access.** The site configuration points to
 the separate `https://decentbusking-dbusker.onrender.com` service. The launcher
-is hidden until an invited Base wallet connects; signatures and provider consent
-are still required for chat. The service uses private configuration and reviewed
-handoff approval. Offline tests do not establish live answer quality.
+is hidden until an invited Base wallet connects. The service uses private
+configuration and reviewed handoff approval. Offline tests do not establish
+live answer quality.
+
+The default `DBUSKER_ACCESS_MODE=signed` retains the signed-session and consent
+workflow described below. An operator may explicitly set `address-only` for
+the simpler pilot: a claimed invited address opens chat without a signature.
+This is not wallet authentication: anyone who learns an invited address can
+impersonate it, spend the shared allowance and make wallet usage attribution
+unreliable. IP, origin, invitation and rate controls do not establish identity.
+In address-only mode, private per-wallet usage and review APIs are disabled;
+new unanswered questions are not captured and exchanges cannot be shared.
+Existing records remain subject to their existing retention and purge rules.
+The information control describes provider data use and the access tradeoff.
+Do not treat this mode as protecting private per-wallet data or proving who
+used the service.
+
+The optional shared meter reads only the configured OpenAI project cost from
+the organization Costs API. Set `DBUSKER_BILLING_KEY` to a restricted admin
+key with Usage API read only, `DBUSKER_BILLING_PROJECT_ID` to the DBusker
+project ID and `DBUSKER_MONTHLY_BUDGET_USD` to the matching project target.
+Keep the key in the server's secret configuration, never the frontend.
+The target is a separate operator-set value and must be updated if the OpenAI
+project alert changes. It is not automatically synchronized, a prepaid credit
+balance, or a guaranteed cap. Costs are provider-reported and may lag; the
+display fails unavailable instead of treating errors as zero. Each UTC month
+starts a new report. The existing durable call limit remains independent.
 
 The initial remote site is `https://thejollylama.github.io/DecentBusking/`.
 Other origins (including localhost and ENS gateways) are not implicitly allowed.
@@ -161,6 +185,9 @@ Before any real model call:
 There is no live mock mode: automated tests inject a fake provider only inside
 the test process, and never pretend to be a real knowledge evaluation.
 
+The question composer defaults to automatic Balanced routing; its answer-style
+selector can choose Efficient or Deep dive for the next question.
+
 ### Creating the provider key
 
 1. Sign in to the [OpenAI API platform](https://platform.openai.com/), not the
@@ -175,9 +202,10 @@ the test process, and never pretend to be a real knowledge evaluation.
 4. In the selected project's **API keys**, create a new secret key named
    **DBusker local pilot**. Prefer restricted permissions: allow writing to
    `/v1/responses`, with the reviewed models available to the project. This
-   service does not need Files, Assistants, fine-tuning, or administrative keys.
-   If access fails, inspect the provider's error and adjust only the required
-   permission; do not make a broadly privileged key as a workaround.
+   model service does not need Files, Assistants, fine-tuning, or an admin key.
+   The optional billing meter uses a separate restricted usage-read key as
+   described above. If access fails, inspect the provider's error and adjust
+   only the required permission; do not use a broadly privileged key.
 5. Copy the secret directly into the ignored `agent-service/.env` file after
    `OPENAI_API_KEY=`. Do not paste it into chat, a GitHub issue, site
    configuration, a terminal command, or a screenshot. Restrict `.env` to

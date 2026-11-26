@@ -13,6 +13,7 @@ import { MODES, selectRoute, deeperRoute, fitContext, finalAnswer } from './rout
 import { createMetrics } from './metrics.mjs';
 import { chainIntent, createChainReader } from './chain.mjs';
 import { createAccounting, validUsage } from './accounting.mjs';
+import { createBilling } from './billing.mjs';
 
 const SESSION_MS = 15 * 60 * 1000;
 const NONCE_MS = 5 * 60 * 1000;
@@ -27,6 +28,8 @@ export function loadSettings(env = process.env) {
       ['localhost', '127.0.0.1'].includes(site.hostname))) throw new Error('Site URL requires HTTPS outside localhost');
   const maxCalls = Number(env.DBUSKER_MAX_CALLS || 100);
   if (!Number.isSafeInteger(maxCalls) || maxCalls < 1 || maxCalls > 10000) throw new Error('Invalid DBUSKER_MAX_CALLS');
+  const accessMode = env.DBUSKER_ACCESS_MODE || 'signed';
+  if (!['signed', 'address-only'].includes(accessMode)) throw new Error('Invalid DBUSKER_ACCESS_MODE');
   if (env.DBUSKER_MODEL) throw new Error('DBUSKER_MODEL has been replaced by reviewed handoff/routing.json; remove the environment override.');
   return {
     enabled: env.DBUSKER_ENABLED === 'true', siteUrl: site.href, origin: site.origin,
@@ -34,11 +37,13 @@ export function loadSettings(env = process.env) {
     accessFile: path.resolve(env.DBUSKER_ACCESS_FILE || path.join(directory, 'access.json')),
     approvalFile: path.resolve(env.DBUSKER_APPROVAL_FILE || path.join(directory, 'approval.json')),
     stateFile: path.resolve(env.DBUSKER_STATE_FILE || path.join(directory, 'state.sqlite')), maxCalls,
-    chainEnabled: env.DBUSKER_CHAIN_ENABLED === 'true',
+    chainEnabled: env.DBUSKER_CHAIN_ENABLED === 'true', accessMode,
+    billingKey: env.DBUSKER_BILLING_KEY || '', billingProject: env.DBUSKER_BILLING_PROJECT_ID || '',
+    monthlyBudget: Number(env.DBUSKER_MONTHLY_BUDGET_USD || 0),
   };
 }
 
-export function createAgentServer(settings, { modelCall = askModel, chainRead = createChainReader(), now = Date.now, logger = console } = {}) {
+export function createAgentServer(settings, { modelCall = askModel, chainRead = createChainReader(), now = Date.now, logger = console, billingFetch = fetch } = {}) {
   const pack = readHandoff();
   const retrieve = createRetriever(pack.sources, pack.topics);
   const db = new DatabaseSync(settings.stateFile);
@@ -46,6 +51,8 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
   db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS budget (id INTEGER PRIMARY KEY CHECK(id=1), calls INTEGER NOT NULL); INSERT OR IGNORE INTO budget VALUES (1,0)');
   const metrics = createMetrics(db);
   const accounting = createAccounting(db, now);
+  const billing = createBilling({ apiKey: settings.billingKey, projectId: settings.billingProject,
+    monthlyBudget: settings.monthlyBudget, now, fetchImpl: billingFetch });
   const challenges = new Map(), sessions = new Map(), rates = new Map(), active = new Map();
   let closed = false;
   function access() {
@@ -83,6 +90,9 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
       throw problem(403, 'This wallet no longer has DBusker access.');
     }
     return { key, session };
+  }
+  function privateSession(session) {
+    if (!session.verified) throw problem(403, 'Private usage and review records are unavailable in address-only mode.');
   }
   async function body(request) {
     if (request.headers['content-type'] !== 'application/json') throw problem(415, 'Expected application/json.');
@@ -125,16 +135,24 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
         return send(200, { cleared: true });
       }
       ready();
+      if (request.url === '/budget' && request.method === 'GET') {
+        authorized(request);
+        limit(`billing:${request.socket.remoteAddress}`, 30);
+        return send(200, await billing());
+      }
       if (request.url === '/usage' && request.method === 'GET') {
         const { session } = authorized(request);
+        privateSession(session);
         return send(200, accounting.usage(session.wallet));
       }
       if (request.url === '/reviews' && request.method === 'GET') {
         const { session } = authorized(request);
+        privateSession(session);
         return send(200, { reviews: accounting.reviews(session.wallet) });
       }
       if (request.url === '/review' && request.method === 'POST') {
         const { key, session } = authorized(request);
+        privateSession(session);
         limit(`review:${session.wallet}`, 6);
         const { exchangeId, consent } = await body(request);
         if (consent !== true) throw problem(400, 'Preview and explicitly consent before sharing this exchange.');
@@ -144,6 +162,7 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
       }
       if (/^\/review\/[a-f0-9]{64}$/.test(request.url) && request.method === 'DELETE') {
         const { session } = authorized(request);
+        privateSession(session);
         accounting.remove(session.wallet, request.url.slice('/review/'.length));
         return send(200, { deleted: true });
       }
@@ -152,7 +171,8 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
         const { address, chainId } = await body(request);
         let wallet;
         try { wallet = getAddress(address); } catch { throw problem(400, 'Invalid wallet address.'); }
-        return send(200, { invited: chainId === 8453 && access().wallets.has(wallet.toLowerCase()) });
+        return send(200, { invited: chainId === 8453 && access().wallets.has(wallet.toLowerCase()),
+          accessMode: settings.accessMode });
       }
       if (request.url === '/challenge' && request.method === 'POST') {
         limit(`ip:${request.socket.remoteAddress}`, 15);
@@ -170,7 +190,7 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
           issuedAt: new Date(now()).toISOString(), expirationTime: new Date(now() + NONCE_MS).toISOString(),
         }).prepareMessage();
         challenges.set(nonce, { wallet: wallet.toLowerCase(), message, expires: now() + NONCE_MS });
-        return send(200, { message });
+        return send(200, { message, accessMode: settings.accessMode });
       }
       if (request.url === '/session' && request.method === 'POST') {
         limit(`ip:${request.socket.remoteAddress}`, 15);
@@ -180,17 +200,20 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
         const challenge = challenges.get(parsed.nonce);
         challenges.delete(parsed.nonce);
         if (!challenge || challenge.expires <= now() || challenge.message !== payload.message) throw problem(401, 'Sign-in challenge expired or already used.');
-        try {
-          await parsed.verify({ signature: payload.signature, domain: settings.domain, nonce: parsed.nonce,
-            time: new Date(now()).toISOString() });
-        } catch { throw problem(401, 'Wallet signature could not be verified.'); }
+        const verified = settings.accessMode !== 'address-only';
+        if (verified) {
+          try {
+            await parsed.verify({ signature: payload.signature, domain: settings.domain, nonce: parsed.nonce,
+              time: new Date(now()).toISOString() });
+          } catch { throw problem(401, 'Wallet signature could not be verified.'); }
+        }
         ready();
         if (!access().wallets.has(challenge.wallet)) throw problem(403, 'This wallet is not invited to DBusker.');
         const credential = token(), expires = now() + SESSION_MS;
-        sessions.set(hash(credential), { wallet: challenge.wallet, expires, messages: [], calls: 0 });
+        sessions.set(hash(credential), { wallet: challenge.wallet, expires, messages: [], calls: 0, verified });
         return send(200, { token: credential, expiresAt: expires, wallet: challenge.wallet,
-          capabilities: { chain: settings.chainEnabled === true, reviews: true },
-          usage: accounting.usage(challenge.wallet),
+          capabilities: { chain: settings.chainEnabled === true, reviews: verified },
+          ...(verified ? { usage: accounting.usage(challenge.wallet) } : {}),
           handoff: { digest: pack.digest, commit: pack.commit, indexedAt: pack.indexedAt } });
       }
       if (request.url === '/chat' && request.method === 'POST') {
@@ -200,7 +223,7 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
         if (active.size >= 3) throw problem(429, 'DBusker is busy. Please try shortly.');
         if (session.calls >= 20) throw problem(429, 'This session has reached its pilot limit.');
         const { message, consent, mode = 'balanced' } = await body(request);
-        if (consent !== true) throw problem(400, 'Consent to send messages to the model provider is required.');
+        if (session.verified && consent !== true) throw problem(400, 'Consent to send messages to the model provider is required.');
         if (typeof message !== 'string' || !message.trim() || message.length > 2000) throw problem(400, 'Enter a question of 1-2000 characters.');
         if (!MODES.includes(mode)) throw problem(400, 'Choose Efficient, Balanced or Deep dive.');
         session.exchange = null;
@@ -212,17 +235,21 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
           handoffDigest: pack.digest, routing: { mode, task: 'sensitive', models: [], tiers: [], attempts: 0,
             review: 'insufficient_evidence', escalation: 'missing_evidence' } });
         const sources = retrieve(message, session.messages);
-        const instructions = [questionInstructions(pack, message, session.messages), ...(intent ? [pack.chain] : [])].join('\n\n');
+        const instructions = [questionInstructions(pack, message, session.messages), ...(intent ? [pack.chain] : []),
+          ...(!session.verified ? ['Private review and unanswered-question capture are disabled in this session. Do not claim that a question or answer was saved or shared with the steward.'] : [])].join('\n\n');
         const messages = [...session.messages, { role: 'user', content: message.trim() }].slice(-7);
         let route = selectRoute(pack.routing, mode, message, session.task);
         if (!sources.length && !intent) {
-          const answer = "I don't know that one yet. I've noted the question for the steward. Meanwhile, try the public newcomer guide or ask the community.";
+          const answer = session.verified
+            ? "I don't know that one yet. I've noted the question for the steward. Meanwhile, try the public newcomer guide or ask the community."
+            : "I don't know that one yet. Try the public newcomer guide or ask the community.";
           session.messages = [...messages, { role: 'assistant', content: answer }].slice(-6);
           session.task = route.task;
           const result = { answer, abstained: true, sources: [], handoffDigest: pack.digest,
             routing: { mode, task: route.task, models: [], tiers: [], attempts: 0, review: 'insufficient_evidence', escalation: 'missing_evidence' } };
           session.exchange = { id: token(), question: message.trim(), answer, sources: [], routing: result.routing, handoffDigest: pack.digest };
-          return send(200, { ...result, exchangeId: session.exchange.id, captured: accounting.capture(session.wallet, session.exchange) });
+          return send(200, { ...result, ...(session.verified
+            ? { exchangeId: session.exchange.id, captured: accounting.capture(session.wallet, session.exchange) } : {}) });
         }
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(problem(504, 'DBusker took too long. Please try again.')), 45000);
@@ -289,8 +316,8 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
             } };
           session.exchange = { id: token(), question: message.trim(), answer: result.answer,
             sources: result.sources, routing: result.routing, handoffDigest: pack.digest };
-          return send(200, { ...result, exchangeId: session.exchange.id,
-            captured: result.abstained ? accounting.capture(session.wallet, session.exchange) : null });
+          return send(200, { ...result, ...(session.verified ? { exchangeId: session.exchange.id,
+            captured: result.abstained ? accounting.capture(session.wallet, session.exchange) : null } : {}) });
         } finally {
           clearTimeout(timeout);
           response.off('close', disconnect);
