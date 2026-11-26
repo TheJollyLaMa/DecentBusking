@@ -115,21 +115,22 @@ export async function sendWorkerTopUp({ signer, workerAddress, amountWei, onStep
 }
 
 export function workerGaugeMarkup({ preview = false } = {}) {
-  return `<svg class="wg-svg" viewBox="0 0 100 66" aria-hidden="true" focusable="false">`
+  return `<svg class="wg-svg" viewBox="0 0 100 84" aria-hidden="true" focusable="false">`
     + `<path class="wg-track" d="${GAUGE_ARC}" pathLength="100"/>`
     + (preview ? `<path class="wg-after" d="${GAUGE_ARC}" pathLength="100"/>` : '')
     + `<path class="wg-fill" d="${GAUGE_ARC}" pathLength="100"/>`
+    + `<path class="wg-shine" d="${GAUGE_ARC}" pathLength="100"/>`
     + '<text class="wg-mark" x="10" y="62" text-anchor="middle">E</text>'
     + '<text class="wg-mark" x="90" y="62" text-anchor="middle">F</text>'
-    + '<text class="wg-pump" x="50" y="38" text-anchor="middle">⛽</text>'
+    + '<image class="wg-pump" href="img/Ens_Eth_Breathe.png" x="42" y="23" width="16" height="16"/>'
     + '<line class="wg-needle" x1="50" y1="50" x2="50" y2="18"/>'
     + '<circle class="wg-pivot" cx="50" cy="50" r="4"/>'
-    + '<text class="wg-times" x="50" y="65" text-anchor="middle"></text></svg>';
+    + '<text class="wg-times" x="50" y="65" text-anchor="middle"></text>'
+    + '<text class="wg-balance" x="50" y="79" text-anchor="middle"></text></svg>';
 }
 
-// The preview draws the current level solid, the post-top-up level as a ghost arc, and points the needle at the result.
-function paintGauge(root, gauge, after = null) {
-  const shown = after || gauge;
+// Only the ghost arc previews a top-up; the needle, multiplier and balance remain actual holdings.
+function paintGauge(root, gauge, state, after = null) {
   root.dataset.level = gauge.level;
   if (after) root.dataset.afterLevel = after.level;
   else delete root.dataset.afterLevel;
@@ -138,9 +139,11 @@ function paintGauge(root, gauge, after = null) {
   const ghost = root.querySelector('.wg-after');
   if (ghost) ghost.style.strokeDasharray = `${((after?.fill || 0) * 100).toFixed(2)} 100`;
   const needle = root.querySelector('.wg-needle');
-  if (needle) needle.style.transform = `rotate(${(-90 + 180 * shown.fill).toFixed(1)}deg)`;
+  if (needle) needle.style.transform = `rotate(${(-90 + 180 * gauge.fill).toFixed(1)}deg)`;
   const times = root.querySelector('.wg-times');
-  if (times) times.textContent = shown.multiplier ? `${shown.multiplier}×` : '';
+  if (times) times.textContent = gauge.multiplier ? `${gauge.multiplier}×` : '';
+  const balance = root.querySelector('.wg-balance');
+  if (balance) balance.textContent = state ? formatEth(state.balanceWei) : '— ETH';
 }
 
 function readingText(state, gauge, error) {
@@ -201,7 +204,7 @@ export function initWorkerGasGauge() {
     const wei = amountWei();
     const after = state && wei ? workerGauge({ ...state, balanceWei: state.balanceWei + wei,
       lowBalance: state.balanceWei + wei < state.thresholdWei }) : null;
-    if (preview) paintGauge(preview, gauge, after);
+    if (preview) paintGauge(preview, gauge, state, after);
     if (reading) {
       const afterRunway = after && config.dailyBurnWei > 0n ? ` · ~${(state.balanceWei + wei) / config.dailyBurnWei} days` : '';
       reading.textContent = `Now ${readingText(state, gauge, error)}${after ? `\nAfter ${formatEth(state.balanceWei + wei)}${afterRunway}` : ''}`;
@@ -232,7 +235,7 @@ export function initWorkerGasGauge() {
     const admin = isAdminWallet();
     button.hidden = !admin;
     const gauge = workerGauge(state);
-    paintGauge(button, gauge);
+    paintGauge(button, gauge, state);
     const label = `Worker gas ${readingText(state, gauge, error)} — open top-up`;
     button.setAttribute('aria-label', label);
     button.title = label;
@@ -346,6 +349,12 @@ export function initWorkerGasGauge() {
   }
 
   button.addEventListener('click', openDialog);
+  part('info')?.addEventListener('click', () => {
+    const help = part('help');
+    if (!help) return;
+    help.hidden = !help.hidden;
+    part('info').setAttribute('aria-expanded', String(!help.hidden));
+  });
   presets.forEach(preset => preset.addEventListener('click', () => {
     setAmount(topUpToTanksWei(state, Number(preset.dataset.workerGasPreset)));
   }));

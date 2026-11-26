@@ -50,6 +50,29 @@ async function fixture(options = {}) {
     stored: () => stored, setTime: t => { clock = t; }, setBalance: b => { balance = b; },
     setReceipt: r => { receipt = r ? { blockHash, ...r } : r; }, setTransaction: tx => { transaction = tx; } };
 }
+test('pinner pilot persists only as a capped ETH draft with an unconfigured NFT and cannot be published', async () => {
+  const f = await fixture();
+  const draftQuote = { ethUsdMicros: '4000000000', quotedAt: new Date(epoch).toISOString() };
+  const amounts = f.shared.pinnerPromotionAmounts(draftQuote.ethUsdMicros);
+  assert.equal(amounts.rewardUnits, '1250000000000000');
+  assert.equal(amounts.budgetUnits, '6250000000000000');
+  const campaign = await f.create(input({ template: 'pinner', asset: 'eth', maxAwards: 5, draftQuote, ...amounts }));
+  assert.equal(campaign.status, 'draft');
+  assert.equal(campaign.asset, 'eth');
+  assert.equal(campaign.pinnerPilot.qualifyingDays, 30);
+  assert.equal(campaign.pinnerPilot.nftReward, null);
+  const { validatePromotionCheckpoint } = await import('../discord-bot/promotions.js');
+  assert.doesNotThrow(() => validatePromotionCheckpoint(f.stored()));
+  await assert.rejects(f.publish(campaign), /draft-only/);
+  const publicState = await f.service.publicState();
+  assert.equal(publicState.campaigns[0].status, 'draft', 'draft records remain public under the existing IPFS policy');
+  const { publicCalendarData } = await import('../js/dbusk-calendar-core.mjs');
+  assert.equal(publicCalendarData({}, publicState).campaigns.length, 0, 'drafts are not advertised on the public calendar');
+  const invalid = structuredClone(f.stored());
+  invalid.campaigns[0].status = 'published';
+  assert.throws(() => validatePromotionCheckpoint(invalid), /Invalid promotions checkpoint/);
+  await assert.rejects(f.create(input({ template: 'pinner', asset: 'eth', maxAwards: 6, draftQuote, ...amounts })), /five.*25/);
+});
 async function matchFixture({ slots = 1, gifts = [], rewards, stock = 11n } = {}) {
   const musician = Wallet.createRandom();
   const f = await fixture({ readPlaylist: () => [{ trackId: 'match-track', title: 'Trial song', mintStatus: 'minted', tokenId: '7',

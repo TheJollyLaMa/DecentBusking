@@ -1,5 +1,7 @@
 import { PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS, MUSICIAN_REFERRAL_PILOT, MUSICIAN_REFERRAL_TERMS, PROMOTIONS_FUND, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, isPromotionsFund,
-  promotionAuthorization, promotionWorkReference, promotionMoney, promotionUnits, promotionLink, campaignAsset, musicianReferralConfig } from './promotions.mjs?v=20261126-eth-gifts';
+  promotionAuthorization, promotionWorkReference, promotionMoney, promotionUnits, promotionLink, campaignAsset, musicianReferralConfig,
+  pinnerPromotionAmounts } from './promotions.mjs?v=20261126-pinner-dashboard';
+import { loadEthUsd } from './eth-usd-quote.mjs?v=20261126-eth-gifts';
 import { newYorkInputToUtc, utcToNewYorkInput } from './radio-calendar.mjs';
 import { radioListenerId } from './radio-client.mjs';
 import { getAudibleBroadcast } from './public-broadcast-client.mjs?v=20261125-song-tail';
@@ -39,6 +41,7 @@ async function signed(command) {
   await w.check();
   const result = await request(body);
   await w.check();
+  if (isAdminWallet(w.address)) document.dispatchEvent(new CustomEvent('promotions-changed', { detail: { campaigns: result.campaigns, address: w.address } }));
   return result;
 }
 export const fetchPromotionsState = () => request();
@@ -100,6 +103,7 @@ const field = (name, label, type = 'text', value = '') =>
 const termsNotice = 'All promotion records are public, including drafts, wallet/referrer links, submitted evidence, activity, review notes and payment receipts. Records are stored on public IPFS; do not submit secrets or personal information about others. Public copies may persist permanently. Rewards require evidence and admin approval. Promotionals is earmarked, not escrowed. Wallets/browsers are not proof of unique humans. Activity means a signed song vote in the stated window, not a positive vote or verified listening time.';
 function campaignCard(c) {
   return `<h3>${escape(c.title)}</h3><p><strong>${money(c.rewardUnits, campaignAsset(c))}</strong> per approved award · ${escape(c.status)} · ${c.remainingAwards} awards available</p>
+    ${c.template === 'pinner' ? '<p>Draft only · five $5-equivalent ETH bonuses, $25 total · 30 qualifying days · NFT reward unconfigured. ETH figures are a draft quote, not a locked payout promise. Cannot publish or pay this pilot yet.</p>' : ''}
     <p>${c.template === 'sponsor-match' ? `Match destination: ${escape(c.matchTargetFund || '')}; draft only.` : 'Reward recipient: claimant wallet.'}
     Funding: ${escape(c.fund)}; one award per wallet.</p>
     ${c.template === 'album' ? `<p>Minimum original tracks: ${c.minOriginalTracks}</p>` : ''}
@@ -267,11 +271,11 @@ export async function enablePromotionRecipient({ claim, snapshot, status, confir
 
 let promotionEditorDialog = null;
 
-export function openPromotionCalendarEditor({ startsAt, endsAt, campaignId } = {}) {
+export function openPromotionCalendarEditor({ startsAt, endsAt, campaignId, template } = {}) {
   if (promotionEditorDialog?.open) return;
   promotionEditorDialog = document.createElement('dialog');
   promotionEditorDialog.className = 'promotion-calendar-editor-dialog promotion-dialog';
-  promotionEditorDialog.setAttribute('aria-label', campaignId ? 'Referral campaign details' : 'Create referral campaign');
+  promotionEditorDialog.setAttribute('aria-label', campaignId ? 'Promotion details' : 'Promotions workspace');
   const close = document.createElement('button');
   close.type = 'button';
   close.textContent = 'Close';
@@ -284,7 +288,7 @@ export function openPromotionCalendarEditor({ startsAt, endsAt, campaignId } = {
     promotionEditorDialog.remove();
     promotionEditorDialog = null;
   }, { once: true });
-  mountAdminPromotions(body, { startsAt, endsAt, campaignId, calendarMode: true });
+  mountAdminPromotions(body, { startsAt, endsAt, campaignId, template, calendarMode: true });
   promotionEditorDialog.showModal();
 }
 
@@ -336,6 +340,10 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
   const form = root.querySelector('form');
   const input = name => form.elements.namedItem(name);
   function templateFields() {
+    const pinner = input('template').value === 'pinner';
+    for (const name of ['reward', 'budget', 'maxAwards']) input(name).disabled = pinner;
+    input('reward').parentElement.firstChild.textContent = pinner ? 'Reward target (USD equivalent, paid in ETH)' : 'Reward (Base USDC)';
+    input('budget').parentElement.firstChild.textContent = pinner ? 'Total target cap (USD equivalent, paid in ETH)' : 'Total campaign budget (Base USDC)';
     for (const [selector, active] of [
       ['[data-promo-album]', input('template').value === 'album'],
       ['[data-promo-referral]', input('template').value === 'referral'],
@@ -359,16 +367,21 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       input('maxAwards').value = '6';
       input('terms').value = MUSICIAN_REFERRAL_TERMS;
     }
+    if (t.id === 'pinner') {
+      input('reward').value = '5'; input('budget').value = '25'; input('maxAwards').value = '5';
+      input('terms').value = 'UNPUBLISHED DRAFT. First five admin-approved pinners completing 30 qualifying days; $5 equivalent in Base ETH each, total cap $25. NFT award is unconfigured and changes by campaign. Not an active offer. Final daily qualification, first-five ordering, ETH/USD valuation time, launch dates and NFT contract/token must be reviewed before publication. No automatic payment or NFT minting. Existing weekly USDC pinner rewards remain separate. Promotion records are public on IPFS; do not include private information.';
+    }
     templateFields();
   }
   function reset() {
     editId = '';
     form.reset();
-    if (calendarOptions.calendarMode) input('template').value = MUSICIAN_REFERRAL_PILOT.template;
+    if (calendarOptions.calendarMode) input('template').value = calendarOptions.template || MUSICIAN_REFERRAL_PILOT.template;
     template();
-    input('startsAt').value = utcToNewYorkInput(new Date().toISOString());
-    input('endsAt').value = utcToNewYorkInput(new Date(Date.now() + 7 * 86400000).toISOString());
-    input('claimDeadline').value = utcToNewYorkInput(new Date(Date.now() + 14 * 86400000).toISOString());
+    const start = Date.parse(calendarOptions.startsAt || new Date().toISOString());
+    input('startsAt').value = utcToNewYorkInput(new Date(start).toISOString());
+    input('endsAt').value = utcToNewYorkInput(new Date(start + (input('template').value === 'pinner' ? 30 : 7) * 86400000).toISOString());
+    input('claimDeadline').value = utcToNewYorkInput(new Date(start + (input('template').value === 'pinner' ? 37 : 14) * 86400000).toISOString());
     if (calendarOptions.startsAt) input('startsAt').value = utcToNewYorkInput(calendarOptions.startsAt);
     if (calendarOptions.endsAt) input('endsAt').value = utcToNewYorkInput(calendarOptions.endsAt);
     if (calendarOptions.endsAt) input('claimDeadline').value = utcToNewYorkInput(calendarOptions.endsAt);
@@ -381,11 +394,11 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       ? state.campaigns.filter(c => c.id === calendarOptions.campaignId)
       : state.campaigns;
     root.querySelector('[data-promo-campaigns]').innerHTML = campaigns.map(c => `<article class="promotion-card" data-campaign="${c.id}">
-      ${campaignCard(c)}<p>Budget: ${money(c.budgetUnits)} · remaining: ${money(c.remainingUnits)} · committed: ${money(c.committedUnits)}</p>
-      <p>Approved: ${money(c.approvedUnits)} · payment pending: ${money(c.paymentPendingUnits)} · paid: ${money(c.paidUnits)} · ${c.applications} claims (${c.awaitingReview} awaiting review)</p>
+      ${campaignCard(c)}<p>Budget: ${money(c.budgetUnits, campaignAsset(c))} · remaining: ${money(c.remainingUnits, campaignAsset(c))} · committed: ${money(c.committedUnits, campaignAsset(c))}</p>
+      <p>Approved: ${money(c.approvedUnits, campaignAsset(c))} · payment pending: ${money(c.paymentPendingUnits, campaignAsset(c))} · paid: ${money(c.paidUnits, campaignAsset(c))} · ${c.applications} claims (${c.awaitingReview} awaiting review)</p>
       <button type="button" data-promo-edit>${c.status === 'draft' ? 'Edit draft' : 'Duplicate as draft'}</button>
       <button type="button" data-promo-share>Copy offer link</button>
-      ${({ draft: ['published', 'archived'], published: ['paused', 'closed'], paused: ['published', 'closed'], closed: ['archived'], archived: [] }[c.status])
+      ${(c.template === 'pinner' ? c.status === 'draft' ? ['archived'] : [] : { draft: ['published', 'archived'], published: ['paused', 'closed'], paused: ['published', 'closed'], closed: ['archived'], archived: [] }[c.status])
         .map(s => `<button type="button" data-promo-state="${s}">${{ published: 'Publish offer', paused: 'Pause offer', closed: 'Close offer', archived: 'Archive' }[s]}</button>`).join('')}
       ${c.announcement?.status === 'sent' ? `<p>Discord poster sent: <a href="${escape(c.announcement.messageUrl)}" target="_blank" rel="noopener">view message</a></p>` : ''}
       ${c.announcement?.status === 'pending' ? '<p>Discord delivery is uncertain; do not send again.</p><button type="button" data-promo-reconcile-discord>Reconcile Discord delivery</button>' : ''}
@@ -477,6 +490,14 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
   form.addEventListener('submit', event => {
     event.preventDefault();
     void guard(async () => {
+      let pinner = {};
+      if (input('template').value === 'pinner') {
+        const rate = await loadEthUsd();
+        if (!rate) throw new Error('ETH/USD quote unavailable. Draft was not saved; try again shortly.');
+        const ethUsdMicros = String(Math.round(rate * 1e6));
+        pinner = { asset: 'eth', ...pinnerPromotionAmounts(ethUsdMicros),
+          draftQuote: { ethUsdMicros, quotedAt: new Date().toISOString() } };
+      }
       const campaign = { template: input('template').value, title: input('title').value,
         criteria: input('criteria').value, terms: input('terms').value,
         rewardUnits: promotionUnits(input('reward').value), budgetUnits: promotionUnits(input('budget').value),
@@ -494,7 +515,7 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
         ...(input('template').value === 'sponsor' ? { minPurchaseUnits: promotionUnits(input('minPurchase').value) } : {}),
         ...(input('template').value === 'sponsor-match' ? { matchTargetFund: input('matchTargetFund').value.trim(),
           minContributionUnits: promotionUnits(input('minContribution').value) } : {}),
-        ...Object.fromEntries(['startsAt', 'endsAt', 'claimDeadline'].map(k => [k, promotionInputToUtc(input(k).value)])) };
+        ...Object.fromEntries(['startsAt', 'endsAt', 'claimDeadline'].map(k => [k, promotionInputToUtc(input(k).value)])), ...pinner };
       await command({ action: 'save', campaignId: editId || undefined, campaign });
       reset();
     });
@@ -541,6 +562,7 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
           for (const name of ['title', 'criteria', 'terms', 'template', 'maxAwards', 'fund']) input(name).value = campaign[name];
           input('reward').value = String(Number(campaign.rewardUnits) / 1e6);
           input('budget').value = String(Number(campaign.budgetUnits) / 1e6);
+          if (campaign.template === 'pinner') { input('reward').value = '5'; input('budget').value = '25'; }
           if (campaign.template === 'musician-referral' && campaign.status !== 'draft') input('budget').value = '150';
           if (campaign.minOriginalTracks) input('minOriginalTracks').value = campaign.minOriginalTracks;
           if (campaign.requiredReferrals) input('requiredReferrals').value = campaign.requiredReferrals;

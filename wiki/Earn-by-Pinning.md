@@ -56,6 +56,31 @@ Turn off automatic sleep while plugged in, or your node can't answer checks:
 
 ### 2. Let DecentBusking talk to your node
 
+**Automatic local setup (recommended):** from your DecentBusking clone, run:
+
+```sh
+node discord-bot/community-pinner-client.js --setup
+```
+
+This makes a private backup of your existing configuration, adds only the
+DecentBusking browser origin (without replacing your other origins), and enables
+Kubo's built-in UPnP/NAT-PMP port mapping. It does not remove any pins, change
+storage limits, expose your control API, or change router settings. The backup
+contains your node identity: keep it private and do not upload it.
+If you use a custom repository, set `IPFS_PATH` to that repository first.
+Restart IPFS from its Desktop menu after applying the settings. Then run:
+
+```sh
+node discord-bot/community-pinner-client.js --diagnose
+```
+
+`Public` is ready for independent verification, not automatic enrollment or
+approval. `Private` or `Unknown` needs the network checks below. A website cannot
+bypass your computer's permission prompts, a router with mapping disabled, or
+an ISP's carrier-grade NAT. No universal automatic port-opening is promised.
+
+**Manual alternative:**
+
 Your browser needs permission to read your node's ID and to pin your private
 ownership marker. In IPFS Desktop open **Settings → IPFS Config**, find the
 `"API"` section and make it look like this. Keep any other entries you
@@ -95,11 +120,19 @@ routers open the way automatically (UPnP). Give a freshly started node about
 
 ### 4. Pin the shared music
 
+The header's IPFS button opens a network dashboard first. **Network** shows real
+registered nodes, recent verification and the weekly pot; it is a schematic,
+not a geographic tracker or a live peer-to-peer connection graph. **Keep a copy**
+contains the pinning controls. **My node & rewards** contains enrollment,
+approval status, check availability, estimates and closed-week awards.
+The optional electricity/hosting calculator is a rough cost estimate, not a
+profit promise. Network size and participants' costs are not inferred.
+
 Pick one:
 
 - **Easy:** open [DecentBusking](https://thejollylama.github.io/DecentBusking/),
-  press the **IPFS** button on the left of the header, choose **IPFS Desktop**
-  and press **Pin shared data**. Keep the tab open. The first run downloads
+  press the **IPFS** button on the left of the header → **Keep a copy**, choose **IPFS Desktop**
+  and press **Pin to IPFS Desktop**. Keep the tab open. The first run downloads
   about 2.2 GB and can take an hour or more; later runs only fetch what's new.
   Press it again about **once a week** to pick up new songs.
 - **Hands-free (recommended):** run the [sync helper](#the-sync-helper). It
@@ -110,7 +143,7 @@ Pinning never deletes anything. You can stop and resume at any time.
 ### 5. Join and get approved
 
 1. Connect your Base wallet in the header and link Discord in **Profile**.
-2. Open the **IPFS** button → **Join pinner rewards** and sign. It's free, with
+2. Open the **IPFS** button → **My node & rewards** → **Join pinner rewards** and sign. It's free, with
    no gas. Your node pins a small, random *ownership marker* that never leaves
    your computer.
 3. Tell an admin in the DecentBusking Discord that you've joined. When they

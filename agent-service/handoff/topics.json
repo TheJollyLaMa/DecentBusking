@@ -2,7 +2,7 @@
   {
     "id": "newcomer",
     "entryFiles": ["README.md", "docs/NEWCOMERS.md"],
-    "entryEvidence": { "README.md": "Drop a track. Join the loop.", "docs/NEWCOMERS.md": ["### Website Route", "does not mint automatically", "You can listen and explore without connecting a wallet"] },
+    "entryEvidence": { "README.md": "Drop a track. Join the loop.", "docs/NEWCOMERS.md": ["### Website Route", "You can listen and explore without connecting a wallet", "IPFS files can be downloaded"] },
     "aliases": ["what is this", "what's this", "what is decentbusking", "what's decentbusking", "what is decent busking", "what's this all about", "what is this all about", "i'm new", "im new", "first visit", "listen without", "add my music", "add music", "my music", "submit a song", "submit music", "upload a song", "upload music", "bring a song", "bring my music", "i'm an artist"],
     "terms": ["community listening room radio JukeLoop briefcase Bring your sound Website Route Submit for Approval Queued owner review Public Uploads rights"],
     "files": ["README.md", "docs/NEWCOMERS.md", "js/tutorial.js"]
@@ -48,10 +48,11 @@
   },
   {
     "id": "pinning",
-    "entryFiles": ["js/pinner-rewards.mjs", "js/community-pinning.mjs"],
-    "aliases": ["ipfs", "pinning", "pinner", "pinners", "pin content", "keep a copy", "preserve music"],
-    "terms": ["pinning pinner rewards manifest availability not active verified community"],
-    "files": ["js/pinner-rewards.mjs", "js/community-pinning.mjs", "test/pinner-rewards.test.js"]
+    "entryFiles": ["wiki/Earn-by-Pinning.md", "js/pinner-rewards.mjs"],
+    "entryEvidence": { "wiki/Earn-by-Pinning.md": ["Every song on DecentBusking lives on IPFS", "90% passed"] },
+    "aliases": ["ipfs", "pinning", "pinner", "pinners", "pin content", "keep a copy", "preserve music", "earn by pinning", "pinning rewards", "become a pinner"],
+    "terms": ["pinning pinner rewards active admin approval node ownership reachability availability weekly Base USDC payout IPFS Desktop newcomer"],
+    "files": ["wiki/Earn-by-Pinning.md", "docs/PINNER-NETWORK.md", "js/pinner-rewards.mjs", "js/community-pinning.mjs", "js/pinner-rewards-ui.mjs", "discord-bot/community-pinner-client.js", "test/pinner-rewards.test.js"]
   },
   {
     "id": "funds",
@@ -76,7 +77,7 @@
   },
   {
     "id": "splits",
-    "entryFiles": ["README.md"],
+    "entryFiles": ["README.md", "js/creator-splits.mjs"],
     "aliases": ["collaborator", "collaborators", "split", "splits", "album", "albums"],
     "terms": ["collaborator album song split payment consent version"],
     "files": ["js/tutorial.js", "js/creator-splits.mjs", "js/creator-split-proposal.mjs", "docs/DJUKE-ROLLOUT.md", "README.md"]

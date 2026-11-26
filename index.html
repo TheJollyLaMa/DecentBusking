@@ -24,7 +24,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261126-worker-gas-gauge" />
+  <link rel="stylesheet" href="css/styles.css?v=20261126-pinner-dashboard" />
   <link rel="stylesheet" href="css/dmtv.css?v=20261118-dmtv-escrow" />
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth" />
   <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback" />
@@ -62,14 +62,16 @@
       "./js/performer-room.mjs?v=20261114-allocated-stage":"./js/performer-room.mjs?v=20261117-booking-assets",
       "./js/performer-room.mjs?v=20261116-curtain":"./js/performer-room.mjs?v=20261117-booking-assets",
       "./js/radio-schedule-ui.mjs?v=20261025-community-reminder":"./js/radio-schedule-ui.mjs?v=20261124-public-personal",
-      "./js/promotions-ui.mjs?v=20261116-promotions":"./js/promotions-ui.mjs?v=20261126-referral-match",
-      "./js/promotions-ui.mjs?v=20261122-musician-referral":"./js/promotions-ui.mjs?v=20261126-referral-match",
-      "./js/promotions-ui.mjs?v=20261126-eth-gifts":"./js/promotions-ui.mjs?v=20261126-referral-match",
-      "./js/promotions-ui.mjs?v=20261123-supporter-queue":"./js/promotions-ui.mjs?v=20261126-referral-match",
-      "./js/promotions-ui.mjs":"./js/promotions-ui.mjs?v=20261126-referral-match",
-      "./js/promotions.mjs?v=20261126-eth-gifts":"./js/promotions.mjs?v=20261126-referral-match",
-      "./js/promotions.mjs?v=20261123-supporter-queue":"./js/promotions.mjs?v=20261126-referral-match",
-      "./js/promotions.mjs":"./js/promotions.mjs?v=20261126-referral-match",
+      "./js/promotions-ui.mjs?v=20261116-promotions":"./js/promotions-ui.mjs?v=20261126-pinner-dashboard",
+      "./js/promotions-ui.mjs?v=20261122-musician-referral":"./js/promotions-ui.mjs?v=20261126-pinner-dashboard",
+      "./js/promotions-ui.mjs?v=20261126-eth-gifts":"./js/promotions-ui.mjs?v=20261126-pinner-dashboard",
+      "./js/promotions-ui.mjs?v=20261123-supporter-queue":"./js/promotions-ui.mjs?v=20261126-pinner-dashboard",
+      "./js/promotions-ui.mjs?v=20261126-referral-match":"./js/promotions-ui.mjs?v=20261126-pinner-dashboard",
+      "./js/promotions-ui.mjs":"./js/promotions-ui.mjs?v=20261126-pinner-dashboard",
+      "./js/promotions.mjs?v=20261126-eth-gifts":"./js/promotions.mjs?v=20261126-pinner-dashboard",
+      "./js/promotions.mjs?v=20261123-supporter-queue":"./js/promotions.mjs?v=20261126-pinner-dashboard",
+      "./js/promotions.mjs?v=20261126-referral-match":"./js/promotions.mjs?v=20261126-pinner-dashboard",
+      "./js/promotions.mjs":"./js/promotions.mjs?v=20261126-pinner-dashboard",
       "./js/supporter-payroll.mjs?v=20261123-supporter-queue":"./js/supporter-payroll.mjs?v=20261126-referral-match",
       "./js/eth-usd-quote.mjs?v=20261126-eth-gifts":"./js/eth-usd-quote.mjs?v=20261126-referral-match",
       "./js/mint.js?v=20261030-ad-cutoff":"./js/mint.js?v=20261126-release-batches",
@@ -92,7 +94,7 @@
       "./js/fund-contribution.mjs?v=20261124-fund-bunny-keys":"./js/fund-contribution.mjs?v=20261124-admin-funds"
     }}
   </script>
-  <link rel="stylesheet" href="css/radio-programming.css?v=20261126-worker-gas-gauge" />
+  <link rel="stylesheet" href="css/radio-programming.css?v=20261126-pinner-dashboard" />
   <link rel="stylesheet" href="css/dbusk-calendar.css?v=20261124-public-personal" />
   <link rel="stylesheet" href="css/fund-admin.css?v=20261124-admin-funds" />
   <link rel="stylesheet" href="css/profile-inbox.css?v=20261126-eth-gifts" />
@@ -533,7 +535,26 @@
   </dialog>
 
   <dialog id="community-pin-dialog" aria-labelledby="community-pin-title">
-    <h3 id="community-pin-title">Pin DBusk content</h3>
+    <header class="pinner-network-head"><h3 id="community-pin-title">The community keeps the music</h3><button id="community-pin-cancel" type="button" aria-label="Close pinner network">✕</button></header>
+    <nav class="pinner-page-nav" aria-label="Pinner dashboard">
+      <button type="button" data-pinner-page="network" aria-pressed="true" aria-controls="pinner-page-network">◎ Network</button>
+      <button type="button" data-pinner-page="storage" aria-pressed="false" aria-controls="pinner-page-storage">↓ Keep a copy</button>
+      <button type="button" data-pinner-page="rewards" aria-pressed="false" aria-controls="pinner-page-rewards">◇ My node &amp; rewards</button>
+    </nav>
+    <section id="pinner-page-network" data-pinner-panel="network" aria-label="Community network health">
+      <div id="community-pinner-network"></div>
+      <button id="community-pinner-network-refresh" type="button">Refresh verified network</button>
+      <form id="pinner-cost-form" class="pinner-cost-form">
+        <h4>What might my copy cost?</h4>
+        <p>Optional estimate for 30 days. Enter the extra power used for pinning, not your whole computer if it already runs. Rates stay in this tab.</p>
+        <label>Extra watts<input name="watts" type="number" min="0" step="any" value="10" required></label>
+        <label>Hours / day<input name="hours" type="number" min="0" max="24" step="any" value="24" required></label>
+        <label>USD / kWh<input name="rate" type="number" min="0" step="any" value="0.15" required></label>
+        <label>Hosting / month (USD)<input name="hosting" type="number" min="0" step="any" value="0" required></label>
+        <button type="submit">Estimate monthly cost</button><output id="pinner-cost-result" aria-live="polite"></output>
+      </form>
+    </section>
+    <section id="pinner-page-storage" data-pinner-panel="storage" aria-label="Keep an independent copy" hidden>
     <p class="pinner-help">New to pinning? <a href="https://github.com/TheJollyLaMa/DecentBusking/blob/main/wiki/Earn-by-Pinning.md" target="_blank" rel="noopener">Read the pinner guide</a>: what you keep, what you earn and how to set up.</p>
     <p id="community-pin-summary">Loading the shared content manifest…</p>
     <fieldset class="community-pin-providers">
@@ -546,10 +567,13 @@
     <p id="community-pin-progress" role="status" aria-live="polite"></p>
     <div class="community-pin-actions">
       <button id="community-pin-start" type="button" disabled>Pin shared data</button>
-      <button id="community-pin-cancel" type="button">Close</button>
     </div>
     <p id="community-pin-rewards-status">Loading the verified pinner reward program…</p>
+    <p class="pinner-help">For automatic local settings and a connectivity check, use <code>node discord-bot/community-pinner-client.js --setup</code> from your clone. It backs up your configuration first. Your firewall or router may still need your permission; never expose port 5001.</p>
+    </section>
+    <section id="pinner-page-rewards" data-pinner-panel="rewards" aria-label="My node and earnings" hidden>
     <section id="community-pinner-rewards" class="pinner-rewards" aria-label="Join and track pinner rewards"></section>
+    </section>
   </dialog>
 
   <!-- NFT detail panel -->
@@ -1034,10 +1058,12 @@
     <header class="rc-head">
       <span class="rc-badge" aria-hidden="true">⛽</span>
       <h3 id="worker-gas-title" class="rc-title">Worker gas tank</h3>
+      <button class="worker-gas-info" type="button" data-worker-gas-info aria-label="Why the worker needs ETH" aria-expanded="false" aria-controls="worker-gas-help">i</button>
       <button class="rc-pill" type="button" data-worker-gas-close aria-label="Close">✕</button>
     </header>
     <div class="worker-gas-preview" data-worker-gas-preview></div>
     <p class="worker-gas-reading" data-worker-gas-reading role="status"></p>
+    <p id="worker-gas-help" class="worker-gas-help" data-worker-gas-help hidden>The playback worker submits on-chain playback reports and sponsored queue transactions on Base. Every transaction uses a little ETH for network gas, even when listeners pay in USDC. Occasional admin top-ups keep those jobs running. This tank is its actual balance; the faint arc and “After” line preview your addition. Transfers always need your wallet confirmation.</p>
     <form class="worker-gas-form" data-worker-gas-form>
       <div class="worker-gas-presets" role="group" aria-label="Fill to">
         <button class="rc-pill" type="button" data-worker-gas-preset="1">Fill</button>
@@ -1045,7 +1071,7 @@
         <button class="rc-pill" type="button" data-worker-gas-preset="3">3×</button>
         <button class="rc-pill" type="button" data-worker-gas-preset="5">5×</button>
       </div>
-      <label class="rc-money is-eth worker-gas-amount"><input data-worker-gas-amount type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="Top-up amount in ETH" /> ETH</label>
+      <label class="rc-money is-eth worker-gas-amount"><input data-worker-gas-amount type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="Top-up amount in ETH" /> <img class="worker-gas-eth" src="img/Ens_Eth_Breathe.png" alt="ETH"></label>
       <input class="worker-gas-slider" data-worker-gas-slider type="range" min="0.0005" max="0.03" step="0.0005" value="0.003" aria-label="Top-up amount slider" />
       <p class="worker-gas-to">To <a data-worker-gas-explorer target="_blank" rel="noopener noreferrer" hidden></a> on Base</p>
       <p class="rc-status" data-worker-gas-status role="status" aria-live="polite"></p>
@@ -1087,7 +1113,6 @@
       </details>
       <div id="admin-live-performance-slot"></div>
       <details id="admin-content-review" class="admin-tool-section hidden"></details>
-      <details id="admin-promotions" class="admin-tool-section hidden"></details>
       <details id="admin-devert-campaigns" class="admin-tool-section hidden">
         <summary><span>📣 DVert</span><small>Advert campaigns and moderation</small></summary>
         <p>Remove an advert from main radio and VertLoop. No refund; the paid term remains unchanged.</p>
@@ -1352,12 +1377,12 @@
   <script type="module" src="js/live-booking-notifications.mjs?v=20261126-worker-gas-gauge"></script>
   <script type="module" src="js/live-performance-admin.mjs?v=20261121-typed-review"></script>
   <link rel="stylesheet" href="css/promotions.css?v=20261116-promotions">
-  <script type="module" src="js/admin.js?v=20261126-release-batches-gas-gauge"></script>
+  <script type="module" src="js/admin.js?v=20261126-pinner-dashboard-release-batches"></script>
   <link rel="stylesheet" href="css/content-review.css?v=20261107-flags">
   <script type="module" src="js/content-review-ui.mjs?v=20261107-flags"></script>
 
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
-  <script type="module" src="js/payroll.js?v=20261126-pinner-onboarding"></script>
+  <script type="module" src="js/payroll.js?v=20261126-pinner-dashboard"></script>
   <script type="module" src="js/radio-history.js?v=20261029-tally-sections"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261124-public-personal"></script>
   <link rel="stylesheet" href="css/fund-tour.css?v=20261124-fund-bunny">
@@ -1370,12 +1395,12 @@
   <script type="module" src="js/artwork-editor.mjs?v=20261118-artist-artwork"></script>
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/djuke-playlists-ui.mjs?v=20261025-scheduling-info"></script>
-  <script type="module" src="js/community-pinning.mjs?v=20261126-pinner-onboarding"></script>
-  <script type="module" src="js/worker-gas.mjs?v=20261126-worker-gas-gauge"></script>
+  <script type="module" src="js/community-pinning.mjs?v=20261126-pinner-dashboard"></script>
+  <script type="module" src="js/worker-gas.mjs?v=20261126-pinner-dashboard"></script>
   <script type="module" src="js/panel-equalizers.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/top-ten-live-meter.mjs?v=20261025-seamless-handoff"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261126-pinner-onboarding';
+    import { initPayroll } from './js/payroll.js?v=20261126-pinner-dashboard';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
   <script type="module">

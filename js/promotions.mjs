@@ -235,6 +235,14 @@ export function musicianReferralLegs(referrer, musician, campaign) {
 export function isMusicianReferralCampaign(campaign) {
   return campaign?.template === MUSICIAN_REFERRAL_PILOT.template;
 }
+export const PINNER_PROMOTION_DRAFT = Object.freeze({
+  qualifyingDays: 30, rewardUsdCents: 500, budgetUsdCents: 2500, maxAwards: 5, nftReward: null,
+});
+export function pinnerPromotionAmounts(ethUsdMicros) {
+  if (!/^[1-9]\d{0,13}$/.test(String(ethUsdMicros))) throw new Error('A valid ETH/USD draft quote is required');
+  const reward = 5_000_000n * 10n ** 18n / BigInt(ethUsdMicros);
+  return { rewardUnits: reward.toString(), budgetUnits: (reward * 5n).toString() };
+}
 export const PROMOTION_TEMPLATES = [
   { id: 'album', title: 'Bring your album', criteria: 'Bring an album with the stated minimum number of original tracks and rights to publish. Supply approved radio catalog and qualifying delivery evidence for admin review.' },
   { id: 'referral', title: 'Referral rush', criteria: 'Bring the stated number of new promotion participants. Each must register your invite before casting a signed song vote in the selected activity window. Final identity and evidence review is required.' },
@@ -243,6 +251,7 @@ export const PROMOTION_TEMPLATES = [
   { id: 'sponsor-match', title: 'First sponsor match', criteria: 'A capped match to the selected artist fund after a sponsor’s first qualifying contribution. Fund contributions are not refundable ad purchases. Draft only until a fund-to-fund settlement path is verified.' },
   { id: 'session', title: 'Village listening session', criteria: 'Organize a listening session and supply event and participation evidence. Never condition rewards on positive votes or claim anonymous activity proves unique humans.' },
   { id: 'musician-referral', title: MUSICIAN_REFERRAL_PILOT.title, criteria: 'For each new musician with a verified minted playlist track and 10 distinct campaign-scoped signed song votes. One conversion creates four auditable $25 allocation legs, capped at six conversions.' },
+  { id: 'pinner', title: 'Founding pinners · first five', criteria: 'Draft only: first five admin-approved pinners who complete 30 qualifying days of independently verified pinning. $5 equivalent in Base ETH each, $25 total. NFT reward not configured. Daily qualification accounting and final launch terms still need review.' },
 ];
 export function promotionAuthorization({ address, origin, issuedAt, command }) {
   return ['DecentBusking Promotions authorization v1', `Wallet: ${address.toLowerCase()}`,

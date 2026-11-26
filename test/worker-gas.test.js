@@ -95,13 +95,17 @@ function gaugeFixture() {
     disabled: false, children: [], setAttribute(name, value) { this.attrs[name] = value; },
     addEventListener(name, fn) { this.listeners[name] = fn; }, querySelector: () => null, querySelectorAll: () => [],
     append(child) { this.children.push(child); }, ...extra });
-  const parts = Object.fromEntries(['preview', 'reading', 'form', 'amount', 'slider', 'explorer', 'status', 'send']
+  const parts = Object.fromEntries(['preview', 'reading', 'form', 'amount', 'slider', 'explorer', 'status', 'send', 'info', 'help']
     .map(name => [name, node()]));
+  const gaugeParts = () => Object.fromEntries(['fill', 'after', 'needle', 'times', 'balance'].map(name => [`.wg-${name}`, node()]));
+  const previewParts = gaugeParts(), buttonParts = gaugeParts();
+  parts.preview.querySelector = selector => previewParts[selector];
+  parts.help.hidden = true;
   const presets = ['1', '2', '3', '5'].map(tanks => node({ dataset: { workerGasPreset: tanks } }));
   const dialog = node({ open: false, querySelector: selector => parts[/data-worker-gas-(\w+)/.exec(selector)[1]],
     querySelectorAll: selector => selector.includes('preset') ? presets : [],
     showModal() { this.open = true; }, close() { this.open = false; } });
-  const button = node(), calendar = { open: false };
+  const button = node({ querySelector: selector => buttonParts[selector] }), calendar = { open: false };
   const ids = { 'worker-gas-gauge': button, 'worker-gas-dialog': dialog, 'radio-programming-modal': calendar };
   const signer = { getAddress: async () => ADMIN,
     sendTransaction: async tx => { sent.push(tx); return { hash: '0xfeed', wait: async () => ({ status: 1, hash: '0xfeed' }) }; } };
@@ -123,7 +127,7 @@ function gaugeFixture() {
     .replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
   vm.runInContext(source, context);
   listeners.get('DOMContentLoaded')();
-  return { env, listeners, timers, reads, sent, switched, parts, presets, dialog, button, calendar,
+  return { env, listeners, timers, reads, sent, switched, parts, presets, dialog, button, calendar, previewParts, buttonParts,
     emit: name => listeners.get(name)() };
 }
 
@@ -180,12 +184,18 @@ test('top-up dialog suggests a fill, re-verifies the worker, and sends the chose
   assert.equal(f.parts.send.textContent, 'Send 0.001086 ETH');
   assert.equal(f.parts.explorer.href, `https://basescan.org/address/${WORKER}`);
   assert.equal(f.parts.preview.dataset.afterLevel, 'full');
+  assert.equal(f.previewParts['.wg-times'].textContent, '', 'a proposed addition never changes actual tank multiples');
+  assert.equal(f.previewParts['.wg-balance'].textContent, '0.001914 ETH');
+  f.parts.info.listeners.click();
+  assert.equal(f.parts.help.hidden, false);
+  assert.equal(f.parts.info.attrs['aria-expanded'], 'true');
   f.presets[1].listeners.click();
   assert.equal(f.parts.amount.value, '0.004086', '2× fills to two tanks');
   f.parts.amount.value = '0.009';
   f.parts.amount.listeners.input();
   assert.equal(f.parts.send.textContent, 'Send 0.009 ETH');
   assert.equal(f.parts.preview.dataset.afterLevel, 'full');
+  assert.equal(f.previewParts['.wg-times'].textContent, '', 'even a large addition does not appear as already held');
   f.parts.amount.value = '3';
   f.parts.amount.listeners.input();
   assert.equal(f.parts.send.disabled, true);
@@ -218,4 +228,7 @@ test('top-up dialog suggests a fill, re-verifies the worker, and sends the chose
   assert.equal(f.parts.send.disabled, true);
   assert.equal(f.button.dataset.level, 'full');
   assert.match(f.button.attrs['aria-label'], /3 tanks/);
+  assert.equal(f.buttonParts['.wg-times'].textContent, '3×');
+  assert.equal(f.previewParts['.wg-times'].textContent, '3×');
+  assert.equal(f.previewParts['.wg-balance'].textContent, '0.010914 ETH');
 });
