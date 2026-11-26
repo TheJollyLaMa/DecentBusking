@@ -1,7 +1,9 @@
 # Report a problem on GitHub
 
 1. Invited DBusker chat visitors can ask for wording and use its **Report a bug
-   on GitHub** button. Anyone can use the direct GitHub form linked below;
+   on GitHub** pathway. Its information button links the bug and Contributor
+   Request forms and explains that contributor approval is separate from chat
+   access. Anyone can use the direct GitHub form linked below;
    filing there needs no wallet or DBusker invitation. There is no duplicate
    report entry in the left ankh menu.
 2. Describe one problem: what happened, expected behavior, reproduction steps,

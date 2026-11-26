@@ -119,57 +119,55 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   host.id = 'dbusker-companion';
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `
-    <link rel="stylesheet" href="${new URL('../css/dbusker.css?v=20261126-composer', import.meta.url).href}">
+    <link rel="stylesheet" href="${new URL('../css/dbusker.css?v=20261126-pathways', import.meta.url).href}">
     <div class="greeting" hidden><span>How can I help you, Earthling?</span><button type="button" class="dismiss" aria-label="Dismiss DBusker greeting">Not now</button></div>
     <button type="button" class="launcher" aria-label="Ask DBusker, AI community guide" aria-expanded="false" aria-controls="dbusker-chat">
       <span class="launcher-portrait"><img src="${new URL('../img/D_Busker.jpeg', import.meta.url).href}" alt="" width="58" height="58"></span><span>Ask DBusker</span><span class="signal-dot" aria-hidden="true"></span>
     </button>
     <section id="dbusker-chat" role="dialog" aria-labelledby="dbusker-title" hidden>
-      <header class="cabin-header"><span class="station-mark" aria-hidden="true">${mark('beacon')}</span><h2 id="dbusker-title">DBusker <small>AI guide / invited pilot</small></h2><div class="cabin-controls"><button type="button" class="sound" aria-label="Enable DBusker chimes" aria-pressed="false" title="Optional chimes. Quiet while the radio plays.">Sound off</button><button type="button" class="close" aria-label="Close DBusker chat" title="Close chat">Close</button></div></header>
+      <header class="cabin-header"><span class="station-mark" aria-hidden="true">${mark('beacon')}</span><h2 id="dbusker-title">DBusker <small>a hobo in know know</small></h2><div class="cabin-controls"><button type="button" class="sound" aria-label="Enable DBusker chimes" aria-pressed="false" title="Optional chimes. Quiet while the radio plays.">Sound off</button><button type="button" class="close" aria-label="Close DBusker chat" title="Close chat">Close</button></div></header>
       <div class="cabin-body">
       <div class="welcome">
         <div class="portrait-port"><span class="orbit orbit-one" aria-hidden="true"></span><span class="orbit orbit-two" aria-hidden="true"></span><img src="${new URL('../img/D_Busker.jpeg', import.meta.url).href}" alt="DBusker, your street-corner companion" width="92" height="92"><span class="portrait-star" aria-hidden="true">+</span></div>
-        <div class="welcome-copy"><p class="eyebrow">Good company. Open horizons.</p><p class="hello">How can I help you, <br><em>Earthling?</em></p><p class="welcome-note">Pull up a corner of the universe.</p></div>
+        <div class="welcome-copy"><p class="hello">How can I help you, <br><em>Earthling?</em></p></div>
       </div>
-      <details class="paths" open><summary><span>Pick a little adventure</span><span class="path-count" aria-hidden="true">07 paths / one planet</span></summary>
-        <p class="paths-hint">A tune, a question, a bright idea. Where shall we wander?</p>
+      <div class="paths"><h3>Pick a quick pathway ...</h3>
         <div class="starters">
           ${PATHS.map(route => `<button type="button" class="path path-${route.icon}" aria-label="${route.label}: ${route.title.replaceAll('&', '&amp;')}" title="${route.note}" aria-pressed="false" data-starter="${route.question.replaceAll('&', '&amp;').replaceAll('"', '&quot;')}"><span class="path-medallion">${mark(route.icon)}</span><span class="path-label">${route.label}</span><span class="path-note">${route.note}</span></button>`).join('')}
+          <button type="button" class="path rabbit-toggle" aria-expanded="false" aria-controls="dbusker-tutorials"><span class="path-medallion rabbit-icon" aria-hidden="true">🐇</span><span class="path-label">Follow the white rabbit</span><span class="path-note">Explore tutorials</span></button>
+          <div class="issue-path"><button type="button" class="path report-issue"><span class="path-medallion bugs" aria-hidden="true"><span>🐞</span><span>🐜</span></span><span class="path-label">Report a bug on GitHub</span></button><button type="button" class="issue-info-toggle" aria-label="About reporting bugs and contributor onboarding" aria-expanded="false" aria-controls="dbusker-issue-info">i</button></div>
         </div>
-        <p class="paths-hint">Choose a path to draft a question. Nothing sends until you ask.</p>
-      </details>
-      <details class="rabbit-trails"><summary aria-label="Follow the white rabbit">
-        <span class="rabbit-invitation" aria-hidden="true"><span class="letter-stream">${[...'Follow the white rabbit'].map((letter, index) => `<span style="--letter:${index}">${letter === ' ' ? '&nbsp;' : letter}</span>`).join('')}</span><span class="burrow"></span><span class="rabbit-runner">🐇</span></span>
-        <span class="trail-toggle" aria-hidden="true">+</span>
-      </summary>
-        <p class="tutorial-heading" id="dbusker-tutorials">Tutorials <small>Open a trail in a new tab</small></p>
-        <div class="tutorial-garden">
-          <ol class="tutorial-links" aria-labelledby="dbusker-tutorials">
+        <div class="rabbit-trails" id="dbusker-tutorials" hidden>
+          <p class="tutorial-heading">Tutorials <small>Open a trail in a new tab</small></p>
+          <ol class="tutorial-links" aria-label="Rabbit tutorials">
             <li><a href="https://github.com/TheJollyLaMa/DecentBusking/blob/main/docs/NEWCOMERS.md" target="_blank" rel="noopener noreferrer">First steps: listen &amp; bring a song</a></li>
             <li><a href="?tutorial=payroll" target="_blank" rel="noopener noreferrer">Follow the funds &amp; payment proofs</a></li>
             <li><a href="?tutorial=playlists" target="_blank" rel="noopener noreferrer">DJuke: make a playlist</a></li>
             <li><a href="?tutorial=splits" target="_blank" rel="noopener noreferrer">Collaborators &amp; song splits</a></li>
           </ol>
-          <span class="garden-bunny" aria-hidden="true"><span class="nibbling-bunny">🐇</span><span class="carrot">🥕</span></span>
         </div>
-      </details>
-      <button type="button" class="report-issue">Report a bug on GitHub</button>
-      <p>Ask me for wording, then review it in the local report helper. You submit on GitHub; a maintainer approves reward labels.</p>
+        <div class="issue-info" id="dbusker-issue-info" hidden>
+          <p>Ask me for wording, then review it in the local report helper. You submit on GitHub; a maintainer approves reward labels.</p>
+          <p>Try: “I found a bug. Help me write my first issue and become a contributor.” Tell me what happened, what you expected, and how to repeat it. Check existing issues and remove private information before submitting.</p>
+          <p>Anyone can <a href="https://github.com/TheJollyLaMa/DecentBusking/issues/new?template=bug-report.yml" target="_blank" rel="noopener noreferrer">file a first bug report</a>. For contributor rewards, submit a <a href="https://github.com/TheJollyLaMa/DecentBusking/issues/new?template=whitelist-request.yml" target="_blank" rel="noopener noreferrer">Contributor Request</a>; it publicly includes your GitHub handle and payout address. Maintainer approval and other reward conditions apply. This is separate from the DBusker chat invitation.</p>
+        </div>
+      </div>
       <label class="consent"><input type="checkbox"> I agree to send my questions, recent chat context and requested public-chain evidence to OpenAI.
         For payment questions, this may include my connected wallet address or a public wallet/transaction I ask about, amounts and payment history. Read-only lookups use public Base RPC and the public earnings index.
         Don't share secrets. Chat is kept in server memory for up to 15 minutes; the provider's own retention policy also applies.
         The steward keeps private per-wallet credit/token totals, not full conversation logs. If DBusker can't answer, that question and its reply are saved with your wallet for up to 30 days of steward review (you can delete them below); a separate share preview lets you submit any other exchange. Human review, not automatic training.
         <a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">Provider data policy</a></label>
-      <details class="privacy-info" hidden><summary aria-label="About DBusker privacy and access">i</summary>
-        <p>Questions, recent chat and requested public Base evidence go to OpenAI, including wallet addresses and payment details when relevant. Don't share secrets. Chat stays in server memory for up to 15 minutes; OpenAI's retention policy also applies. Usage is counted against the claimed wallet, which is not verified. Private review records are unavailable in this mode, and unanswered questions are not saved for review. <a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">Provider data policy</a></p>
-      </details>
-      <div class="actions"><button type="button" class="signin">Sign in with wallet</button><button type="button" class="signout" hidden>Clear chat &amp; sign out</button></div>
+      <div class="actions"><button type="button" class="signin">Sign in with wallet</button><button type="button" class="signout" hidden>Sign out</button></div>
       <p class="status" role="status" aria-live="polite">Invite-only. Connect through the site header, then sign in here on Base. No gas or payment.</p>
       <p class="route-result" role="status" aria-live="polite"></p>
       <p class="usage-note" role="status" aria-live="polite"></p>
       <div class="transcript" role="log" aria-label="DBusker conversation" aria-live="polite" tabindex="0"></div>
-      <form><label for="dbusker-question">Your question</label><textarea id="dbusker-question" maxlength="2000" rows="3" required disabled></textarea>
-        <div class="composer-actions"><label class="mode-label" for="dbusker-mode">Answer style<select id="dbusker-mode" aria-describedby="dbusker-mode-note">
+      <form>
+        <details class="privacy-info" hidden><summary aria-label="About DBusker privacy and access">i</summary>
+          <p>Questions, recent chat and requested public Base evidence go to OpenAI, including wallet addresses and payment details when relevant. Don't share secrets. Chat stays in server memory for up to 15 minutes; OpenAI's retention policy also applies. Usage is counted against the claimed wallet, which is not verified. Private review records are unavailable in this mode, and unanswered questions are not saved for review. <a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">Provider data policy</a></p>
+        </details>
+        <textarea id="dbusker-question" aria-label="Your question" placeholder="Your question" maxlength="2000" rows="3" required disabled></textarea>
+        <div class="composer-actions"><label class="mode-label" title="Automatic chooses a model and may use a deeper pass. Efficient uses one light pass; Deep dive uses one stronger pass."><span aria-hidden="true">🤖</span><select id="dbusker-mode" aria-label="Answer style" aria-describedby="dbusker-mode-note">
           <option value="efficient">Efficient</option>
           <option value="balanced" selected>Automatic</option>
           <option value="deep">Deep dive</option>
@@ -184,7 +182,6 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       </details>
       <p class="review-status" role="status" aria-live="polite"></p>
       <div class="shared-reviews" aria-label="Your shared exchanges"></div>
-      <p class="handoff"></p>
       </div>
       <div class="cabin-foot"><div class="budget-meter"><span class="budget-label" role="status">DBusker budget unavailable</span><progress class="budget-progress" max="100" aria-label="DBusker monthly budget remaining"></progress></div>
         <details class="budget-info"><summary aria-label="About the shared DBusker budget">i</summary><p>OpenAI's DBusker project spending is shared by invited wallets. Reporting may lag. Remaining means the configured monthly target minus reported spending, not the prepaid balance or a guaranteed spending cap. The target must be updated if the project limit changes.</p></details>
@@ -196,6 +193,13 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   find('.report-issue').addEventListener('click', () => {
     document.dispatchEvent(new window.CustomEvent('open-issue-helper'));
   });
+  for (const [button, content] of [['.rabbit-toggle', '.rabbit-trails'], ['.issue-info-toggle', '.issue-info']]) {
+    find(button).addEventListener('click', () => {
+      const target = find(content);
+      target.hidden = !target.hidden;
+      find(button).setAttribute('aria-expanded', String(!target.hidden));
+    });
+  }
   const launcher = find('.launcher'), panel = find('section'), status = find('.status');
   const consent = find('input'), signin = find('.signin'), signout = find('.signout');
   const question = find('textarea'), send = find('.send'), transcript = find('.transcript');
@@ -241,8 +245,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     find('.privacy-info').hidden = !addressOnly;
     signin.hidden = Boolean(credential) || addressOnly;
     signin.disabled = pending || (!addressOnly && !consent.checked);
-    signout.hidden = !credential;
-    signout.textContent = addressOnly ? 'Clear chat' : 'Clear chat & sign out';
+    signout.hidden = !credential || addressOnly;
     question.disabled = pending || reviewPending || (addressOnly ? !invited : !credential || !consent.checked);
     send.disabled = question.disabled;
     mode.disabled = pending;
@@ -263,7 +266,6 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     pending = false;
     transcript.replaceChildren();
     question.value = '';
-    find('.handoff').textContent = '';
     find('.route-result').textContent = '';
     exchangeId = null; reviewPending = false;
     find('.review-share').hidden = true;
@@ -445,7 +447,6 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   });
   root.querySelectorAll('[data-starter]').forEach(button => button.addEventListener('click', () => {
     question.value = button.dataset.starter;
-    find('.paths').open = false;
     root.querySelectorAll('[data-starter]').forEach(route => {
       route.setAttribute('aria-pressed', String(route === button));
     });
@@ -498,7 +499,6 @@ export function initDBusker({ document = globalThis.document, window = globalThi
         if (attempt !== generation) return;
       }
       expiryTimer = window.setTimeout(() => signout.click(), Math.max(0, expiresAt - Date.now()));
-      find('.handoff').textContent = `Public source ${session.handoff.commit.slice(0, 8)} · handoff ${session.handoff.digest.slice(0, 8)}. ${session.capabilities?.chain ? 'Read-only Base evidence enabled; each answer has coverage limits.' : 'No live-state access.'}`;
       status.textContent = addressOnly ? 'Ready to chat.' : 'Signed in. Ask about getting started, the public code, or hosting your own community.';
     } catch (error) {
       if (attempt === generation) status.textContent = error.message;
