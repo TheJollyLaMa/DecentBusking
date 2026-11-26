@@ -161,6 +161,10 @@ The song rows show **Plays**, **Likes**, and **Dislikes**. Those like/dislike co
 
 **You have reached this step when:** you can find your own song and distinguish its lifetime activity from the selected week's qualified plays. If the list is empty, check the wallet, the date/search filters, and **All Time** first. Counts are not a withdrawable balance; owner-reviewed payments need a funded budget.
 
+## 6. Keep A Copy And Share The Pinner Fund (Optional)
+
+Musicians and listeners can keep a copy of our public music on their own computer with IPFS Desktop. Admin-approved nodes that pass independent hourly checks share the weekly pinner fund in Base USDC. Start with the [Earn by pinning guide](../wiki/Earn-by-Pinning.md), then open the header **IPFS** button.
+
 ## When Something Does Not Match
 
 If you cannot hear the radio, check **Tune in**, mute, volume, and whether a track is actually live. If an upload is queued, wait for the owner rather than re-uploading. If a song or NFT is missing, keep the CID, artist wallet, and any confirmation transaction link, then [ask the admins on Discord](https://discord.gg/SCtcBggHPa). Never send anyone your seed phrase or private key.

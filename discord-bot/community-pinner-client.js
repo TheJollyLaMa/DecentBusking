@@ -2,7 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { pinCommunityManifest } from '../js/pinner-rewards.mjs';
 
 export function createCommunityPinnerClient({ serviceUrl = 'https://decentbusking.onrender.com',
-  ipfsApiUrl = 'http://127.0.0.1:5001', fetchImpl = fetch, onProgress = () => {} } = {}) {
+  ipfsApiUrl = 'http://127.0.0.1:5001', carGatewayUrl, fetchImpl = fetch, onProgress = () => {} } = {}) {
   const service = new URL(serviceUrl);
   if (service.protocol !== 'https:' || service.username || service.password) throw new Error('Community manifest service must use HTTPS');
   return async () => {
@@ -11,13 +11,13 @@ export function createCommunityPinnerClient({ serviceUrl = 'https://decentbuskin
     });
     if (!response.ok) throw new Error(`Community manifest unavailable (${response.status})`);
     const manifest = await response.json();
-    return pinCommunityManifest({ manifest, provider: 'local', ipfsApiUrl, fetchImpl, onProgress });
+    return pinCommunityManifest({ manifest, provider: 'local', ipfsApiUrl, carGatewayUrl, fetchImpl, onProgress });
   };
 }
 
 async function main() {
   const poll = createCommunityPinnerClient({ serviceUrl: process.env.DBUSK_SERVICE_URL || undefined,
-    ipfsApiUrl: process.env.IPFS_API_URL || undefined });
+    ipfsApiUrl: process.env.IPFS_API_URL || undefined, carGatewayUrl: process.env.PINNER_CAR_GATEWAY || undefined });
   do {
     try {
       const result = await poll();

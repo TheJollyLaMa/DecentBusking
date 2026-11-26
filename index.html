@@ -79,7 +79,7 @@
       "./js/settlement-funds.mjs?v=20261124-fund-bunny":"./js/settlement-funds.mjs?v=20261125-pinner-rewards",
       "./js/settlement-funds.mjs?v=20261116-promotions":"./js/settlement-funds.mjs?v=20261125-pinner-rewards",
       "./js/settlement-funds.mjs?v=20261124-admin-funds":"./js/settlement-funds.mjs?v=20261125-pinner-rewards",
-      "./js/pinner-rewards.mjs":"./js/pinner-rewards.mjs?v=20261125-pinner-rewards",
+      "./js/pinner-rewards.mjs":"./js/pinner-rewards.mjs?v=20261126-pinner-onboarding",
       "./js/radio-payroll.mjs?v=20261123-song-splits":"./js/radio-payroll.mjs?v=20261125-pinner-rewards",
       "./js/fund-guide.mjs?v=20261124-fund-bunny-keys":"./js/fund-guide.mjs?v=20261125-pinner-rewards",
       "./js/referral-campaign-editor.mjs?v=20261126-eth-gifts":"./js/referral-campaign-editor.mjs?v=20261126-referral-match",
@@ -533,6 +533,7 @@
 
   <dialog id="community-pin-dialog" aria-labelledby="community-pin-title">
     <h3 id="community-pin-title">Pin DBusk content</h3>
+    <p class="pinner-help">New to pinning? <a href="https://github.com/TheJollyLaMa/DecentBusking/blob/main/wiki/Earn-by-Pinning.md" target="_blank" rel="noopener">Read the pinner guide</a>: what you keep, what you earn and how to set up.</p>
     <p id="community-pin-summary">Loading the shared content manifest…</p>
     <fieldset class="community-pin-providers">
       <legend>Choose storage</legend>
@@ -1315,7 +1316,7 @@
   <script type="module" src="js/content-review-ui.mjs?v=20261107-flags"></script>
 
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
-  <script type="module" src="js/payroll.js?v=20261125-pinner-rewards"></script>
+  <script type="module" src="js/payroll.js?v=20261126-pinner-onboarding"></script>
   <script type="module" src="js/radio-history.js?v=20261029-tally-sections"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261124-public-personal"></script>
   <link rel="stylesheet" href="css/fund-tour.css?v=20261124-fund-bunny">
@@ -1328,12 +1329,12 @@
   <script type="module" src="js/artwork-editor.mjs?v=20261118-artist-artwork"></script>
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/djuke-playlists-ui.mjs?v=20261025-scheduling-info"></script>
-  <script type="module" src="js/community-pinning.mjs?v=20261125-pinner-rewards"></script>
+  <script type="module" src="js/community-pinning.mjs?v=20261126-pinner-onboarding"></script>
   <script type="module" src="js/worker-gas.mjs?v=20261024-admin-sections"></script>
   <script type="module" src="js/panel-equalizers.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/top-ten-live-meter.mjs?v=20261025-seamless-handoff"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261125-pinner-rewards';
+    import { initPayroll } from './js/payroll.js?v=20261126-pinner-onboarding';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
   <script type="module">

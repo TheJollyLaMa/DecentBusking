@@ -3,6 +3,9 @@ import { importer } from 'ipfs-unixfs-importer';
 import { fixedSize } from 'ipfs-unixfs-importer/chunker';
 import { CID } from 'multiformats/cid';
 
+// The daily playlist checkpoint passed 5 MB in November 2026; leave room for its history to grow.
+export const CHECKPOINT_MIRROR_MAX_BYTES = 16 * 1024 * 1024;
+
 export async function checkpointContentCid(bytes) {
   let cid;
   for await (const result of importer([{ content: bytes }], { put: async () => {} }, {
@@ -11,8 +14,8 @@ export async function checkpointContentCid(bytes) {
   return cid;
 }
 
-export function createCheckpointMirror({ secret, timeoutMs = 120000, maxBytes = 2 * 1024 * 1024,
-  now = () => Date.now(), maxRequiredJobs = 8, maxOptionalJobs = 16 }) {
+export function createCheckpointMirror({ secret, timeoutMs = 120000, maxBytes = CHECKPOINT_MIRROR_MAX_BYTES,
+  now = () => Date.now(), maxRequiredJobs = 8, maxOptionalJobs = 16, maxOptionalBytes = 2 * CHECKPOINT_MIRROR_MAX_BYTES }) {
   if (typeof secret !== 'string' || Buffer.byteLength(secret) < 32) throw new Error('Checkpoint mirror needs a dedicated secret of at least 32 bytes');
   const jobs = new Map();
   const availabilityWaiters = new Set();
@@ -49,6 +52,7 @@ export function createCheckpointMirror({ secret, timeoutMs = 120000, maxBytes = 
     for (const waiter of claimWaiters) waiter.wake();
   };
   const count = required => [...jobs.values()].filter(job => job.required === required).length;
+  const optionalBytes = () => [...jobs.values()].reduce((total, job) => total + (job.required ? 0 : job.bytes), 0);
   return {
     authorize: authenticate,
     requireAvailable() { if (!available()) throw new Error('Local checkpoint mirror is offline; no Pinata upload attempted'); },
@@ -120,6 +124,7 @@ export function createCheckpointMirror({ secret, timeoutMs = 120000, maxBytes = 
       if (count(required) >= (required ? maxRequiredJobs : maxOptionalJobs)) throw new Error('Checkpoint mirror queue is full');
       const expectedCid = await checkpointContentCid(bytes);
       if (count(required) >= (required ? maxRequiredJobs : maxOptionalJobs)) throw new Error('Checkpoint mirror queue is full');
+      if (!required && optionalBytes() + bytes.length > maxOptionalBytes) throw new Error('Checkpoint mirror queue is full');
       const jobId = randomUUID();
       const snapshot = Buffer.from(bytes).toString('base64');
       return new Promise((resolve, reject) => {
@@ -127,7 +132,8 @@ export function createCheckpointMirror({ secret, timeoutMs = 120000, maxBytes = 
           jobs.delete(jobId);
           reject(new Error('Local checkpoint mirror timed out; no Pinata upload attempted'));
         }, timeoutMs);
-        jobs.set(jobId, { jobId, key, required: required === true, claimed: false, lastOffer: 0, expectedCid, contentBase64: snapshot, resolve, timer });
+        jobs.set(jobId, { jobId, key, required: required === true, claimed: false, lastOffer: 0, expectedCid,
+          bytes: bytes.length, contentBase64: snapshot, resolve, timer });
         wakeClaimers();
       });
     },

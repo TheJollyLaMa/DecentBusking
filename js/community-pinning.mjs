@@ -1,5 +1,5 @@
 import { pinCommunityManifest } from './pinner-rewards.mjs';
-import { createPinnerRewardsView } from './pinner-rewards-ui.mjs?v=20261125-pinner-rewards';
+import { createPinnerRewardsView } from './pinner-rewards-ui.mjs?v=20261126-pinner-onboarding';
 
 export function initCommunityPinning({ fetchImpl = fetch } = {}) {
   const dialog = document.getElementById('community-pin-dialog');

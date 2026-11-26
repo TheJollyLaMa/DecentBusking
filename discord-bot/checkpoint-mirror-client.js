@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { pathToFileURL } from 'node:url';
 import { CID } from 'multiformats/cid';
-import { checkpointContentCid } from './checkpoint-mirror.js';
+import { CHECKPOINT_MIRROR_MAX_BYTES, checkpointContentCid } from './checkpoint-mirror.js';
 import { ensureLocalRecursivePin } from './ipfs.js';
 import { validatePlaylistShowSnapshot } from './playlist-show.js';
 import { validateHypeSnapshot } from './top-ten-hype.js';
@@ -28,18 +28,19 @@ export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiU
   const post = async (route, body) => {
     const response = await fetchImpl(`${base}/api/checkpoint-mirror/${route}`, { method: 'POST',
       headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
-      body: JSON.stringify(body || {}), redirect: 'error', signal: AbortSignal.timeout(15000) });
+      body: JSON.stringify(body || {}), redirect: 'error', signal: AbortSignal.timeout(60000) });
     if (!response.ok) throw new Error(`Checkpoint mirror service returned ${response.status}`);
     return response.json();
   };
   return async function poll() {
     const { job } = await post('claim');
     if (!job) return { idle: true };
-    if (typeof job.jobId !== 'string' || typeof job.contentBase64 !== 'string' || job.contentBase64.length > 2800000) {
+    if (typeof job.jobId !== 'string' || typeof job.contentBase64 !== 'string' ||
+      job.contentBase64.length > Math.ceil(CHECKPOINT_MIRROR_MAX_BYTES / 3) * 4) {
       throw new Error('Invalid checkpoint mirror job');
     }
     const bytes = Buffer.from(job.contentBase64, 'base64');
-    if (bytes.length < 1 || bytes.length > 2 * 1024 * 1024) throw new Error('Checkpoint mirror payload exceeds limit');
+    if (bytes.length < 1 || bytes.length > CHECKPOINT_MIRROR_MAX_BYTES) throw new Error('Checkpoint mirror payload exceeds limit');
     const expectedCid = CID.parse(job.expectedCid).toV1().toString();
     if (await checkpointContentCid(bytes) !== expectedCid) throw new Error('Checkpoint payload CID mismatch');
     const snapshot = JSON.parse(bytes.toString('utf8'));

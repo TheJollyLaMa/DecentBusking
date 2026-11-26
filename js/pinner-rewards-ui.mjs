@@ -114,8 +114,8 @@ export function createPinnerRewardsView({ root, enrollment = false, fetchImpl = 
         await pinPinnerOwnership({ ownership: state.ownership, ipfsApiUrl, fetchImpl });
         status('Node setup complete. An admin can now verify and approve it. Keep IPFS Desktop running and pin the shared content.');
       });
-      const guide = element('a', 'Node setup and reachability guide');
-      guide.href = 'https://github.com/TheJollyLaMa/DecentBusking/blob/main/docs/PINNER-NETWORK.md';
+      const guide = element('a', 'Step-by-step pinner guide: setup, reachability and payouts');
+      guide.href = 'https://github.com/TheJollyLaMa/DecentBusking/blob/main/wiki/Earn-by-Pinning.md';
       guide.target = '_blank'; guide.rel = 'noopener'; root.append(guide);
     }
     if (admin()) {
