@@ -540,7 +540,7 @@ test('tour uses factual rabbit-themed copy and a smaller money icon without a Me
   vm.runInContext('initTutorial(); startTutorial();', context);
   const copy = vm.runInContext('TUTORIAL_STEPS.map(step => step.title + " " + step.body).join(" ")', context);
   assert.doesNotMatch(copy, /Mercury|messenger|narrator|I’m|I won’t|not just the little symbol/);
-  assert.match(vm.runInContext('TUTORIAL_STEPS[9].body', context), /right ankh menu.*Profile and Public Schedule/);
+  assert.match(vm.runInContext('TUTORIAL_STEPS[9].body', context), /right ankh menu.*Profile and DCal/);
   assert.match(document.head.children[0].textContent, /\.mercury-money \{[^}]*font-size: 22px/);
   assert.equal(document.getElementById('rabbit-tour-launch').getAttribute('aria-label'), 'Follow the white rabbit: explore DecentBusking');
 });

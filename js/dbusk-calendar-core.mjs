@@ -1,16 +1,34 @@
-import { utcToNewYorkInput, newYorkInputToUtc, radioCalendarOccurrences } from './radio-calendar.mjs?v=20261024-programming-calendar';
+import { utcToZonedInput, zonedInputToUtc, radioCalendarOccurrences } from './radio-calendar.mjs?v=20261024-programming-calendar';
 import { performerRoomUrl } from './performer-room.mjs?v=20261116-curtain';
 import { formatLiveAsset } from './live-bookings.mjs?v=20261108-live-audio-pilot';
 
 export const DCAL_ZONE = 'America/New_York';
 export const walletKey = value => /^0x[0-9a-f]{40}$/i.test(value || '') ? value.toLowerCase() : '';
-export const localDate = value => utcToNewYorkInput(new Date(value).toISOString()).slice(0, 10);
+export const localDate = (value, timeZone = DCAL_ZONE) => utcToZonedInput(new Date(value).toISOString(), timeZone).slice(0, 10);
 export function addDays(key, count) {
   const date = new Date(`${key}T12:00:00Z`);
   date.setUTCDate(date.getUTCDate() + count);
   return date.toISOString().slice(0, 10);
 }
-export function calendarRange(anchor, mode = 'week') {
+function calendarDayStart(date, timeZone) {
+  try {
+    const start = zonedInputToUtc(`${date}T00:00`, timeZone);
+    if (localDate(Date.parse(start) - 1, timeZone) < date) return start;
+  } catch (error) {
+    if (!error.message.includes('daylight-saving')) throw error;
+  }
+  // Midnight can be skipped or repeated; find the first instant of the civil day.
+  const midnight = Date.parse(`${date}T00:00:00Z`);
+  let low = midnight - 36 * 3600000;
+  let high = midnight + 36 * 3600000;
+  while (low + 1 < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (localDate(mid, timeZone) < date) low = mid;
+    else high = mid;
+  }
+  return new Date(high).toISOString();
+}
+export function calendarRange(anchor, mode = 'week', timeZone = DCAL_ZONE) {
   const first = mode === 'month' ? `${anchor.slice(0, 7)}-01` : anchor;
   const weekday = new Date(`${first}T12:00:00Z`).getUTCDay();
   const startDate = addDays(first, -(weekday + 6) % 7);
@@ -21,8 +39,8 @@ export function calendarRange(anchor, mode = 'week') {
     count = Math.ceil((Date.parse(next) - Date.parse(`${startDate}T12:00:00Z`)) / 86400000 / 7) * 7;
   }
   const dates = Array.from({ length: count }, (_, i) => addDays(startDate, i));
-  return { dates, start: newYorkInputToUtc(`${startDate}T00:00`),
-    end: newYorkInputToUtc(`${addDays(startDate, count)}T00:00`) };
+  return { dates, timeZone, start: calendarDayStart(startDate, timeZone),
+    end: calendarDayStart(addDays(startDate, count), timeZone) };
 }
 export const overlaps = (event, range) => Date.parse(event.startUtc) < Date.parse(range.end) &&
   Date.parse(event.endUtc) > Date.parse(range.start);
@@ -59,7 +77,7 @@ export function publicCalendarEvents(data, range, { now = Date.now(), showPastRu
   const start = Date.parse(range.start);
   const days = range.dates.length;
   const recurrence = radioCalendarOccurrences({ schedule: data?.schedule?.schedule || [], events: [] },
-    { now: start, days, pastDays: 0 });
+    { now: start, days: days + 1, pastDays: 1 });
   const recordedIds = new Set(recorded.map(event => event.id));
   return [
     ...recorded.map(event => ({ ...event, audience: 'public', provenance: 'ipfs-record',
@@ -197,13 +215,14 @@ export function calendarEvents(publicData, personal, wallet, range, options) {
   return [...events.values()].sort((a, b) => Date.parse(a.startUtc) - Date.parse(b.startUtc));
 }
 
-export function intervalSegments(events, dates) {
-  const range = { start: newYorkInputToUtc(`${dates[0]}T00:00`),
-    end: newYorkInputToUtc(`${addDays(dates.at(-1), 1)}T00:00`) };
+export function intervalSegments(events, dates, timeZone = DCAL_ZONE) {
+  const range = { start: calendarDayStart(dates[0], timeZone),
+    end: calendarDayStart(addDays(dates.at(-1), 1), timeZone) };
+  if (range.start === range.end) return [];
   const lanes = [];
   return events.filter(event => event.interval && overlaps(event, range)).map(event => {
-    const start = Math.max(0, dates.indexOf(localDate(Date.parse(event.startUtc))));
-    const last = localDate(Date.parse(event.endUtc) - 1);
+    const start = Math.max(0, dates.indexOf(localDate(Date.parse(event.startUtc), timeZone)));
+    const last = localDate(Date.parse(event.endUtc) - 1, timeZone);
     const end = last > dates.at(-1) ? dates.length : dates.indexOf(last) + 1;
     let lane = lanes.findIndex(items => items.every(item => item.end <= start || item.start >= end));
     if (lane < 0) { lane = lanes.length; lanes.push([]); }
@@ -213,10 +232,51 @@ export function intervalSegments(events, dates) {
   });
 }
 
-export function timedSegments(events, date) {
-  const range = { start: newYorkInputToUtc(`${date}T00:00`), end: newYorkInputToUtc(`${addDays(date, 1)}T00:00`) };
+export function groupedIntervalSegments(events, dates, timeZone = DCAL_ZONE) {
+  const segments = intervalSegments(events, dates, timeZone);
+  const runs = [];
+  let active = new Map();
+  for (let day = 0; day < dates.length; day++) {
+    const groups = new Map();
+    for (const { event, start, end } of segments) {
+      if (day < start || day >= end) continue;
+      const key = `${event.audience}:${event.owner || ''}:${event.type || 'show'}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(event);
+    }
+    const next = new Map();
+    for (const [key, members] of groups) {
+      const signature = JSON.stringify([key, ...members.map(event => event.id).sort()]);
+      const run = active.get(signature) || { key, members, start: day, end: day };
+      if (!active.has(signature)) runs.push(run);
+      run.end = day + 1;
+      next.set(signature, run);
+    }
+    active = next;
+  }
+  const lanes = [];
+  return runs.map(({ key, members, start, end }) => {
+    const first = members.reduce((a, b) => Date.parse(a.startUtc) <= Date.parse(b.startUtc) ? a : b);
+    const last = members.reduce((a, b) => Date.parse(a.endUtc) >= Date.parse(b.endUtc) ? a : b);
+    const kinds = { referral_campaign: 'promotions', advert_campaign: 'adverts' };
+    const event = members.length === 1 ? first : { ...first, id: `group:interval:${dates[start]}:${key}`,
+      title: `${members.length} ${kinds[first.type] || 'events'}`, endUtc: last.endUtc,
+      status: members.every(member => member.status === first.status) ? first.status : 'multiple statuses',
+      attention: members.find(member => member.attention)?.attention || '', members };
+    let lane = lanes.findIndex(items => items.every(item => item.end <= start || item.start >= end));
+    if (lane < 0) { lane = lanes.length; lanes.push([]); }
+    lanes[lane].push({ start, end });
+    return { event, start, end, lane,
+      before: members.every(member => localDate(member.startUtc, timeZone) < dates[start]),
+      after: members.every(member => localDate(Date.parse(member.endUtc) - 1, timeZone) > dates[end - 1]) };
+  });
+}
+
+export function timedSegments(events, date, timeZone = DCAL_ZONE) {
+  const range = { start: calendarDayStart(date, timeZone), end: calendarDayStart(addDays(date, 1), timeZone) };
+  if (range.start === range.end) return [];
   const minute = value => {
-    const local = utcToNewYorkInput(new Date(value).toISOString());
+    const local = utcToZonedInput(new Date(value).toISOString(), timeZone);
     return Number(local.slice(11, 13)) * 60 + Number(local.slice(14));
   };
   const segments = events.filter(event => !event.interval && overlaps(event, range)).map(event => {
@@ -243,4 +303,33 @@ export function timedSegments(events, date) {
     for (const segment of group.items) segment.lanes = ends.length;
   }
   return segments;
+}
+
+export function calendarLayer(event) {
+  if (event.type === 'payment') return 'receipts';
+  if (event.type === 'advert_campaign') return 'adverts';
+  if (event.type === 'referral_campaign') return 'campaigns';
+  if (event.audience === 'personal') return 'invitations';
+  return 'schedule';
+}
+
+export function groupCalendarDay(events, date, timeZone = DCAL_ZONE) {
+  const groups = new Map();
+  for (const segment of timedSegments(events, date, timeZone)) {
+    const event = segment.event;
+    const key = `${event.audience}:${event.owner || ''}:${event.type || 'show'}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(segment);
+  }
+  return [...groups.entries()].map(([key, segments]) => {
+    if (segments.length === 1) return segments[0].event;
+    const first = segments[0];
+    const kinds = { payment: 'payment / gift receipts', soundcheck: 'soundchecks', personal_show: 'performances',
+      live_performance: 'live shows', top10: 'Top 10 shows', playlist_show: 'playlist shows' };
+    return { ...first.event, id: `group:${date}:${key}`, title: `${segments.length} ${kinds[first.event.type] || 'events'}`,
+      startUtc: new Date(first.start).toISOString(), endUtc: new Date(Math.min(first.end, first.start + 15 * 60000)).toISOString(),
+      status: segments.every(segment => segment.event.status === first.event.status) ? first.event.status : 'multiple statuses',
+      attention: segments.find(segment => segment.event.attention)?.event.attention || '',
+      members: segments.map(segment => segment.event) };
+  });
 }

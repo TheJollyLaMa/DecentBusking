@@ -304,7 +304,7 @@ test('Right Ankh keeps the public schedule visible and hides My Playbacks on dis
   assert.equal((root.innerHTML.match(/<li /g) || []).length, 3);
   nodes.get('#creator-profile-btn').listeners.get('click')({ stopPropagation() {} });
   assert.equal(dispatched.type, 'open-creator-profile');
-  assert.match(root.innerHTML, /Public Schedule/);
+  assert.match(root.innerHTML, /☿🗓️ DCal ⨘ 🜐/);
   assert.match(root.innerHTML, /My Playbacks/);
   assert.doesNotMatch(root.innerHTML, /wallet-connect-btn|wallet-addr-display/);
   const button = nodes.get('#radio-history-btn');

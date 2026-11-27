@@ -75,7 +75,7 @@ const TUTORIAL_STEPS = [
   {
     title: 'Profile and public schedule',
     prop: '🎷', propName: 'saxophone',
-    body: 'Open the right ankh menu to access Profile and Public Schedule. The schedule lists community shows and includes calendar reminders. Profile contains your personal collections and activity. Connect a wallet to use wallet-backed profile features.',
+    body: 'Open the right ankh menu to access Profile and DCal. The calendar lists community shows and includes calendar reminders. Profile contains your personal collections and activity. Connect a wallet to use wallet-backed profile features.',
     target: 'decent-header >>> app-title >>> right-ankh >>> .dropdown-menu',
     surface: 'menu',
   },

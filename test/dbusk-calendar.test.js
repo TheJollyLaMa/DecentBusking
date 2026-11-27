@@ -67,6 +67,34 @@ test('continuous multiweek bars clip to each week, midnight-exclusive ends and s
   assert.deepEqual([final.start, final.end, final.before, final.after], [0, 2, true, false]);
 });
 
+test('overlapping interval events share one blip per day without hiding their individual dates', async () => {
+  const { groupedIntervalSegments, calendarRange } = await load();
+  const dates = calendarRange('2026-11-24').dates;
+  const first = { id: 'one', title: 'First promotion', type: 'referral_campaign', interval: true,
+    audience: 'public', status: 'published', startUtc: '2026-11-21T05:00:00Z', endUtc: '2026-11-26T05:00:00Z' };
+  const second = { ...first, id: 'two', title: 'Second promotion', status: 'paused',
+    startUtc: '2026-11-25T05:00:00Z', endUtc: '2026-12-02T05:00:00Z' };
+  const personal = { ...second, id: 'own', audience: 'personal', owner: A };
+  const otherWallet = { ...personal, id: 'other', owner: B };
+  const segments = groupedIntervalSegments([first, second, personal, otherWallet], dates);
+  const combined = segments.find(segment => segment.event.members);
+  assert.deepEqual([combined.start, combined.end], [2, 3]);
+  assert.equal(combined.event.title, '2 promotions');
+  assert.equal(combined.event.status, 'multiple statuses');
+  assert.deepEqual(combined.event.members, [first, second]);
+  assert.ok(segments.some(segment => segment.event === first && segment.start === 0 && segment.end === 2));
+  assert.ok(segments.some(segment => segment.event === second && segment.start === 3 && segment.end === 7));
+  assert.ok(segments.some(segment => segment.event === personal && segment.start === 2 && segment.end === 7));
+  assert.ok(segments.some(segment => segment.event === otherWallet && segment.start === 2 && segment.end === 7));
+  assert.equal(combined.before, false);
+  assert.equal(combined.after, false);
+
+  const early = { ...first, id: 'early', startUtc: '2026-11-24T05:30:00Z', endUtc: '2026-11-24T06:00:00Z' };
+  const later = { ...second, id: 'later', startUtc: '2026-11-24T08:30:00Z', endUtc: '2026-11-24T09:00:00Z' };
+  assert.ok(groupedIntervalSegments([early, later], dates, 'America/New_York').some(segment => segment.event.members));
+  assert.ok(groupedIntervalSegments([early, later], dates, 'America/Los_Angeles').every(segment => !segment.event.members));
+});
+
 test('timed events cross midnight and competing slots do not cover each other', async () => {
   const { timedSegments } = await load();
   const spanning = { ...event, startUtc: '2026-11-28T04:30:00Z', endUtc: '2026-11-28T05:30:00Z' };
@@ -236,4 +264,58 @@ test('source timeouts and pause discard pending work without retaining personal 
   assert.equal(store.snapshot().personal.length, 0);
   assert.equal(store.snapshot().sources.bookings, undefined);
   store.dispose();
+});
+
+test('calendar primary timezone moves day boundaries and slots without moving the underlying event', async () => {
+  const { calendarRange, timedSegments, localDate, intervalSegments, publicCalendarEvents } = await load();
+  const early = { ...event, startUtc: '2026-11-24T05:30:00Z', endUtc: '2026-11-24T06:00:00Z' };
+  assert.equal(localDate(early.startUtc), '2026-11-24');
+  assert.equal(localDate(early.startUtc, 'America/Los_Angeles'), '2026-11-23');
+  assert.equal(timedSegments([early], '2026-11-24')[0].top, 30);
+  assert.equal(timedSegments([early], '2026-11-23', 'America/Los_Angeles')[0].top, 1290);
+  assert.equal(timedSegments([early], '2026-11-24', 'America/Los_Angeles').length, 0);
+  const tokyo = calendarRange('2026-11-24', 'week', 'Asia/Tokyo');
+  assert.equal(tokyo.start, '2026-11-22T15:00:00.000Z');
+  const [bar] = intervalSegments([{ ...early, interval: true }], tokyo.dates, 'Asia/Tokyo');
+  assert.deepEqual([bar.start, bar.end], [1, 2]);
+  const data = { schedule: { events: [], schedule: [
+    { id: 'sunday', label: 'Sunday show', type: 'top10', weekday: 0, startHourLocal: 23, endHourLocal: 24 },
+  ] } };
+  const recurring = publicCalendarEvents(data, tokyo, { now: Date.parse('2026-11-20T00:00Z') });
+  assert.equal(recurring[0].startUtc, '2026-11-23T04:00:00.000Z');
+  assert.equal(localDate(recurring[0].startUtc, 'Asia/Tokyo'), tokyo.dates[0]);
+  assert.equal(early.startUtc, '2026-11-24T05:30:00Z');
+});
+
+test('calendar handles timezones that skip midnight or an entire civil day', async () => {
+  const { timedSegments, intervalSegments, calendarRange } = await load();
+  const afterJump = { ...event, startUtc: '2026-09-06T04:15:00Z', endUtc: '2026-09-06T04:45:00Z' };
+  const [segment] = timedSegments([afterJump], '2026-09-06', 'America/Santiago');
+  assert.equal(segment.top, 75);
+  assert.equal(segment.bottom, 105);
+  const week = calendarRange('2026-09-06', 'week', 'America/Santiago');
+  assert.equal((Date.parse(week.end) - Date.parse(week.start)) / 3600000, 167);
+  const spanning = { ...event, startUtc: '2011-12-30T09:00:00Z', endUtc: '2011-12-30T11:00:00Z' };
+  assert.deepEqual(timedSegments([spanning], '2011-12-30', 'Pacific/Apia'), []);
+  assert.deepEqual(intervalSegments([{ ...spanning, interval: true }], ['2011-12-30'], 'Pacific/Apia'), []);
+});
+
+test('same-day payment blips retain every receipt and do not mix wallets, types or local days', async () => {
+  const { groupCalendarDay, calendarLayer } = await load();
+  const payment = { ...event, id: 'first-payment', type: 'payment', audience: 'personal', owner: A,
+    startUtc: '2026-11-24T05:30:00Z', endUtc: '2026-11-24T05:31:00Z' };
+  const later = { ...payment, id: 'later', startUtc: '2026-11-24T18:00:00Z', endUtc: '2026-11-24T18:01:00Z' };
+  const other = { ...later, id: 'other', owner: B };
+  const input = [payment, later, other, { ...later, id: 'show', type: 'personal_show' }];
+  const grouped = groupCalendarDay(input, '2026-11-24');
+  assert.equal(grouped.length, 3);
+  const receipts = grouped.find(item => item.members);
+  assert.deepEqual(receipts.members.map(item => item.id), ['first-payment', 'later']);
+  assert.equal(calendarLayer(receipts), 'receipts');
+  assert.ok(Date.parse(receipts.endUtc) - Date.parse(receipts.startUtc) <= 15 * 60000);
+  const mixed = groupCalendarDay([{ ...payment, status: 'cancelled' }, { ...later, status: 'confirmed' }], '2026-11-24');
+  assert.equal(mixed[0].status, 'multiple statuses');
+  assert.equal(groupCalendarDay([payment, later], '2026-11-24', 'America/Los_Angeles').length, 1);
+  assert.equal(groupCalendarDay([payment, later], '2026-11-23', 'America/Los_Angeles').length, 1);
+  assert.equal(input[0].members, undefined);
 });

@@ -1,31 +1,40 @@
 export const RADIO_TIME_ZONE = 'America/New_York';
 export const RADIO_LISTEN_URL = 'https://thejollylama.github.io/DecentBusking/';
 
-function zonedParts(epoch) {
+function zonedParts(epoch, timeZone = RADIO_TIME_ZONE) {
   return Object.fromEntries(new Intl.DateTimeFormat('en-US', {
-    timeZone: RADIO_TIME_ZONE,
+    timeZone,
     year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
     second: '2-digit', hourCycle: 'h23',
   }).formatToParts(new Date(epoch)).filter(part => part.type !== 'literal').map(part => [part.type, Number(part.value)]));
 }
 
 export function utcToNewYorkInput(value) {
-  const parts = zonedParts(Date.parse(value));
+  return utcToZonedInput(value, RADIO_TIME_ZONE);
+}
+
+export function utcToZonedInput(value, timeZone) {
+  const parts = zonedParts(Date.parse(value), timeZone);
   return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}T${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`;
 }
 
 export function newYorkInputToUtc(value) {
+  return zonedInputToUtc(value, RADIO_TIME_ZONE);
+}
+
+export function zonedInputToUtc(value, timeZone) {
+  const label = timeZone === RADIO_TIME_ZONE ? 'New York' : timeZone;
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value || '');
-  if (!match) throw new Error('Choose a valid New York date and time');
+  if (!match) throw new Error(`Choose a valid ${label} date and time`);
   const [year, month, day, hour, minute] = match.slice(1).map(Number);
   const target = Date.UTC(year, month - 1, day, hour, minute);
   const date = new Date(target);
   if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day || hour > 23 || minute > 59) {
-    throw new Error('Choose a valid New York date and time');
+    throw new Error(`Choose a valid ${label} date and time`);
   }
   let epoch = target;
   for (let attempt = 0; attempt < 5; attempt++) {
-    const parts = zonedParts(epoch);
+    const parts = zonedParts(epoch, timeZone);
     const displayed = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
     const next = epoch + target - displayed;
     if (next === epoch) {
