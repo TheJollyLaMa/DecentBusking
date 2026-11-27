@@ -37,6 +37,7 @@ export function playbackWeekStory({ report, days = [], wallet = '', archive, est
   if (archive) {
     if (archive.fundSlug !== 'dbusk-playback' || !Array.isArray(archive.weeks)) throw new Error('Invalid Playback Fund history');
     if (archive.payoutsAvailable === false) throw new Error('Playback Fund payment history is still indexing');
+    if (archive.refreshError && !Number.isFinite(Date.parse(archive.historyCheckedAt))) throw new Error('Payment history has no verified check date');
     const week = archive.weeks.find(w => w.week === report.week);
     const credited = new Set();
     const rows = (week?.entries || []).filter(entry => !wallet || same(entry.wallet, wallet)).map(entry => {
@@ -62,7 +63,8 @@ export function playbackWeekStory({ report, days = [], wallet = '', archive, est
     funding = { kind: 'closed', allocated: Boolean(week && week.status !== 'activity'), rows,
       paid: rows.reduce((sum, r) => sum + r.received, 0n),
       pending: rows.reduce((sum, r) => sum + r.remaining, 0n),
-      disputed: rows.some(r => r.disputed), unmatched: units(archive.unmatchedPaidUnits || '0') > 0n };
+      disputed: rows.some(r => r.disputed), unmatched: units(archive.unmatchedPaidUnits || '0') > 0n,
+      checkedAt: archive.historyCheckedAt, refreshError: archive.refreshError || '' };
   } else if (estimates) {
     if (estimates.ready !== true || estimates.lastError || estimates.chainId !== 8453 ||
       estimates.timeZone !== 'America/New_York' || estimates.currentPeriod?.week !== report.week ||
@@ -214,7 +216,13 @@ export function mountPlaybackWeek(root) {
       if (funding.warning) target.append(node('p', funding.warning, 'radio-history-note'));
     } else {
       if (!funding.allocated) target.append(node('p', 'No frozen allocation indexed for this earning week. No payment is being inferred from airplay.', 'radio-history-note'));
-      if (funding.pending > 0n) target.append(node('p', `${usdc(funding.pending)} USDC allocated · awaiting payment`, 'playback-week-pending'));
+      if (funding.pending > 0n) target.append(node('p', `${usdc(funding.pending)} USDC allocated · ${funding.refreshError ? 'not yet recorded as paid at last check' : 'awaiting payment'}`, 'playback-week-pending'));
+      if (funding.checkedAt) target.append(node('p', `Payment history checked ${paymentDate.format(new Date(funding.checkedAt))}.`, 'radio-history-note'));
+      if (funding.refreshError) {
+        target.append(node('p', 'Latest blockchain refresh unavailable. Showing recorded payments as of that check; newer payments may not yet appear.', 'playback-week-pending'));
+        const retry = node('button', 'Check for newer payments', 'playback-previous-week'); retry.type = 'button'; retry.addEventListener('click', render);
+        target.append(retry);
+      }
       if (funding.disputed) target.append(node('p', 'Some payment evidence differs from the allocation. Check the receipts below before treating this week as settled.', 'payroll-funding-warning'));
       if (funding.unmatched) target.append(node('p', 'Other fund payments are not matched to an earning week and are excluded here.', 'radio-history-note'));
       const dates = funding.rows.flatMap(row => row.payments).filter(p => p.timestamp > 0).map(p => p.timestamp).sort((a, b) => a - b);
@@ -301,7 +309,7 @@ export function mountPlaybackWeek(root) {
         if (!archive) {
           archive = await json(`/api/funds/dbusk-playback/weeks?week=${encodeURIComponent(selected)}`, signal);
           if (currentVersion !== version) return;
-          archiveCache.set(selected, archive);
+          if (!archive.refreshError) archiveCache.set(selected, archive);
         }
         evidence = { archive };
       }

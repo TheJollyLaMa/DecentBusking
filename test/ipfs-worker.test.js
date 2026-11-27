@@ -589,6 +589,28 @@ test('weekly fund archive errors remain readable from local and hosted browsers'
   }
 });
 
+test('weekly archives read verified history without live balance RPC and expose a failed refresh rather than hiding receipts', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const checkedAt = '2026-11-27T12:15:00Z';
+  let ready = true;
+  const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: Wallet.createRandom().address,
+    getFunds: async () => { throw new Error('Historical reads must not request current balances'); },
+    getFundHistory: () => ({ ready, lastCheckedAt: ready ? checkedAt : null, lastError: 'RPC rate limited',
+      funds: { 'dbusk-playback': { payoutsAvailable: true, payouts: [], historyCheckedAt: checkedAt } } }),
+    getWeeklyPayflow: () => ({ ready: false, allocationsReady: true, allocations: [], lastError: 'Current estimates unavailable' }),
+  });
+  await withServer(handler, async base => {
+    const response = await fetch(`${base}/api/funds/dbusk-playback/weeks?week=NY-2026-11-16`);
+    assert.equal(response.status, 200);
+    const archive = await response.json();
+    assert.equal(archive.historyCheckedAt, checkedAt);
+    assert.equal(archive.refreshError, 'RPC rate limited');
+    assert.equal(archive.payoutsAvailable, true);
+    ready = false;
+    assert.equal((await fetch(`${base}/api/funds/dbusk-playback/weeks?week=NY-2026-11-16`)).status, 503);
+  });
+});
+
 test('weekly archive reports actual paid amounts, recipient discrepancies, duplicate logs, and unmatched payments', async () => {
   const { buildFundWeeklyArchive } = await import('../js/fund-archive.mjs');
   const fundSlug = 'dbusk-top10';

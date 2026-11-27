@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { playbackWeekStory } from '../js/playback-week.mjs';
 import { buildAirplayCalendar } from '../discord-bot/airplay-calendar.js';
+import { recoverDatedAirplay } from '../scripts/recover-airplay-history.mjs';
 
 const a = `0x${'a'.repeat(40)}`, b = `0x${'b'.repeat(40)}`, tx = `0x${'1'.repeat(64)}`;
 const now = Date.parse('2026-11-27T12:00:00Z');
@@ -84,4 +85,53 @@ test('selecting an older week retrieves its retained finish-date detail, includi
   assert.deepEqual(result.daily.map(d => d.date), ['2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01']);
   assert.equal(result.daily.at(-1).tracks[0].plays, 4);
   assert.throws(() => buildAirplayCalendar(playlist, { now, dayWeek: 'NY-2026-11-01' }), /Monday/);
+});
+
+test('historical days fill the whole week without adding overlapping live counters or another wallet', () => {
+  const history = Array.from({ length: 7 }, (_, index) => ({ date: `2026-11-${16 + index}`, coverage: 'tracked',
+    tracks: [{ trackId: 'one', plays: 1 }, { trackId: 'three', plays: 2 }] }));
+  const playlist = [{ trackId: 'one', mintRecipient: a, airplayDays: { '2026-11-16': { plays: 1, votes: 3 } } },
+    { trackId: 'three', mintRecipient: b }];
+  const { daily } = buildAirplayCalendar(playlist, { now, dayWeek: report.week, history, wallet: a });
+  const story = playbackWeekStory({ report: { ...report, tracks: [{ trackId: 'one', wallet: a, plays: 7 }] },
+    days: daily, wallet: a, now });
+  assert.deepEqual(story.points.map(p => p.value), [1, 1, 1, 1, 1, 1, 1]);
+  assert.ok(story.points.every(p => p.coverage === 'tracked'));
+  assert.equal(story.points.reduce((sum, p) => sum + p.value, 0), story.airings);
+  assert.equal(daily[0].tracks[0].votes, 3);
+  assert.equal(buildAirplayCalendar(playlist, { now, dayWeek: report.week, history }).daily[0].tracks.length, 2);
+});
+
+test('archive recovery deduplicates journals, uses finish dates across DST, and reconciles each track before claiming complete days', async () => {
+  const play = (playId, endedAt) => ({ id: `play:${playId}`, playId, type: 'play', trackId: 'one',
+    qualified: true, audibleMs: 30000, endedAt });
+  const snapshots = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(Date.UTC(2026, 9, 26 + index)).toISOString().slice(0, 10);
+    return { cid: `source-${index}`, snapshot: { playlist: [{ trackId: 'one', payrollPlays: { 'NY-2026-10-26': 8 } }],
+      _checkpoint: { policy: 'daily-v1', timeZone: 'America/New_York', day: date,
+        savedAt: `${date}T23:59:59Z`, events: [play(String(index), `${date}T12:00:00Z`)] } } };
+  });
+  snapshots[6].snapshot._checkpoint.events = [play('6', '2026-11-01T05:30:00Z'), play('fall-back', '2026-11-01T06:30:00Z'),
+    snapshots[0].snapshot._checkpoint.events[0], { ...play('short', '2026-11-01T12:00:00Z'), audibleMs: 29999 },
+    { ...play('start-is-not-finish:1793527200000', undefined) }];
+  const result = await recoverDatedAirplay(snapshots, { through: '2026-11-01' });
+  assert.equal(result.days.length, 7);
+  assert.equal(result.days.at(-1).tracks[0].plays, 2);
+  assert.ok(result.days.every(day => day.coverage === 'tracked'));
+  assert.equal(result.reconciliation[0].complete, true);
+  snapshots[6].snapshot.playlist[0].payrollPlays['NY-2026-10-26'] = 9;
+  assert.ok((await recoverDatedAirplay(snapshots, { through: '2026-11-01' })).days.every(day => day.coverage === 'partial'));
+  snapshots[6].snapshot._checkpoint.events.push(play('0', '2026-11-01T07:00:00Z'));
+  await assert.rejects(recoverDatedAirplay(snapshots, { through: '2026-11-01' }), /Conflicting finish dates/);
+});
+
+test('verified receipts remain usable during a failed refresh, with their check date and warning intact', () => {
+  const evidence = { ...archive([{ wallet: a, amountUnits: '2000000', payments: [payment(a, '1500000')] }]),
+    historyCheckedAt: '2026-11-27T12:15:00Z', refreshError: 'RPC rate limited' };
+  const funding = playbackWeekStory({ report, archive: evidence, wallet: a, now }).funding;
+  assert.equal(funding.paid, 1500000n);
+  assert.equal(funding.pending, 500000n);
+  assert.equal(funding.checkedAt, evidence.historyCheckedAt);
+  assert.equal(funding.refreshError, 'RPC rate limited');
+  assert.throws(() => playbackWeekStory({ report, archive: { ...evidence, historyCheckedAt: null }, now }), /no verified check date/);
 });

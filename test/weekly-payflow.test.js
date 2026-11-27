@@ -39,6 +39,21 @@ test('weekly payflow freezes funded closed-week shares, reserves unpaid receipts
   assert.equal(value.uploads(), 2);
 });
 
+test('validated past allocations remain ready when the first current balance refresh fails', async () => {
+  const { createWeeklyPayflow } = await import(url);
+  const value = await fixture();
+  await value.scheduler.initialize();
+  const saved = value.snapshots.at(-1);
+  const scheduler = createWeeklyPayflow({ ...value.options, restore: async () => saved,
+    router: { ...value.options.router, fundBalances: async () => { throw new Error('RPC rate limited'); } } });
+  await assert.rejects(scheduler.initialize(), /RPC rate limited/);
+  const state = scheduler.getState();
+  assert.equal(state.ready, false, 'current estimates are still unavailable');
+  assert.equal(state.allocationsReady, true);
+  assert.deepEqual(state.allocations.map(r => r.metadataHash), saved.allocations.map(r => r.metadataHash));
+  assert.equal(state.lastError, 'RPC rate limited');
+});
+
 test('song prizes grow with funding, move with votes, and freeze at New York Monday midnight', async () => {
   const { createWeeklyPayflow } = await import(url);
   const value = await fixture();
