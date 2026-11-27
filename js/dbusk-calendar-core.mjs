@@ -1,6 +1,7 @@
 import { utcToZonedInput, zonedInputToUtc, radioCalendarOccurrences } from './radio-calendar.mjs?v=20261024-programming-calendar';
 import { performerRoomUrl } from './performer-room.mjs?v=20261116-curtain';
 import { formatLiveAsset } from './live-bookings.mjs?v=20261108-live-audio-pilot';
+import { campaignAsset, promotionMoney } from './promotions.mjs';
 
 export const DCAL_ZONE = 'America/New_York';
 export const walletKey = value => /^0x[0-9a-f]{40}$/i.test(value || '') ? value.toLowerCase() : '';
@@ -68,7 +69,12 @@ export function publicCalendarData(schedule, promotions) {
     ['published', 'paused', 'closed'].includes(c.status)).map(c => ({
     id: `promotion:${c.id}`, title: c.title, startUtc: c.startsAt, endUtc: c.endsAt, type: 'referral_campaign',
     interval: true, status: c.status, audience: 'public', provenance: 'ipfs-record',
-    portal: { kind: 'campaign', id: c.id }, details: ['Reward budget is earmarked, not escrowed. Payment requires a confirmed receipt.'],
+    portal: { kind: 'campaign', id: c.id }, details: [
+      ...(c.template === 'pinner' ? [`📌 ${c.qualifyingDays} qualifying full New York days · first ${c.maxAwards} finishers.`,
+        `Campaign bonus: ${promotionMoney(c.rewardUnits, campaignAsset(c))}. Budget: ${promotionMoney(c.budgetUnits, campaignAsset(c))}.`,
+        'Weekly USDC pinning rewards are separate from these promotional gifts.'] : []),
+      'Reward budget is earmarked, not escrowed. Payment requires a confirmed receipt.',
+    ],
   }));
   return { schedule: { events, schedule: rules, ready: schedule?.ready }, campaigns };
 }

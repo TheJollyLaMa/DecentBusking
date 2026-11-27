@@ -184,6 +184,29 @@ test('money preserves six-decimal amounts and invite links keep the deployment s
     `https://site.example/DecentBusking/?promotion=offer&ref=${owner}`);
   assert.ok(PROMOTION_TEMPLATES.some(template => template.id === 'musician-referral'));
 });
+
+test('pinning profile cards show verified progress and ETH bonuses without referral fields or success-shaped unavailable stats', async () => {
+  const { pinnerCampaignStatsCard } = await import('../js/promotions-ui.mjs');
+  const stats = { campaignId: 'pin-test', title: '<Pin & earn>', asset: 'eth', startsAt: '2026-11-27T22:00:00Z',
+    endsAt: '2026-12-29T22:00:00Z', qualifyingDays: 30, completedDays: 1, nodeStatus: 'active',
+    maxAwards: 5, eligible: false, claimStatus: 'not-submitted', rewardUnits: '1250000000000000',
+    pendingUnits: '0', approvedUnits: '0', paidUnits: '0', nftGifts: [],
+    days: [{ day: '2026-11-28', successfulChecks: 18, failedChecks: 2, qualified: true }] };
+  const html = pinnerCampaignStatsCard(stats);
+  assert.match(html, /1 \/ 30 qualifying days/);
+  assert.match(html, /0\.00125 ETH/);
+  assert.match(html, /18\/20 passed.*90%/);
+  assert.match(html, /Weekly USDC pinning rewards are separate/);
+  assert.match(html, /&lt;Pin &amp; earn&gt;/);
+  assert.doesNotMatch(html, /Referral|voteProgress|<Pin/);
+  const unavailable = pinnerCampaignStatsCard({ ...stats, completedDays: null, nodeStatus: 'unavailable',
+    error: 'Checkpoint timed out' });
+  assert.match(unavailable, /Verification unavailable: Checkpoint timed out/);
+  assert.doesNotMatch(unavailable, /<progress|Qualified for bonus review/);
+  const { promotionMoney, CAMPAIGN_ASSETS } = await import('../js/promotions.mjs');
+  assert.equal(promotionMoney('1250123456789012', CAMPAIGN_ASSETS.eth), '0.001250123456789012 ETH',
+    'the fixed bonus must display the exact payable wei, not silently truncate to six decimals');
+});
 test('conversion UI pays one wallet leg with its own amount and work reference', async t => {
   const f = await fixture(t);
   const leg = { id: 'musician', recipient: '0x' + '34'.repeat(20), amountUnits: '5000000', kind: 'wallet',

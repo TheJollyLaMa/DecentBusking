@@ -10,6 +10,7 @@
   padding: 22px;
 }
 .promotion-dialog::backdrop { background: #000b; }
+.promotion-dialog [hidden], #admin-promotions [hidden] { display: none; }
 .promotion-card { border: 1px solid #617383; border-radius: 10px; padding: 14px; margin: 14px 0; overflow-wrap: anywhere; }
 .promotion-terms { white-space: pre-wrap; overflow-wrap: anywhere; }
 #admin-promotions label, .promotion-dialog label { display: block; margin: 10px 0; }
@@ -31,3 +32,6 @@
 .promotion-card figure { margin: 12px 0; }
 .promotion-card figure img { max-width: min(100%, 360px); max-height: 360px; object-fit: contain; }
 .promotion-launcher { position: fixed; top: 85px; right: 12px; z-index: 10000; padding: 10px 14px; }
+.pinner-campaign-card progress { width: 100%; accent-color: #72cfa2; }
+.pinner-campaign-card a { display: inline-block; margin: 8px 14px 8px 0; }
+.pinner-campaign-amounts { display: flex; flex-wrap: wrap; gap: 16px; margin: 18px 0; }

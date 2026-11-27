@@ -21,7 +21,17 @@ function midnight(civil) {
     if (next === epoch) return epoch;
     epoch = next;
   }
+
   throw new Error('Could not resolve New York payroll midnight');
+}
+
+export function newYorkDayPeriod(day) {
+  const date = new Date(`${day}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day || '') || !Number.isFinite(date.getTime()) ||
+      date.toISOString().slice(0, 10) !== day) throw new Error('Invalid New York calendar day');
+  const end = new Date(date);
+  end.setUTCDate(end.getUTCDate() + 1);
+  return { day, startAt: new Date(midnight(date)).toISOString(), endAt: new Date(midnight(end)).toISOString() };
 }
 
 const periodsByKey = new Map();

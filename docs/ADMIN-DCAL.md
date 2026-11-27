@@ -161,10 +161,14 @@ Click its native disclosure to choose, then drag the same visible text:
 Saved reusable campaigns join the campaign options; **Custom** is always last.
 There is no separate static-name scheduling button.
 
-**Pin Reward Campaign** is the renamed pinner draft preset. It remains
-unpublishable: qualification accounting, launch terms, valuation timing and NFT
-configuration still require product review. No funds or NFT rewards were
-committed by renaming it.
+**Pin Reward Campaign** opens editable campaign dates, qualifying days, a capped
+ETH bonus and optional NFT gift. Save, fund and explicitly publish to make it
+public in right-ankh DCal. Independent daily checks and personal profile cards
+track its first-finisher bonus eligibility; ordinary weekly USDC pinning rewards
+remain separate. Legacy drafts require an explicit edit/save upgrade.
+See [Pinning bonus campaigns](PROMOTIONS.md#pinning-bonus-campaigns) for the
+qualification boundaries, publication quote, payment safeguards and deployment
+order. A drop alone never publishes, pays or announces anything.
 
 Dragging **Live Performance** opens the existing invitation form at the chosen
 time. Clicking a live occurrence exposes the same booking workflow. It uses the

@@ -1,3 +1,5 @@
+import { newYorkDay, newYorkDayPeriod } from './payroll-week.mjs';
+
 export const PROMOTIONS_FUND = 'dbusk-promotionals';
 export const REFERRALS_FUND = 'dbusk-referrals';
 export const PROMOTIONS_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -86,7 +88,7 @@ export function referralFundMatchQueue(campaigns = [], claims = [], now = Date.n
 }
 export function supporterRewardQueue(campaigns = []) {
   return campaigns.flatMap(campaign => (campaign.supporterToken?.eligibleWallets || []).flatMap(wallet =>
-    (campaignSupporterRewards(campaign.supporterRewards) || []).map(token => {
+    (promotionSupporterRewards(campaign) || []).map(token => {
     const tokenKey = supporterRewardKey(token);
     const delivery = (campaign.supporterToken.deliveries || []).find(item => item.wallet === wallet &&
       (item.tokenKey || supporterRewardKey()) === tokenKey);
@@ -238,10 +240,32 @@ export function isMusicianReferralCampaign(campaign) {
 export const PINNER_PROMOTION_DRAFT = Object.freeze({
   qualifyingDays: 30, rewardUsdCents: 500, budgetUsdCents: 2500, maxAwards: 5, nftReward: null,
 });
-export function pinnerPromotionAmounts(ethUsdMicros) {
+export const PINNER_CAMPAIGN_VERSION = 'pinner-days-v1';
+export function pinnerCampaignFullDays(startsAt, endsAt) {
+  let period = newYorkDayPeriod(newYorkDay(Date.parse(startsAt)));
+  let days = 0;
+  for (let count = 0; Date.parse(period.endAt) <= Date.parse(endsAt); count++) {
+    if (count > 366) throw new Error('Pinning campaign timebox cannot exceed 366 days');
+    if (Date.parse(period.startAt) >= Date.parse(startsAt)) days++;
+    period = newYorkDayPeriod(newYorkDay(Date.parse(period.endAt)));
+  }
+  return days;
+}
+export function promotionSupporterRewards(campaign) {
+  if (campaign?.template === 'pinner' && (campaign.supporterRewards === undefined ||
+      Array.isArray(campaign.supporterRewards) && !campaign.supporterRewards.length)) return [];
+  return campaignSupporterRewards(campaign?.supporterRewards);
+}
+export function pinnerPromotionAmounts(ethUsdMicros, { rewardUsdCents = 500, maxAwards = 5 } = {}) {
   if (!/^[1-9]\d{0,13}$/.test(String(ethUsdMicros))) throw new Error('A valid ETH/USD draft quote is required');
-  const reward = 5_000_000n * 10n ** 18n / BigInt(ethUsdMicros);
-  return { rewardUnits: reward.toString(), budgetUnits: (reward * 5n).toString() };
+  if (!Number.isSafeInteger(rewardUsdCents) || rewardUsdCents < 1 || rewardUsdCents > 1000000 ||
+      !Number.isSafeInteger(maxAwards) || maxAwards < 1 || maxAwards > 1000) throw new Error('Invalid pinning bonus or award cap');
+  const reward = BigInt(rewardUsdCents) * 10000n * 10n ** 18n / BigInt(ethUsdMicros);
+  return { rewardUnits: reward.toString(), budgetUnits: (reward * BigInt(maxAwards)).toString() };
+}
+export function pinnerCampaignTerms(campaign) {
+  const nft = promotionSupporterRewards(campaign) || [];
+  return `${campaign.maxAwards} bonuses maximum, first to complete ${campaign.qualifyingDays} qualifying full New York calendar days after joining and inside the offer window; days need not be consecutive. Each day requires at least 20 independent node checks and 90% availability. Completion time, then registration time, then wallet address break ties; one bonus per Discord-linked identity per campaign. ${promotionMoney(campaign.rewardUnits, campaignAsset(campaign))} per approved participant, fixed at the reviewed publication quote of $${Number(campaign.draftQuote.ethUsdMicros) / 1e6} per ETH (${campaign.draftQuote.quotedAt}); no later repricing. ${nft.length ? `NFT gifts: ${nft.map(token => `${token.contract} #${token.tokenId}`).join(', ')}, one each per approved winner, separately delivered from admin inventory.` : 'No NFT gift is promised.'} These campaign bonuses come from ${campaign.fund}, separately from ordinary weekly USDC rewards in dbusk-pinners. Funds are earmarked, not escrowed; evidence, disputes and owner-signed Payroll are required. Wallet, daily stats, evidence and receipts are public on IPFS; no private data.`;
 }
 export const PROMOTION_TEMPLATES = [
   { id: 'album', title: 'Bring your album', criteria: 'Bring an album with the stated minimum number of original tracks and rights to publish. Supply approved radio catalog and qualifying delivery evidence for admin review.' },
@@ -251,7 +275,7 @@ export const PROMOTION_TEMPLATES = [
   { id: 'sponsor-match', title: 'First sponsor match', criteria: 'A capped match to the selected artist fund after a sponsor’s first qualifying contribution. Fund contributions are not refundable ad purchases. Draft only until a fund-to-fund settlement path is verified.' },
   { id: 'session', title: 'Village listening session', criteria: 'Organize a listening session and supply event and participation evidence. Never condition rewards on positive votes or claim anonymous activity proves unique humans.' },
   { id: 'musician-referral', title: MUSICIAN_REFERRAL_PILOT.title, criteria: 'For each new musician with a verified minted playlist track and 10 distinct campaign-scoped signed song votes. One conversion creates four auditable $25 allocation legs, capped at six conversions.' },
-  { id: 'pinner', title: 'Pin Reward Campaign', criteria: 'Draft only: first five admin-approved pinners who complete 30 qualifying days of independently verified pinning. $5 equivalent in Base ETH each, $25 total. NFT reward not configured. Daily qualification accounting and final launch terms still need review.' },
+  { id: 'pinner', title: 'Pin Reward Campaign', criteria: 'Pin the community catalogue on your own admin-approved, independently checked IPFS node. Choose the campaign timebox and required qualifying days; promotional bonuses are separate from weekly pinning rewards.' },
   { id: 'custom', title: 'Custom', criteria: '' },
 ];
 export function promotionAuthorization({ address, origin, issuedAt, command }) {
@@ -262,7 +286,11 @@ export function promotionWorkReference(claim, legId = '') {
   return `decentbusking:promotions:v1:8453:${claim.campaignId}:${claim.wallet.toLowerCase()}${legId ? `:${legId}` : ''}`;
 }
 export function promotionMoney(value, asset = CAMPAIGN_ASSETS.usdc) {
-  if (asset.id === 'eth') return `${formatAssetUnits(value, asset).slice(1)} ETH`;
+  if (asset.id === 'eth') {
+    const units = BigInt(value);
+    const fraction = (units % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, '');
+    return `${units / 10n ** 18n}${fraction ? `.${fraction}` : ''} ETH`;
+  }
   const amount = BigInt(value);
   const fraction = String(amount % 1000000n).padStart(6, '0').replace(/0+$/, '').padEnd(2, '0');
   return `${amount / 1000000n}.${fraction} USDC`;

@@ -1,6 +1,6 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import { id, verifyMessage } from 'ethers';
-import { currentPayrollPeriod, payrollPeriodFromKey } from '../js/payroll-week.mjs';
+import { currentPayrollPeriod, payrollPeriodFromKey, newYorkDay, newYorkDayPeriod } from '../js/payroll-week.mjs';
 import { BASE_USDC_ADDRESS } from '../js/settlement-funds.mjs';
 import { allocatePinnerRewards, buildPinnerCommandMessage, buildPinnerReceipt, PINNER_FUND, PINNER_POLICY,
   pinnerWeekStats, validatePinnerCheckpoint } from '../js/pinner-rewards.mjs';
@@ -88,6 +88,7 @@ export function createPinnerNetwork({ restore, save, upload, router, ownerWallet
   async function update() {
     requireReady();
     await refreshFund();
+    await archiveCampaignDays();
     await closeWeeks();
     const due = state.pinners.find(pinner => statusAt(pinner, now()) === 'active' && Date.parse(pinner.nextCheckAt) <= now());
     if (due) {
@@ -100,7 +101,7 @@ export function createPinnerNetwork({ restore, save, upload, router, ownerWallet
       }
       const at = new Date(now()).toISOString();
       const nextCheckAt = new Date(now() + choose(45 * 60000, 75 * 60000)).toISOString();
-      const check = { wallet: due.wallet, at, rootCid, blockCid: result.blockCid || '',
+      const check = { wallet: due.wallet, memberHash: due.memberHash, at, rootCid, blockCid: result.blockCid || '',
         ok: result.ok, latencyMs: result.latencyMs, ...(result.reason ? { reason: result.reason } : {}) };
       await persist({ ...state, checks: [...state.checks, check],
         pinners: state.pinners.map(pinner => pinner.wallet === due.wallet ? { ...pinner, nextCheckAt } : pinner) });
@@ -113,6 +114,41 @@ export function createPinnerNetwork({ restore, save, upload, router, ownerWallet
     try { return await operation(); }
     catch (error) { lastError = error.message; throw error; }
   });
+  async function archiveCampaignDays() {
+    const records = new Map((state.campaignDays || []).map(record =>
+      [`${record.wallet}:${record.memberHash}:${record.day}`, record]));
+    const pending = new Map();
+    const today = newYorkDay(now());
+    for (const check of state.checks) {
+      const day = newYorkDay(Date.parse(check.at));
+      if (day >= today || !check.memberHash) continue;
+      const key = `${check.wallet}:${check.memberHash}:${day}`;
+      if (records.has(key)) continue;
+      const record = pending.get(key) || { wallet: check.wallet, memberHash: check.memberHash,
+        ...newYorkDayPeriod(day), successfulChecks: 0, failedChecks: 0 };
+      record[check.ok ? 'successfulChecks' : 'failedChecks']++;
+      pending.set(key, record);
+    }
+    if (pending.size) await persist({ ...state, campaignDays: [...records.values(), ...pending.values()] });
+  }
+  function campaignProgress({ wallet, campaignId, startsAt, endsAt, joinedAt, qualifyingDays }) {
+    requireReady();
+    if (lastError) throw new Error(`Independent pinning evidence is unavailable: ${lastError}`);
+    const pinner = state.pinners.find(item => item.wallet === wallet);
+    if (!pinner) return { status: 'not-enrolled', qualifyingDays, completedDays: 0, days: [], completedAt: null };
+    const lower = Math.max(Date.parse(startsAt), Date.parse(joinedAt));
+    const upper = Math.min(Date.parse(endsAt), now());
+    const days = (state.campaignDays || []).filter(record => record.wallet === wallet &&
+      record.memberHash === pinner.memberHash && Date.parse(record.startAt) >= lower && Date.parse(record.endAt) <= upper)
+      .sort((a, b) => a.day.localeCompare(b.day)).map(({ memberHash, wallet: _, ...record }) => ({
+        ...record, qualified: record.successfulChecks + record.failedChecks >= 20 &&
+          record.successfulChecks * 10000 >= (record.successfulChecks + record.failedChecks) * 9000,
+      }));
+    const qualifying = days.filter(record => record.qualified);
+    return { status: statusAt(pinner, now()), participantKey: id(`${campaignId}:${pinner.memberHash}`),
+      qualifyingDays, completedDays: qualifying.length, days,
+      completedAt: qualifying.length >= qualifyingDays ? qualifying[qualifyingDays - 1].endAt : null };
+  }
   function getState() {
     const period = currentPayrollPeriod(now());
     const participants = (state?.pinners || []).map(pinner => {
@@ -138,6 +174,7 @@ export function createPinnerNetwork({ restore, save, upload, router, ownerWallet
   }
   return {
     getState,
+    campaignProgress,
     initialize: () => guarded(async () => {
       if (!ready) {
         await probe.initialize();

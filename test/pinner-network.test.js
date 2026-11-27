@@ -150,6 +150,80 @@ test('a failed evidence checkpoint cannot manufacture availability or lose the s
   await assert.rejects(createPinnerNetwork({ ...h.options, restore: async () => corrupt }).initialize(), /Invalid pinner/);
 });
 
+test('campaign qualification preserves real daily probes across weekly payroll, restoration and an unavailable checkpoint', async () => {
+  const h = await harness();
+  const { newYorkDayPeriod } = await load('js/payroll-week.mjs');
+  const { createPinnerNetwork } = await load('discord-bot/pinner-network.js');
+  await h.command('enroll'); await h.command('approve', h.owner);
+  const request = { wallet: h.member.address.toLowerCase(), campaignId: 'pinning-test',
+    startsAt: '2026-11-23T12:00:00Z', joinedAt: '2026-11-23T12:00:00Z',
+    endsAt: '2026-12-04T05:00:00Z', qualifyingDays: 2 };
+  const { createPromotions } = await load('discord-bot/promotions.js');
+  const { PINNER_CAMPAIGN_VERSION, pinnerPromotionAmounts, promotionAuthorization } = await load('js/promotions.mjs');
+  let campaignCheckpoint;
+  const promotional = createPromotions({ ownerWallet: h.owner.address, routerAddress: h.router.target, provider: {},
+    restore: async () => campaignCheckpoint, save: async value => { campaignCheckpoint = structuredClone(value); return `ipfs://${cid}`; },
+    readFunding: async () => 100000000000000000n, readPinnerProgress: h.network.campaignProgress, now: h.options.now });
+  const execute = async (command, signer = h.owner) => {
+    const body = { command: { revision: campaignCheckpoint?.revision || 0, ...command }, address: signer.address,
+      origin, issuedAt: new Date(h.options.now()).toISOString() };
+    body.signature = await signer.signMessage(promotionAuthorization(body));
+    return promotional.execute(body, origin);
+  };
+  const draftQuote = { ethUsdMicros: '4000000000', quotedAt: request.joinedAt };
+  const draft = (await execute({ action: 'save', campaign: { template: 'pinner',
+    qualificationVersion: PINNER_CAMPAIGN_VERSION, asset: 'eth', title: 'Node bonus', criteria: 'Pin community music',
+    terms: 'Generated fixed terms', fund: 'dbusk-promotionals', maxAwards: 5, qualifyingDays: 2,
+    rewardUsdCents: 500, supporterRewards: [], draftQuote, ...pinnerPromotionAmounts(draftQuote.ethUsdMicros),
+    startsAt: request.startsAt, endsAt: request.endsAt, claimDeadline: '2026-12-11T05:00:00Z' } })).campaigns[0];
+  await execute({ action: 'status', campaignId: draft.id, status: 'published' });
+  await execute({ action: 'join', campaignId: draft.id, acceptTerms: true, termsVersion: 1 }, h.member);
+  const checkDay = async (date, count, failures = 0) => {
+    const day = newYorkDayPeriod(date);
+    for (let hour = 0; hour < count; hour++) {
+      h.setClock(Date.parse(day.startAt) + hour * 3600000);
+      h.setProof(!(hour >= 1 && hour <= failures));
+      await h.network.tick();
+    }
+    h.setProof(true);
+    h.setClock(Date.parse(day.endAt));
+    await h.network.tick();
+  };
+  await checkDay('2026-11-24', 20, 2);
+  assert.equal(h.network.campaignProgress(request).completedDays, 1, '18/20 is exactly 90%');
+  await checkDay('2026-11-25', 20, 3);
+  assert.equal(h.network.campaignProgress(request).completedDays, 1, '17/20 is below the required availability');
+  await checkDay('2026-11-29', 20);
+  const progress = h.network.campaignProgress(request);
+  assert.equal(progress.completedDays, 2);
+  assert.equal(progress.completedAt, '2026-11-30T05:00:00.000Z');
+  assert.equal(h.network.getState().receipts.length, 1, 'ordinary weekly payroll still closes');
+  const publicCampaign = await promotional.publicState();
+  const profile = publicCampaign.participantProfiles.find(row => row.wallet === request.wallet);
+  assert.equal(profile.completedDays, 2);
+  assert.equal(profile.eligible, true);
+  assert.equal(profile.nodeStatus, 'active');
+  const { publicCalendarData } = await load('js/dbusk-calendar-core.mjs');
+  assert.equal(publicCalendarData({}, publicCampaign).campaigns[0].portal.id, draft.id);
+  const claim = (await execute({ action: 'claim', campaignId: draft.id }, h.member)).claims[0];
+  await execute({ action: 'review', claimId: claim.id, decision: 'approved', reason: 'Independent probes verified' });
+  assert.equal((await promotional.publicState()).participantProfiles[0].approvedUnits, draft.rewardUnits);
+  assert.equal(h.network.getState().receipts[0].allocation.fundSlug, 'dbusk-pinners');
+  assert.equal(campaignCheckpoint.claims[0].fund, 'dbusk-promotionals');
+  assert.ok(h.snapshot().checks.every(check => Date.parse(check.at) >= Date.parse(progress.completedAt)));
+  const restored = createPinnerNetwork(h.options);
+  await restored.initialize();
+  assert.deepEqual(restored.campaignProgress(request), progress, 'progress is not erased by weekly pruning or a restart');
+  assert.equal(restored.campaignProgress({ ...request, joinedAt: '2026-11-24T06:00:00Z' }).completedDays, 1,
+    'a day that started before joining is not counted');
+  h.setFailSave(true);
+  h.setClock(Date.parse('2026-11-30T07:00:00Z'));
+  await assert.rejects(restored.tick(), /Checkpoint unavailable/);
+  assert.throws(() => restored.campaignProgress(request), /evidence is unavailable/);
+  assert.equal(newYorkDayPeriod('2026-03-08').endAt, '2026-03-09T04:00:00.000Z');
+  assert.equal(Date.parse(newYorkDayPeriod('2026-11-01').endAt) - Date.parse(newYorkDayPeriod('2026-11-01').startAt), 25 * 3600000);
+});
+
 test('peer lookup filters private addresses and never treats routing outages as successful proofs', async () => {
   const { resolvePinnerAddresses, normalizePinnerPeerId, verifyPinnerBlock } = await load('discord-bot/pinner-probe.js');
   const peer = normalizePinnerPeerId(await peerFor('one'));

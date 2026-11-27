@@ -20,7 +20,8 @@ import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readC
   summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261023-djuke-v05';
 import { renderTipLedger } from './tip-ledger-ui.mjs?v=20261123-song-splits';
 import { promotionMoney, campaignAsset } from './promotions.mjs?v=20261126-eth-gifts';
-import { createProfileInbox, activeReferralInvites, renderReferralInviteCard } from './profile-inbox.mjs?v=20261123-supporter-queue';
+import { pinnerCampaignStatsCard } from './promotions-ui.mjs?v=20261126-pinner-dashboard';
+import { createProfileInbox, activeReferralInvites, renderReferralInviteCard } from './profile-inbox.mjs?v=20261127-pinner-campaign';
 import { renderReferredBadge } from './inviter-prompt.mjs?v=20261125-inviter';
 
 import { renderWallet } from './wallet-label.mjs';
@@ -47,11 +48,11 @@ export function renderPromotionProfileSummary(container, state, wallet, ensName 
   if (!target) return;
   const profiles = (state?.participantProfiles || []).filter(item => item.wallet?.toLowerCase() === wallet?.toLowerCase());
   if (!profiles.length) {
-    target.textContent = 'No musician-referral pilot participation is recorded.';
+    target.textContent = 'No promotional campaign participation is recorded.';
     return;
   }
   const walletLink = address => `<a href="https://basescan.org/address/${address}" target="_blank" rel="noopener">${address.slice(0, 6)}…${address.slice(-4)}</a>`;
-  target.innerHTML = profiles.map(item => `<strong>${ensName || walletLink(wallet)} · Referral pilot</strong><br>` +
+  target.innerHTML = profiles.map(item => item.template === 'pinner' ? pinnerCampaignStatsCard(item) : `<strong>${ensName || walletLink(wallet)} · Referral pilot</strong><br>` +
     `${item.qualifiedCount} qualified · pending ${promotionMoney(item.pendingUnits || '0', campaignAsset(item))} · approved ${promotionMoney(item.approvedUnits || '0', campaignAsset(item))} · paid ${promotionMoney(item.paidUnits || '0', campaignAsset(item))} · ` +
     `maximum ${promotionMoney(item.maxEarningsUnits || '0', campaignAsset(item))}<br>${item.referred.map(ref => `${walletLink(ref.wallet)}: ${ref.voteProgress}/10 votes, ${ref.trackState}`).join('<br>')}` +
     `<br>Supporter token: ${item.supporterToken.eligible ? (item.supporterToken.delivery === 'delivered' ? '🎖 delivered' : '🎖 earned, queued for delivery') : 'not yet earned'}.`).join('<hr>');
