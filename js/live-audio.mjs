@@ -55,6 +55,8 @@ export function liveAudioPolicy(record, booking, now = Date.now(), program = nul
       ...(program ? { program: { ...common.program,
         endsAt: (allocated.actualEndedAt ?? allocated.authorizedEndAt) + program.outroSeconds * 1000 } } : {}) };
     if (finish !== null && now >= finish) {
+      // An early ending still suppresses its signed reservation; a delayed ending keeps its actual outro.
+      if (now >= Math.max(end, outroEnd)) return null;
       return { ...directed, mode: now < outroEnd ? 'adverts' : 'radio',
         ...(now < outroEnd ? { breakKind: 'outro', advertsEndAt: outroEnd } : {}) };
     }
@@ -91,7 +93,7 @@ export function applyLiveAudioShow(show, policy) {
     return show.type === 'live_performance' ? { id: 'normal-rotation', type: 'normal_rotation', label: 'Waiting for producer take' } : show;
   }
   if (policy.breakKind === 'outro' && show.type === 'playlist_show') return show;
-  if (policy.program && policy.mode === 'radio' && show.type !== 'live_performance' && !show.unbookedLiveOccurrenceId) return show;
+  if (policy.mode === 'radio' && show.type !== 'live_performance' && !show.unbookedLiveOccurrenceId) return show;
   if (policy.mode === 'live' || policy.mode === 'fault') {
     const event = { id: policy.mode === 'live' ? policy.eventId || policy.bookingId : `${policy.eventId || policy.bookingId}:fault`, title: policy.title,
       startUtc: policy.startUtc, endUtc: policy.endUtc };

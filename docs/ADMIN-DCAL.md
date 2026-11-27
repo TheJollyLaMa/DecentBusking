@@ -36,13 +36,72 @@ Two different boundaries were involved:
   constructor binding, serialized saved weekly hour, actual eligible-track
   admission and durable completion cursor.
 
-The exact production reason for the copied/runtime divergence remains
-unverified without deployed-artifact/runtime inspection. This is a locally
-verified fix for the divergence class, **not** a claim that production playback
-has been repaired. No worker restart, rollout, live schedule edit, signature,
-booking cancellation or payment was performed during implementation.
+The initial copied-array/deployed-artifact hypothesis was unverified, and the
+canonical getter did **not** repair production playback after PR #519 was
+released. The post-release investigation below identifies a different,
+reproduced override cause. No worker restart, rollout, live schedule edit,
+signature, booking cancellation or payment was performed by the implementing
+agent.
 Playback-history PR #517 is merged at current main `545c8f1`; it does not change
 the scheduling selector. Public DCal PR #518 merged at `36993740f83b8cc56cfdfc096330e503837f06ab`.
+
+### Post-release root cause: expired live allocation overrides the calendar
+
+The released PR #519 source at `26e8920b3f97749afa1d0bda6face73ffbca6e1a`
+still returned Normal Rotation during the saved zero-vote hour. Read-only
+`https://decentbusking.onrender.com/api/radio` at **21:51:40.229Z** returned
+`activeShow: normal_rotation`, `playlistShow: null`, `liveAudio: null` and
+“675 long as I can see the light” (started **21:48:46.551Z**).
+Render application logs (`--type app`, **21:45–21:50Z**) recorded the new
+service live at **21:48:17Z**, Discord startup at **21:48:33Z**, and that
+ordinary song at **21:48:46Z**. This is actual worker playback, not just a
+healthy encoder or a separate edge presentation.
+
+The public booking ledger retained the paid
+`friday-live-performance-2125:2026-11-20:daef17ed-5122-4ca8-9235-c3d3a4b7b3ef`
+allocation, with actual completion **2026-11-21T04:05:33.043Z**. Reconstructing
+its timing from public completion evidence and evaluating the exact saved
+schedule at the observed API timestamp reproduced the override. A subsequent
+read-only **`/api/live-audio/state?bookingId=…` at 22:02:38.330Z** directly
+confirmed the actual historical room: `configured: true`, `phase: ended`,
+fresh booking verification, and **`policy: { controlled: true, mode: radio }`**
+with no `program`. Its public allocation had 20 minutes plus a ten-minute
+encore, revision 5, and the same recorded actual ending. This establishes the
+running policy cause, rather than merely a compatible local hypothesis:
+
+1. `resolveActiveShow` correctly selects the saved zero-vote occurrence.
+2. `liveAudioPolicy` returns a **controlled, program-less `mode: radio`**
+   indefinitely after that historical allocation ends.
+3. `applyLiveAudioShow` preserves scheduled playlists/Top10 in radio mode only
+   when `policy.program` exists; otherwise it replaces them with Normal Rotation.
+4. `createLiveAudioService.current()` intentionally hides radio-mode policies
+   as `null`. Consequently `liveAudio: null` did not establish a wrong artifact.
+   `/api/radio` reads the same in-process JukeLoop state through a one-second
+   state-reader cache; this path does not substitute a separate public edge state.
+
+The fix adapts those existing helpers, without another schedule subsystem:
+completed allocations expire after **both** the original signed reservation and
+actual outro; radio-mode policy yields to scheduled playlist/Top10 regardless
+of optional program configuration. Existing live, fault, recovery adverts,
+lead-in, protected next performer and canceled-reservation rules remain.
+Booking records, fee guarantees, actual completion and settlement are not erased
+or changed by policy expiry.
+
+Focused validation passed **74/74**:
+
+```sh
+node --test test/live-audio.test.js test/playlist-show-runtime.test.js
+```
+
+The historical-allocation regression failed on the released behavior and passes
+with this fix. It restores a paid, ended room with no program configuration,
+checks canonical policy and public `current()` semantics, injects a stale copied
+radio policy, and actually admits eligible Long-Form and zero-vote audio from
+saved weekly rules while rejecting an ineligible ordinary track. It also covers
+Top10 preservation and early/delayed ending boundaries. Production private room
+files were not accessed, and this follow-up has not been deployed by the agent;
+production recovery still requires an authorized release and in-hour playback
+verification.
 
 After an authorized worker release, verify both `/api/radio/schedule` and
 `/api/radio` at an intended hour: selected playlist, eligible pool/fallback reason,
