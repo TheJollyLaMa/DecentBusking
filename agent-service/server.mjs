@@ -8,12 +8,13 @@ import { getAddress } from 'ethers';
 import { SiweMessage } from 'siwe';
 import { directory, readHandoff, isApproved, questionInstructions } from './handoff.mjs';
 import { askModel } from './model.mjs';
-import { createRetriever } from './knowledge.mjs';
+import { createRetriever, matchTopics } from './knowledge.mjs';
 import { MODES, selectRoute, deeperRoute, fitContext, finalAnswer } from './routing.mjs';
 import { createMetrics } from './metrics.mjs';
 import { chainIntent, createChainReader } from './chain.mjs';
 import { createAccounting, validUsage } from './accounting.mjs';
 import { createBilling } from './billing.mjs';
+import { fetchLiveMusicEvidence } from './live-music.mjs';
 
 const SESSION_MS = 15 * 60 * 1000;
 const NONCE_MS = 5 * 60 * 1000;
@@ -43,7 +44,8 @@ export function loadSettings(env = process.env) {
   };
 }
 
-export function createAgentServer(settings, { modelCall = askModel, chainRead = createChainReader(), now = Date.now, logger = console, billingFetch = fetch } = {}) {
+export function createAgentServer(settings, { modelCall = askModel, chainRead = createChainReader(), now = Date.now, logger = console,
+  billingFetch = fetch, musicRead = fetchLiveMusicEvidence } = {}) {
   const pack = readHandoff();
   const retrieve = createRetriever(pack.sources, pack.topics);
   const db = new DatabaseSync(settings.stateFile);
@@ -235,6 +237,8 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
           handoffDigest: pack.digest, routing: { mode, task: 'sensitive', models: [], tiers: [], attempts: 0,
             review: 'insufficient_evidence', escalation: 'missing_evidence' } });
         const sources = retrieve(message, session.messages);
+        const needsMusic = matchTopics(message, session.messages, pack.topics)
+          .some(({ topic }) => topic.id === 'music-catalog');
         const instructions = [questionInstructions(pack, message, session.messages), ...(intent ? [pack.chain] : []),
           ...(!session.verified ? ['Private review and unanswered-question capture are disabled in this session. Do not claim that a question or answer was saved or shared with the steward.'] : [])].join('\n\n');
         const messages = [...session.messages, { role: 'user', content: message.trim() }].slice(-7);
@@ -257,6 +261,15 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
         response.on('close', disconnect);
         active.set(key, controller);
         try {
+          if (needsMusic) {
+            sources.splice(6);
+            try { sources.push(...await musicRead({ signal: controller.signal })); }
+            catch (error) {
+              if (controller.signal.aborted) throw controller.signal.reason;
+              throw problem(503, 'Live music details are temporarily unavailable; no current music answer was generated.');
+            }
+            controller.signal.throwIfAborted();
+          }
           let chainSource;
           if (intent) {
             const evidence = await chainRead(intent, { signal: controller.signal });

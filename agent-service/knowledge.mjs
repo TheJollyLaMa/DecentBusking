@@ -17,6 +17,7 @@ export function sourceDisposition(file, mode = '100644') {
   if (['contributor-accounts.json', 'payroll-queue.json'].includes(file) ||
       file.startsWith('docs/reports/')) return 'individual accounting or generated operational report';
   if (file === 'agent-service/handoff/sources.json') return 'generated knowledge snapshot (avoid recursive ingestion)';
+  if (file === 'agent-service/handoff/evaluation.json') return 'expected-answer test rubric, not project evidence';
   if (/(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(file)) return 'dependency lockfile';
   if (file.startsWith('img/')) return 'creative or binary asset; no asset-content ingestion';
   if (!textExtensions.has(path.extname(file).toLowerCase()) &&
@@ -125,7 +126,8 @@ export function createRetriever(sources, topics = []) {
       perFile.set(source.file, (perFile.get(source.file) || 0) + 1);
     };
     // Keep reviewed entry points visible instead of drowning short forms in code matches.
-    for (let index = 0; index < 2; index++) {
+    const entryDepth = Math.max(0, ...matches.map(({ topic }) => topic.entryFiles?.length || 0));
+    for (let index = 0; index < entryDepth; index++) {
       for (const { topic } of matches) {
         const file = topic.entryFiles?.[index];
         const evidence = topic.entryEvidence?.[file];

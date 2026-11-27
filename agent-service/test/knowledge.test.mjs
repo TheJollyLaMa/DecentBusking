@@ -78,7 +78,7 @@ test('chunking bounds long UTF-8 lines without losing characters or corrupting l
 test('credentials, individual records, binary assets, lockfiles and recursive snapshots are not model knowledge', () => {
   for (const file of ['.env', '.env.local', 'discord-bot/.env.example', 'server.key', 'agent-service/access.json',
     'agent-service/approval.json', 'contributor-accounts.json', 'payroll-queue.json', 'docs/reports/report.json',
-    'img/D_Busker.jpeg', 'package-lock.json', 'agent-service/handoff/sources.json', 'data.sqlite']) {
+    'img/D_Busker.jpeg', 'package-lock.json', 'agent-service/handoff/sources.json', 'agent-service/handoff/evaluation.json', 'data.sqlite']) {
     assert.notEqual(sourceDisposition(file), null, file);
   }
   assert.notEqual(sourceDisposition('js/link.js', '120000'), null);

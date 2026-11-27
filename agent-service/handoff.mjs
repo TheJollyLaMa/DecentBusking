@@ -45,6 +45,12 @@ export function readHandoff(base = directory) {
 export function questionInstructions(pack, message, history = []) {
   const matches = matchTopics(message, history, pack.topics);
   const guides = [];
+  if (matches.some(({ topic }) => topic.id === 'earning-paths')) {
+    guides.push('For broad earning questions, give a concise map of the supported artist, contributor, pinner, performance and campaign paths using the supplied evidence. Eligibility, an allocation, an invitation or a report is not proof of payment. Do not promise income or claim a route is currently open unless the live evidence establishes that.');
+  }
+  if (matches.some(({ topic }) => topic.id === 'music-catalog')) {
+    guides.push('For current music questions, use the live catalog/radio evidence when present. Distinguish newest catalog entries from the track reported as playing, mention the source timestamps and any index warning, and never invent songs or claim completeness. If live evidence is absent, say current music could not be verified.');
+  }
   if (matches.some(({ topic }) => ['steward', 'independent-host', 'multisig', 'seed'].includes(topic.id))) {
     guides.push(pack.stewardship);
   }
