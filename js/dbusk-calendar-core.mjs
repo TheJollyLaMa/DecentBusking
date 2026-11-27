@@ -53,6 +53,26 @@ export function receiptProof(tx) {
   return hashPattern.test(hash || '') ? { hash, url: `https://basescan.org/tx/${hash}` } : null;
 }
 
+export const PINNER_GUIDE_URL = 'https://github.com/TheJollyLaMa/DecentBusking/wiki/Earn-by-Pinning';
+function pinnerCampaignDetails(c) {
+  return [`📌 ${c.qualifyingDays} qualifying full New York days · first ${c.maxAwards} finishers.`,
+    `🎁 Campaign bonus: ${promotionMoney(c.rewardUnits, campaignAsset(c))} each. Budget: ${promotionMoney(c.budgetUnits, campaignAsset(c))}.`,
+    '① Run an IPFS node and enroll it (Earn by Pinning guide) · ② the admin approves it · ③ Open campaign → Join · ④ pin every day: 20+ independent checks and 90%+ passing makes a qualifying day.',
+    '💸 Weekly USDC pinning rewards are paid separately; this bonus is extra.'];
+}
+export function pinnerCampaignProgress(stats) {
+  if (!stats || stats.template !== 'pinner') return null;
+  if (stats.completedDays === null || stats.nodeStatus === 'unavailable') {
+    return { value: 0, max: stats.qualifyingDays, label: `Verification unavailable: ${stats.error || 'independent checks are unavailable'}` };
+  }
+  const value = Math.min(stats.completedDays || 0, stats.qualifyingDays);
+  const step = stats.nodeStatus === 'not-enrolled' ? 'Enroll your IPFS node to start counting days'
+    : stats.nodeStatus === 'pending' ? 'Node awaiting admin approval'
+      : stats.eligible ? (stats.claimStatus === 'not-submitted' ? 'Qualified · claim your bonus in the campaign' : `Bonus ${stats.claimStatus}`)
+        : stats.rank ? `Finished · rank ${stats.rank} (first ${stats.maxAwards} win)` : `Node ${stats.nodeStatus || 'checking'} · keep pinning`;
+  return { value, max: stats.qualifyingDays, label: `${value} / ${stats.qualifyingDays} qualifying days · ${step}` };
+}
+
 // Only allowlisted display fields cross the public/personal boundary. Raw ledger
 // payloads contain unpublished offers, review notes and other wallets' invitations.
 export function publicCalendarData(schedule, promotions) {
@@ -70,9 +90,7 @@ export function publicCalendarData(schedule, promotions) {
     id: `promotion:${c.id}`, title: c.title, startUtc: c.startsAt, endUtc: c.endsAt, type: 'referral_campaign',
     interval: true, status: c.status, audience: 'public', provenance: 'ipfs-record',
     portal: { kind: 'campaign', id: c.id }, details: [
-      ...(c.template === 'pinner' ? [`📌 ${c.qualifyingDays} qualifying full New York days · first ${c.maxAwards} finishers.`,
-        `Campaign bonus: ${promotionMoney(c.rewardUnits, campaignAsset(c))}. Budget: ${promotionMoney(c.budgetUnits, campaignAsset(c))}.`,
-        'Weekly USDC pinning rewards are separate from these promotional gifts.'] : []),
+      ...(c.template === 'pinner' ? pinnerCampaignDetails(c) : []),
       'Reward budget is earmarked, not escrowed. Payment requires a confirmed receipt.',
     ],
   }));
@@ -161,10 +179,15 @@ export function personalCalendarEvents({ bookings, promotions, earnings, ads, ti
     const invited = (campaign.curatedReferrers || []).some(address => walletKey(address) === owner) ||
       (promotions.participantProfiles || []).some(p => p.campaignId === campaign.id && walletKey(p.wallet) === owner);
     if (!member && !invited) continue;
+    const pinner = campaign.template === 'pinner';
+    const progress = pinner ? pinnerCampaignProgress((promotions.participantProfiles || [])
+      .find(p => p.campaignId === campaign.id && walletKey(p.wallet) === owner)) : null;
     result.push({ id: `promotion:${campaign.id}`, title: campaign.title, startUtc: campaign.startsAt, endUtc: campaign.endsAt,
       type: 'referral_campaign', interval: true, audience: 'personal', owner, provenance: 'ipfs-record', status: campaign.status,
       attention: !member && campaign.status === 'published' && Date.parse(campaign.endsAt) > now ? 'Invited · view campaign' : '',
-      portal: { kind: 'campaign', id: campaign.id }, details: [
+      portal: { kind: 'campaign', id: campaign.id }, ...(progress ? { progress } : {}), details: [
+        ...(progress ? [`◈ Your progress: ${progress.label}`] : []),
+        ...(pinner ? pinnerCampaignDetails(campaign) : []),
         member ? 'You participate in this campaign.' : 'You are on this campaign’s invitation list.',
         'Rewards are promised / pending until an actual payment receipt; budgets are not escrow.',
       ] });

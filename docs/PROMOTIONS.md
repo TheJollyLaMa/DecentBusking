@@ -47,7 +47,7 @@ budget and optional NFT gifts. See [Admin DCal](ADMIN-DCAL.md).
    Completing verified days is retained even if a node is later suspended;
    disputes still require owner review. Rejecting a claim makes that slot
    available to the next finisher.
-8. Profile **Campaign participation** cards show verified days/check ratios,
+8. Profile **✨ For you** banner cards (swipe ‹ › between campaigns) show verified days/check ratios,
    qualification/claim status, pending/approved/paid ETH, optional NFT delivery,
    and payment proof. Registration does not promise payment. Claim submission
    and approval recheck server-side evidence and ordering; unavailable

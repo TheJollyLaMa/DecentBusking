@@ -13,14 +13,14 @@ test('slow Profile payment loads survive periodic refresh and retain visible fai
     textContent: '', children: [], setAttribute() {}, append(...items) { this.children.push(...items); },
     replaceChildren(...items) { this.children = items; }, querySelector() { return null; }, querySelectorAll() { return []; }, contains() { return false; },
   });
-  const inserted = [], disclosure = { parentElement: { insertBefore: item => inserted.push(item) } };
+  const carousel = [], inserted = [], disclosure = { parentElement: { insertBefore: item => inserted.push(item) } };
   let resolve, reject, calls = 0;
   const context = {
     document: { createElement: node, hidden: false },
     dialog: { open: true, querySelector: () => disclosure, addEventListener() {} },
     viewingOwnProfile: true, revision: 1, address: 'performer', config: () => ({ ipfsUploadServiceUrl: 'worker' }),
     window: { ethers: {} },
-    createProfileInbox: () => ({ setCards() {} }), activeReferralInvites: () => [], renderReferralInviteCard: () => ({}),
+    createProfileInbox: ({ slots }) => { carousel.push(...slots); return { element: node(), setCards() {} }; }, activeReferralInvites: () => [], renderReferralInviteCard: () => ({}),
     renderLivePerformances: ({ container }) => {
       calls++;
       return new Promise((done, fail) => {
@@ -30,7 +30,7 @@ test('slow Profile payment loads survive periodic refresh and retain visible fai
     },
   };
   runInNewContext(`${loader}\nglobalThis.load = loadLivePayments;`, context);
-  const section = inserted[0];
+  const section = carousel[0];
   const first = context.load(1);
   assert.match(section.children[0].textContent, /Live performances/);
   assert.match(section.children[1].textContent, /Checking/);

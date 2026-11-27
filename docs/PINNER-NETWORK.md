@@ -142,7 +142,8 @@ root CID. Keep the original root and pins until a replacement is verified.
 
 Pinning **promotional campaigns** are separate from the weekly allocation above.
 Admin DCal can schedule extra capped ETH bonuses and optional NFT gifts; public
-DCal links to joining, node enrollment and verified campaign stats in Profile.
+DCal shows how to qualify, links to joining and node enrollment, and shows joined
+wallets a progress bar; verified campaign stats appear as a Profile **✨ For you** card.
 Completed New York daily check summaries are stored as additive `campaignDays`
 records in the same strict-restored pinner checkpoint before weekly checks are
 pruned. They use campaign-scoped identity hashes when qualifying a claim; marker

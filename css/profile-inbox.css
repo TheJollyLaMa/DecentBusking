@@ -58,3 +58,11 @@
 .inbox-facts .inbox-gift.is-glow { animation: inbox-gift-glow 2.4s ease-in-out infinite; }
 @keyframes inbox-gift-glow { 50% { box-shadow: 0 0 18px #f4d380aa; transform: translateY(-1px); } }
 @media (prefers-reduced-motion: reduce) { .inbox-facts .inbox-gift.is-glow { animation: none; } }
+.inbox-pinner { background: linear-gradient(150deg, #24405a, #1d3548 55%, #3d3a1c); border-color: #f4d38066; }
+.inbox-days { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 8px; }
+.inbox-days i { width: 10px; height: 10px; border-radius: 3px; background: #ffffff1c; transition: background .4s; }
+.inbox-days i.is-done { background: #f4d380; box-shadow: 0 0 8px #f4d38099; animation: inbox-pop .4s cubic-bezier(.3, 1.4, .5, 1) both; }
+:is(#creator-profile, .profile-inbox) a.inbox-action { display: inline-block; margin: 0 6px 4px 0; text-decoration: none; }
+.inbox-live { padding: 14px; border-radius: 22px; color: #eef4fb; background: linear-gradient(150deg, #4a2338, #2a2440 55%, #1d3548); border: 1px solid #ff9bc066; max-height: min(70vh, 620px); overflow: auto; }
+.inbox-live > h3 { margin: 0 0 8px; font-size: 1rem; }
+@media (prefers-reduced-motion: reduce) { .inbox-days i.is-done { animation: none; } }

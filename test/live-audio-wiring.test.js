@@ -900,7 +900,7 @@ test('post-show waiting card gives ownership of next step without a disabled cla
   assert.match(nodes.find(node => node.tag === 'h3').textContent, /Your performance status/);
   assert.ok(nodes.some(node => /Show: Finish not verified/.test(node.textContent)));
   const creatorSource = fs.readFileSync(path.join(__dirname, '../js/creator-profile.mjs'), 'utf8');
-  assert.match(creatorSource, /insertBefore\(livePerformances, earningsDisclosure\)/);
+  assert.match(creatorSource, /createProfileInbox\(\{ slots: \[livePerformances\]/);
   assert.match(creatorSource, /livePaymentLoad = loadLivePayments\(check\)/);
 });
 

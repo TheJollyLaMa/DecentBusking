@@ -1,4 +1,4 @@
-import { DCAL_ZONE, localDate, addDays, calendarRange, calendarEvents, groupedIntervalSegments, timedSegments, walletKey, calendarLayer, groupCalendarDay } from './dbusk-calendar-core.mjs';
+import { DCAL_ZONE, localDate, addDays, calendarRange, calendarEvents, groupedIntervalSegments, timedSegments, walletKey, calendarLayer, groupCalendarDay, PINNER_GUIDE_URL } from './dbusk-calendar-core.mjs';
 import { createCalendarStore } from './dbusk-calendar-store.mjs';
 import { googleRadioCalendarUrl, buildRadioCalendar } from './radio-calendar.mjs?v=20261024-programming-calendar';
 import { renderWallet } from './wallet-label.mjs';
@@ -304,6 +304,15 @@ export function mountDBuskCalendar(root, { dialog, status, serviceUrl, fetchImpl
       node('small', provenance[event.provenance] || 'Source unavailable'));
     if (secondaryZone) detailBody.append(node('p', `(${secondaryTime(event)})`));
     if (event.attention) detailBody.append(node('p', `✦ ${event.attention}`, 'dbcal-callout'));
+    if (event.progress) {
+      const meter = node('div', undefined, 'dbcal-progress');
+      const bar = node('progress');
+      bar.max = Math.max(1, event.progress.max);
+      bar.value = event.progress.value;
+      bar.setAttribute('aria-label', 'Your campaign progress');
+      meter.append(node('strong', '◈ Your progress'), bar, node('span', event.progress.label));
+      detailBody.append(meter);
+    }
     const facts = node('div', undefined, 'dbcal-detail-facts');
     for (const text of event.details || []) facts.append(node('p', text));
     detailBody.append(facts);
@@ -311,7 +320,8 @@ export function mountDBuskCalendar(root, { dialog, status, serviceUrl, fetchImpl
     actions.setAttribute('aria-label', 'Event actions and proof');
     for (const proof of event.proofs || []) actions.append(link('↗ Base receipt', proof.url));
     const portal = calendarPortal(event, currentWallet(), { pathname: location.pathname });
-    if (portal?.kind === 'link') actions.append(link('✦ Open campaign', portal.href));
+    if (portal?.kind === 'link') actions.append(link(event.audience === 'personal' ? '✦ Open campaign · progress / claim' : '✦ Open campaign · join', portal.href));
+    if (event.details?.some(text => text.startsWith('📌'))) actions.append(link('📖 Earn by Pinning guide', PINNER_GUIDE_URL));
     if (portal && ['profile', 'stage'].includes(portal.kind)) {
       actions.append(button(event.type === 'payment' ? '◈ Your receipts / payments' : '✉ Your invitation / payment in Profile', () => {
         if (!permitted(event)) return;

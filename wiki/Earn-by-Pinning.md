@@ -36,8 +36,8 @@ Rewards come from your own node answering our independent checks.
 ### Extra campaign bonuses
 
 Watch **right ankh → DCal** for a published **Pin Reward Campaign**. Open it and
-register with your wallet; keep using the same approved node setup below.
-**Profile → Campaign participation** shows your qualifying days, daily checks
+register with your wallet (clicking it on DCal also shows your progress); keep using the same approved node setup below.
+Your **Profile → ✨ For you** banner card shows your qualifying days, daily checks
 and any pending, approved or paid bonus. Campaigns have their own dates, required
 days and limited winner slots. A full New York day needs at least 20 independent
 checks and 90% availability; days before joining and partial days do not count.

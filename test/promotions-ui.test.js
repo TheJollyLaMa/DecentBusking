@@ -551,6 +551,34 @@ test('earned Supporter notifications remain after campaign closure until deliver
   assert.match(walk(deliveredCard).find(n => n.className?.includes('inbox-gift')).textContent, /✅$/);
 });
 
+test('For You pinner cards show verified day progress until owed rewards settle', async () => {
+  const { activePinnerCampaigns, renderPinnerCampaignCard } = await import('../js/profile-inbox.mjs');
+  const wallet = '0x' + '34'.repeat(20);
+  const now = Date.parse('2026-12-10T00:00:00Z');
+  const stats = { wallet, campaignId: 'pin-1', template: 'pinner', title: 'Pin Reward', status: 'published', asset: 'eth',
+    startsAt: '2026-11-28T05:00:00Z', endsAt: '2026-12-28T05:00:00Z', qualifyingDays: 3, maxAwards: 5,
+    rewardUnits: '1000000000000000', completedDays: 2, nodeStatus: 'active', eligible: false, rank: null,
+    claimStatus: 'not-submitted', pendingUnits: '0', approvedUnits: '0', paidUnits: '0', nftGifts: [],
+    days: [{ day: '2026-11-29', successfulChecks: 24, failedChecks: 0, qualified: true },
+      { day: '2026-11-30', successfulChecks: 3, failedChecks: 9, qualified: false },
+      { day: '2026-12-01', successfulChecks: 22, failedChecks: 1, qualified: true }] };
+  const other = { ...stats, wallet: '0x' + '56'.repeat(20) };
+  assert.deepEqual(activePinnerCampaigns({ participantProfiles: [stats, other] }, wallet, now), [stats]);
+  const node = tag => ({ tag, children: [], dataset: {}, style: { setProperty() {} },
+    classList: { add() {}, remove() {} }, append(...items) { this.children.push(...items); },
+    setAttribute() {}, addEventListener() {} });
+  const walk = n => [n, ...(n.children || []).flatMap(walk)];
+  const card = renderPinnerCampaignCard(stats, { doc: { createElement: node }, now, site: 'https://example.test/' });
+  const nodes = walk(card);
+  assert.ok(nodes.some(n => n.textContent === '2/3'));
+  assert.equal(nodes.filter(n => n.className === 'is-done').length, 2);
+  assert.ok(nodes.some(n => n.textContent === 'Keep pinning · 1 days to go'));
+  const ended = Date.parse('2027-01-10T00:00:00Z');
+  assert.deepEqual(activePinnerCampaigns({ participantProfiles: [stats] }, wallet, ended), []);
+  const owed = { ...stats, approvedUnits: '1000000000000000' };
+  assert.deepEqual(activePinnerCampaigns({ participantProfiles: [owed] }, wallet, ended), [owed]);
+});
+
 test('Supporter queue reports blocked browser storage without breaking the payroll panel', async t => {
   const { loadSupporterPayroll } = await import('../js/supporter-payroll.mjs');
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
