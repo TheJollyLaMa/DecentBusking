@@ -21,7 +21,7 @@ import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readC
 import { renderTipLedger } from './tip-ledger-ui.mjs?v=20261123-song-splits';
 import { promotionMoney, campaignAsset } from './promotions.mjs?v=20261126-eth-gifts';
 import { pinnerCampaignStatsCard } from './promotions-ui.mjs?v=20261126-pinner-dashboard';
-import { createProfileInbox, activeReferralInvites, renderReferralInviteCard } from './profile-inbox.mjs?v=20261127-pinner-campaign';
+import { createProfileInbox, activeReferralInvites, renderReferralInviteCard, activePinnerCampaigns, renderPinnerCampaignCard } from './profile-inbox.mjs?v=20261127-for-you';
 import { renderReferredBadge } from './inviter-prompt.mjs?v=20261125-inviter';
 
 import { renderWallet } from './wallet-label.mjs';
@@ -1005,20 +1005,17 @@ export function initCreatorProfile() {
   const earningsStatus = dialog.querySelector('[data-earnings-status]');
   const earningsList = dialog.querySelector('[data-earnings-list]');
   const livePerformances = document.createElement('section');
-  livePerformances.className = 'creator-live-performances';
+  livePerformances.className = 'creator-live-performances inbox-live';
+  livePerformances.setAttribute('aria-label', 'Live performances');
   const liveHeading = document.createElement('h3');
-  liveHeading.textContent = 'Live performances · payment and recording';
+  liveHeading.textContent = '🎤 Live performances · pay, gifts & recording';
   const liveStatus = document.createElement('output');
   liveStatus.setAttribute('role', 'status');
   liveStatus.setAttribute('aria-live', 'polite');
   livePerformances.append(liveHeading, liveStatus);
   const earningsDisclosure = dialog.querySelector('[data-profile-earnings]');
-  earningsDisclosure?.parentElement?.insertBefore(livePerformances, earningsDisclosure);
-  const feeSpotlight = document.createElement('section');
-  feeSpotlight.setAttribute('aria-label', 'Your performance pay');
-  feeSpotlight.hidden = true;
   const profileCard = dialog.querySelector('.creator-profile-card');
-  const inbox = createProfileInbox({ slots: [feeSpotlight], isOwnProfile: () => viewingOwnProfile });
+  const inbox = createProfileInbox({ slots: [livePerformances], isOwnProfile: () => viewingOwnProfile });
   profileCard.parentElement.insertBefore(inbox.element, profileCard);
   const avatarLookups = new Map();
   const resolveInboxAvatar = wallet => {
@@ -1032,13 +1029,15 @@ export function initCreatorProfile() {
   let inboxReferralKey = '';
   const renderInboxReferrals = (state, wallet) => {
     const invites = viewingOwnProfile ? activeReferralInvites(state, wallet) : [];
-    const key = JSON.stringify([wallet, invites]);
+    const pinning = viewingOwnProfile ? activePinnerCampaigns(state, wallet) : [];
+    const key = JSON.stringify([wallet, invites, pinning]);
     if (key === inboxReferralKey) return;
     inboxReferralKey = key;
     inbox.setCards('referrals', invites.map(stats => renderReferralInviteCard(stats, { wallet, resolveAvatar: resolveInboxAvatar })));
+    inbox.setCards('pinner', pinning.map(stats => renderPinnerCampaignCard(stats)));
   };
-  const paymentBusy = () => [feeSpotlight, livePerformances].some(section => section.querySelector('[data-live-claim-busy="true"]'));
-  const paymentFocused = () => [feeSpotlight, livePerformances].some(section => section.contains(document.activeElement));
+  const paymentBusy = () => !!livePerformances.querySelector('[data-live-claim-busy="true"]');
+  const paymentFocused = () => livePerformances.contains(document.activeElement);
   const tipReceipts = document.createElement('section');
   earningsDisclosure?.parentElement?.insertBefore(tipReceipts, earningsDisclosure);
   let liveRevision = 0;
@@ -1054,7 +1053,7 @@ export function initCreatorProfile() {
     pendingProfileRevision = check;
     const generation = ++liveRevision, target = address;
     const contents = document.createElement('div');
-    if (feeSpotlight.hidden) liveStatus.textContent = 'Checking your performance payment and recording…';
+    if (!passive) liveStatus.textContent = 'Checking your performance payment and recording…';
     try {
       let liveReceipt;
       const activateCurtains = await renderLivePerformances({ container: contents, wallet: target,
@@ -1062,10 +1061,6 @@ export function initCreatorProfile() {
         onReceipt: entry => { liveReceipt = entry; },
         onRefresh: () => loadLivePayments(check) });
       if (dialog.open && check === revision && generation === liveRevision && target === address && canReplace() && !paymentBusy()) {
-        const cards = [...contents.querySelectorAll('.live-fee-card')];
-        const current = cards.find(card => !['paid', 'refunded', 'recovered'].includes(card.dataset.feeState)) || cards[0];
-        feeSpotlight.replaceChildren(...(current ? [current] : []));
-        feeSpotlight.hidden = !current;
         liveStatus.textContent = '';
         livePerformances.replaceChildren(liveHeading, liveStatus, contents);
         livePerformances.hidden = !contents.childElementCount;
@@ -1161,6 +1156,7 @@ export function initCreatorProfile() {
     viewingOwnProfile = !detail?.address || editable();
     inboxReferralKey = '';
     inbox.setCards('referrals', []);
+    inbox.setCards('pinner', []);
     void renderReferredBadge(referredBadge, { wallet: target, own: viewingOwnProfile });
     profile = {};
     ens = null;
@@ -1183,8 +1179,6 @@ export function initCreatorProfile() {
     discordLinkExpiryAt = 0;
     const check = ++revision;
     void loadAlbumShelf();
-    feeSpotlight.replaceChildren();
-    feeSpotlight.hidden = true;
     livePerformances.hidden = false;
     livePerformances.replaceChildren(liveHeading, liveStatus);
     liveStatus.textContent = 'Checking your performance payment and recording…';
@@ -1798,8 +1792,6 @@ export function initCreatorProfile() {
   });
   document.addEventListener('wallet-connected', event => {
     revision++;
-    feeSpotlight.replaceChildren();
-    feeSpotlight.hidden = true;
     livePerformances.querySelectorAll('.live-curtain-call,.live-release-party').forEach(curtain => curtain.remove());
     setControls();
     if (dialog.open && viewingOwnProfile) void run(() => open({}));
@@ -1812,8 +1804,6 @@ export function initCreatorProfile() {
   document.getElementById('djuke-profile')?.addEventListener('click', () => { run(() => open({})); });
   document.addEventListener('wallet-disconnected', () => {
     revision++;
-    feeSpotlight.replaceChildren();
-    feeSpotlight.hidden = true;
     livePerformances.querySelectorAll('.live-curtain-call,.live-release-party').forEach(curtain => curtain.remove());
     setControls();
   });

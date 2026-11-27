@@ -64,6 +64,11 @@
 .dbcal-detail-facts p { margin: 0; padding: 18px; border: 1px solid #6d8aab44; border-radius: 14px; background: #adc8f009; }
 .dbcal-detail-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
 .dbcal-detail-actions a, .dbcal-detail-actions button { margin: 0; text-decoration: none; }
+.dbcal-progress { display: grid; gap: 8px; margin: 20px 0 0; padding: 18px; border: 1px solid #f4d38066; border-radius: 16px; background: radial-gradient(120% 140% at 0 0, #f4d38018, transparent 60%), #adc8f009; animation: dbcal-progress-glow 3s ease-in-out infinite; }
+.dbcal-progress progress { width: 100%; height: 12px; accent-color: #f4d380; }
+.dbcal-progress span { color: #c3d0df; font-size: .9rem; }
+@keyframes dbcal-progress-glow { 50% { box-shadow: 0 0 18px #f4d38033; } }
+@media (prefers-reduced-motion: reduce) { .dbcal-progress { animation: none; } }
 .dbcal-callout { padding: 16px; border-left: 3px solid #d5a8ff; background: #d5a8ff12; }
 .dbcal-group-list { display: grid; gap: 12px; margin-top: 24px; }
 .dbcal-group-list button { display: grid; gap: 8px; text-align: left; padding: 18px; }

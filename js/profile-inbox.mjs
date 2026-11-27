@@ -184,3 +184,76 @@ export function renderReferralInviteCard(stats, { wallet, doc = document, now = 
   card.append(head, body, aliens, ...(journey ? [journey] : []), actions);
   return card;
 }
+
+const PINNER_GUIDE = 'https://github.com/TheJollyLaMa/DecentBusking/wiki/Earn-by-Pinning';
+
+export function activePinnerCampaigns(state, wallet, now = Date.now()) {
+  const lower = String(wallet || '').toLowerCase();
+  if (!lower) return [];
+  return (state?.participantProfiles || []).filter(item => {
+    if (item.template !== 'pinner' || item.wallet?.toLowerCase() !== lower || item.status === 'archived') return false;
+    const open = now < Date.parse(item.claimDeadline || item.endsAt);
+    const owed = BigInt(item.pendingUnits || 0) + BigInt(item.approvedUnits || 0) > 0n ||
+      (item.nftGifts || []).some(token => !['delivered', 'not-earned'].includes(token.status));
+    return open || owed;
+  });
+}
+
+export function renderPinnerCampaignCard(stats, { doc = document, now = Date.now(), site = globalThis.location?.href } = {}) {
+  const card = el(doc, 'article', 'inbox-referral inbox-pinner');
+  card.dataset.campaignId = stats.campaignId;
+  const asset = campaignAsset(stats);
+  const money = units => formatAssetUnits(units || 0, asset);
+  const unavailable = stats.completedDays === null || stats.nodeStatus === 'unavailable';
+  const done = Math.min(stats.completedDays || 0, stats.qualifyingDays);
+  const started = now >= Date.parse(stats.startsAt);
+  const ended = now >= Date.parse(stats.endsAt);
+  const days = Math.max(0, Math.ceil((Date.parse(started ? stats.endsAt : stats.startsAt) - now) / 86400000));
+  const head = el(doc, 'header', 'inbox-referral-head');
+  head.append(el(doc, 'span', 'inbox-badge', '📌'), el(doc, 'strong', 'inbox-referral-title', stats.title || 'Pin Reward Campaign'),
+    el(doc, 'span', 'inbox-chip', ended ? '⏳ claims open' : started ? `⏳ ${days}d left` : `🌅 starts in ${days}d`));
+  const body = el(doc, 'div', 'inbox-referral-body');
+  const next = unavailable ? `⚠️ Verification unavailable: ${stats.error || 'independent checks are unavailable'}`
+    : stats.nodeStatus === 'not-enrolled' ? '① Enroll your IPFS node to start counting days'
+      : stats.nodeStatus === 'pending' ? '② Node awaiting admin approval'
+        : stats.claimStatus === 'paid' ? '✅ Bonus paid'
+          : stats.eligible ? (stats.claimStatus === 'not-submitted' ? '🏁 Qualified · claim your bonus' : `🏁 Bonus ${stats.claimStatus}`)
+            : stats.rank ? `Finished · rank ${stats.rank}; first ${stats.maxAwards} win`
+              : `Keep pinning · ${stats.qualifyingDays - done} days to go`;
+  const facts = el(doc, 'div', 'inbox-facts');
+  facts.append(el(doc, 'span', '', `🎁 ${money(stats.rewardUnits)} bonus`),
+    el(doc, 'span', '', `🏅 first ${stats.maxAwards}`),
+    el(doc, 'span', stats.nodeStatus === 'active' ? 'is-glow' : '', `🛰 node ${unavailable ? 'unverified' : stats.nodeStatus}`));
+  for (const [key, label] of [['pendingUnits', '⏳'], ['approvedUnits', '✓'], ['paidUnits', '💸']]) {
+    if (BigInt(stats[key] || 0) > 0n) facts.append(el(doc, 'span', 'is-glow', `${label} ${money(stats[key])}`));
+  }
+  for (const token of stats.nftGifts || []) facts.append(el(doc, 'span', token.status === 'delivered' ? 'is-glow' : '', `🎖 NFT #${token.tokenId} · ${token.status}`));
+  body.append(ring(doc, unavailable ? 0 : done / Math.max(1, stats.qualifyingDays), `${unavailable ? '—' : done}/${stats.qualifyingDays}`),
+    el(doc, 'div', 'inbox-ring-label', next), facts);
+  const strip = el(doc, 'div', 'inbox-days');
+  strip.setAttribute('aria-label', 'Independently verified New York days');
+  const record = stats.days || [];
+  for (let index = 0; index < stats.qualifyingDays; index += 1) {
+    const day = record.filter(item => item.qualified)[index];
+    const dot = el(doc, 'i', day ? 'is-done' : '');
+    dot.title = day ? `${day.day} · ${day.successfulChecks}/${day.successfulChecks + day.failedChecks} checks passed` : `Day ${index + 1}`;
+    strip.append(dot);
+  }
+  const note = el(doc, 'p', 'inbox-journey', 'Weekly USDC pinning share is paid separately; this bonus is extra.');
+  const actions = el(doc, 'footer', 'inbox-actions');
+  const open = el(doc, 'a', 'inbox-action', stats.eligible && stats.claimStatus === 'not-submitted' ? '🏁 Claim bonus' : '📌 Campaign');
+  open.href = new URL(`?promotion=${encodeURIComponent(stats.campaignId)}`, site || 'https://thejollylama.github.io/DecentBusking/').href;
+  actions.append(open);
+  if (['not-enrolled', 'pending'].includes(stats.nodeStatus)) {
+    const guide = el(doc, 'a', 'inbox-action', '📖 Node guide');
+    guide.href = PINNER_GUIDE; guide.target = '_blank'; guide.rel = 'noopener';
+    actions.append(guide);
+  }
+  if (/^0x[0-9a-f]{64}$/i.test(stats.txHash || '')) {
+    const proof = el(doc, 'a', 'inbox-action', '↗ Proof');
+    proof.href = `https://basescan.org/tx/${stats.txHash}`; proof.target = '_blank'; proof.rel = 'noopener';
+    actions.append(proof);
+  }
+  card.append(head, body, strip, note, actions);
+  return card;
+}

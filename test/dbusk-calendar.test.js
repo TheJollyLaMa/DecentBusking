@@ -319,3 +319,20 @@ test('same-day payment blips retain every receipt and do not mix wallets, types 
   assert.equal(groupCalendarDay([payment, later], '2026-11-23', 'America/Los_Angeles').length, 1);
   assert.equal(input[0].members, undefined);
 });
+
+test('pinner campaign shows public steps and the joined wallet’s own progress', async () => {
+  const { publicCalendarData, personalCalendarEvents } = await load();
+  const pinner = { ...campaign, id: 'pin', title: 'Pin Reward', template: 'pinner', curatedReferrers: [], asset: 'eth',
+    qualifyingDays: 7, maxAwards: 5, rewardUnits: '1000000000000000', budgetUnits: '5000000000000000' };
+  const promotions = { campaigns: [pinner], members: [{ campaignId: 'pin', wallet: A }],
+    participantProfiles: [{ wallet: A, campaignId: 'pin', template: 'pinner', qualifyingDays: 7, maxAwards: 5,
+      completedDays: 3, nodeStatus: 'active', eligible: false, rank: null, claimStatus: 'not-submitted' }] };
+  const publicEvent = publicCalendarData({}, promotions).campaigns[0];
+  assert.ok(publicEvent.details.some(text => text.startsWith('①')));
+  assert.equal(publicEvent.progress, undefined);
+  const [mine] = personalCalendarEvents({ promotions }, A, { now });
+  assert.deepEqual([mine.progress.value, mine.progress.max], [3, 7]);
+  assert.match(mine.details[0], /Your progress: 3 \/ 7 qualifying days/);
+  assert.ok(mine.details.some(text => text.startsWith('📌')), 'joined wallets keep the public bonus terms');
+  assert.deepEqual(personalCalendarEvents({ promotions }, B, { now }), []);
+});
