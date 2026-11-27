@@ -85,6 +85,7 @@ export function activeReferralInvites(state, wallet, now = Date.now()) {
   const lower = String(wallet || '').toLowerCase();
   if (!lower) return [];
   return (state?.participantProfiles || []).filter(item => {
+    if (item.template === 'pinner') return false;
     const active = ['published', 'paused'].includes(item.status) && now < Date.parse(item.claimDeadline || item.endsAt);
     const owed = item.status !== 'draft' && item.supporterToken?.eligible && item.supporterToken.delivery !== 'delivered';
     return item.wallet?.toLowerCase() === lower && (active || owed);

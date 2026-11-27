@@ -2090,6 +2090,10 @@ async function main() {
         devertContractAddress: process.env.DEVERT_CONTRACT_ADDRESS,
         siteUrl: config.siteUrl,
         readPlaylist: getPlaybackPlaylist,
+        readPinnerProgress: input => {
+          if (!pinnerNetwork) throw new Error('Independent pinner rewards are not enabled');
+          return pinnerNetwork.campaignProgress(input);
+        },
         announcements: createPromotionAnnouncements({ channelId: config.announceChannelId,
           getClient: () => config.getDiscordClient?.() || client,
           canAnnounce: () => discordDiagnostics.bot('dbusker').notBefore() <= Date.now() }),

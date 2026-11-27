@@ -1,6 +1,6 @@
 import { PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS, MUSICIAN_REFERRAL_PILOT, MUSICIAN_REFERRAL_TERMS, PROMOTIONS_FUND, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, isPromotionsFund,
   promotionAuthorization, promotionWorkReference, promotionMoney, promotionUnits, promotionLink, campaignAsset, musicianReferralConfig,
-  pinnerPromotionAmounts } from './promotions.mjs?v=20261126-pinner-dashboard';
+  pinnerPromotionAmounts, PINNER_CAMPAIGN_VERSION, promotionSupporterRewards, pinnerCampaignFullDays } from './promotions.mjs?v=20261126-pinner-dashboard';
 import { loadEthUsd } from './eth-usd-quote.mjs?v=20261126-eth-gifts';
 import { newYorkInputToUtc, utcToNewYorkInput } from './radio-calendar.mjs';
 import { radioListenerId } from './radio-client.mjs';
@@ -100,10 +100,12 @@ export function promotionInputToUtc(value) {
 }
 const field = (name, label, type = 'text', value = '') =>
   `<label>${label}<input name="${name}" type="${type}" value="${escape(value)}" required></label>`;
-const termsNotice = 'All promotion records are public, including drafts, wallet/referrer links, submitted evidence, activity, review notes and payment receipts. Records are stored on public IPFS; do not submit secrets or personal information about others. Public copies may persist permanently. Rewards require evidence and admin approval. Promotionals is earmarked, not escrowed. Wallets/browsers are not proof of unique humans. Activity means a signed song vote in the stated window, not a positive vote or verified listening time.';
+const termsNotice = 'All promotion records are public, including drafts, wallet/referrer links, submitted evidence, activity, review notes and payment receipts. Records are stored on public IPFS; do not submit secrets or personal information about others. Public copies may persist permanently. Rewards require evidence and admin approval. Promotionals is earmarked, not escrowed. Wallets/browsers are not proof of unique humans. Song activity means a signed vote in the stated window, not a positive vote or verified listening time. Pinning campaigns use independent node checks instead.';
 function campaignCard(c) {
   return `<h3>${escape(c.title)}</h3><p><strong>${money(c.rewardUnits, campaignAsset(c))}</strong> per approved award · ${escape(c.status)} · ${c.remainingAwards} awards available</p>
-    ${c.template === 'pinner' ? '<p>Draft only · five $5-equivalent ETH bonuses, $25 total · 30 qualifying days · NFT reward unconfigured. ETH figures are a draft quote, not a locked payout promise. Cannot publish or pay this pilot yet.</p>' : ''}
+    ${c.template === 'pinner' ? c.qualificationVersion === PINNER_CAMPAIGN_VERSION
+      ? `<p>📌 ${c.qualifyingDays} qualifying days · first ${c.maxAwards} finishers · bonus budget ${money(c.budgetUnits, campaignAsset(c))}. Ordinary weekly USDC pinning rewards remain separate.</p>`
+      : '<p>Legacy draft · edit and save the timebox and bonus terms before publication.</p>' : ''}
     <p>${c.template === 'sponsor-match' ? `Match destination: ${escape(c.matchTargetFund || '')}; draft only.` : 'Reward recipient: claimant wallet.'}
     Funding: ${escape(c.fund)}; one award per wallet.</p>
     ${c.template === 'album' ? `<p>Minimum original tracks: ${c.minOriginalTracks}</p>` : ''}
@@ -117,6 +119,27 @@ function campaignCard(c) {
     <p>${escape(c.criteria)}</p><p class="promotion-terms">${escape(c.terms)}</p>
     <p>${date(c.startsAt)} – ${date(c.endsAt)}<br>Claim by ${date(c.claimDeadline)}</p>
     ${(c.amendments || []).map(a => `<p><strong>Immutable amendment ${escape(a.id)}:</strong> ${escape(a.reason)} · budget ${money(a.before.budgetUnits)} → ${money(a.after.budgetUnits)} · end ${date(a.before.endsAt)} → ${date(a.after.endsAt)} · claim ${date(a.before.claimDeadline)} → ${date(a.after.claimDeadline)}</p>`).join('')}`;
+}
+export function pinnerCampaignStatsCard(stats) {
+  const asset = campaignAsset(stats);
+  const unavailable = stats.completedDays === null || stats.nodeStatus === 'unavailable';
+  const count = Math.min(stats.completedDays || 0, stats.qualifyingDays);
+  const progress = unavailable ? `<p role="status">Verification unavailable: ${escape(stats.error || 'Independent checks are unavailable')}</p>`
+    : `<p>📌 ${count} / ${stats.qualifyingDays} qualifying days · ${escape(stats.nodeStatus)}</p>
+      <progress max="${stats.qualifyingDays}" value="${count}" aria-label="Qualifying pinning days"></progress>
+      <p>${stats.eligible ? '🏁 Qualified for bonus review' : stats.rank ? `Completion rank ${stats.rank} · first ${stats.maxAwards} bonus slots` : 'Keep pinning to qualify'} · ${escape(stats.claimStatus)}</p>`;
+  return `<article class="promotion-card pinner-campaign-card"><h3>📌 ${escape(stats.title)}</h3>
+    <p>${date(stats.startsAt)} – ${date(stats.endsAt)}</p>${progress}
+    <div class="pinner-campaign-amounts"><span>⏳ Pending<br>${money(stats.pendingUnits, asset)}</span>
+      <span>✓ Approved<br>${money(stats.approvedUnits, asset)}</span><span>💸 Paid<br>${money(stats.paidUnits, asset)}</span></div>
+    <p>Campaign bonus: ${money(stats.rewardUnits, asset)}. Weekly USDC pinning rewards are separate.</p>
+    ${(stats.nftGifts || []).map(token => `<p>🎖 NFT #${escape(token.tokenId)} · ${escape(token.status)}</p>`).join('')}
+    ${stats.txHash ? `<a href="https://basescan.org/tx/${escape(stats.txHash)}" target="_blank" rel="noopener">Payment proof</a>` : ''}
+    <a href="?promotion=${encodeURIComponent(stats.campaignId)}">Open campaign · join / claim</a>
+    <details><summary>Independent daily checks</summary>${(stats.days || []).map(day => {
+      const total = day.successfulChecks + day.failedChecks;
+      return `<p>${escape(day.day)} · ${day.successfulChecks}/${total} passed · ${total ? Math.floor(day.successfulChecks * 100 / total) : 0}% · ${day.qualified ? '✓ qualifying' : 'not qualifying'}</p>`;
+    }).join('') || '<p>No completed verification days yet.</p>'}</details></article>`;
 }
 export function publicPromotionRecords(state, campaignId) {
   if (!state?.campaigns.some(c => c.id === campaignId)) return '';
@@ -315,6 +338,13 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
           ${field('budget', 'Total campaign budget (Base USDC)', 'text', '50')}
           ${field('maxAwards', 'Maximum awards (one per participant)', 'number', '5')}
           ${field('fund', 'Dedicated promotional funding source', 'text', PROMOTIONS_FUND)}
+          <div data-promo-pinner>
+            ${field('qualifyingDays', 'Required qualifying days inside this timebox (1–365)', 'number', '30')}
+            <p>Each full New York day after registration requires 20 independent checks and 90% availability. Days need not be consecutive. First finishers win; weekly pinning rewards are unchanged.</p>
+            <label>Optional Base ERC-1155 NFT gift contract<input name="pinnerNftContract" placeholder="0x…"></label>
+            <label>Optional NFT token ID<input name="pinnerNftTokenId" placeholder="75"></label>
+            <p>Blank means no NFT promise. One configured token per winner, delivered from admin inventory through Payroll.</p>
+          </div>
           <div data-promo-album>${field('minOriginalTracks', 'Minimum original tracks', 'number', '3')}</div>
           <div data-promo-referral>
             ${field('requiredReferrals', 'Required qualified referrals (2–100)', 'number', '2')}
@@ -342,7 +372,7 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
   const input = name => form.elements.namedItem(name);
   function templateFields() {
     const pinner = input('template').value === 'pinner';
-    for (const name of ['reward', 'budget', 'maxAwards']) input(name).disabled = pinner;
+    input('budget').disabled = pinner;
     input('reward').parentElement.firstChild.textContent = pinner ? 'Reward target (USD equivalent, paid in ETH)' : 'Reward (Base USDC)';
     input('budget').parentElement.firstChild.textContent = pinner ? 'Total target cap (USD equivalent, paid in ETH)' : 'Total campaign budget (Base USDC)';
     for (const [selector, active] of [
@@ -351,6 +381,7 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       ['[data-promo-curated]', ['referral', 'musician-referral'].includes(input('template').value)],
       ['[data-promo-sponsor-terms]', input('template').value === 'sponsor'],
       ['[data-promo-match-terms]', input('template').value === 'sponsor-match'],
+      ['[data-promo-pinner]', pinner],
     ]) {
       const section = root.querySelector(selector);
       section.hidden = !active;
@@ -370,7 +401,7 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     }
     if (t.id === 'pinner') {
       input('reward').value = '5'; input('budget').value = '25'; input('maxAwards').value = '5';
-      input('terms').value = 'UNPUBLISHED DRAFT. First five admin-approved pinners completing 30 qualifying days; $5 equivalent in Base ETH each, total cap $25. NFT award is unconfigured and changes by campaign. Not an active offer. Final daily qualification, first-five ordering, ETH/USD valuation time, launch dates and NFT contract/token must be reviewed before publication. No automatic payment or NFT minting. Existing weekly USDC pinner rewards remain separate. Promotion records are public on IPFS; do not include private information.';
+      input('terms').value = 'Fixed campaign terms are generated from the selected timebox, required days, bonus, award cap, publication quote and optional NFT. Bonuses are separate from weekly USDC rewards.';
     }
     if (t.id === 'custom') {
       for (const name of ['title', 'criteria', 'terms', 'reward', 'budget']) input(name).value = '';
@@ -384,8 +415,8 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     template();
     const start = Date.parse(calendarOptions.startsAt || new Date().toISOString());
     input('startsAt').value = utcToNewYorkInput(new Date(start).toISOString());
-    input('endsAt').value = utcToNewYorkInput(new Date(start + (input('template').value === 'pinner' ? 30 : 7) * 86400000).toISOString());
-    input('claimDeadline').value = utcToNewYorkInput(new Date(start + (input('template').value === 'pinner' ? 37 : 14) * 86400000).toISOString());
+    input('endsAt').value = utcToNewYorkInput(new Date(start + (input('template').value === 'pinner' ? 31 : 7) * 86400000).toISOString());
+    input('claimDeadline').value = utcToNewYorkInput(new Date(start + (input('template').value === 'pinner' ? 38 : 14) * 86400000).toISOString());
     if (calendarOptions.startsAt) input('startsAt').value = utcToNewYorkInput(calendarOptions.startsAt);
     if (calendarOptions.endsAt) input('endsAt').value = utcToNewYorkInput(calendarOptions.endsAt);
     if (calendarOptions.endsAt) input('claimDeadline').value = utcToNewYorkInput(calendarOptions.endsAt);
@@ -398,6 +429,13 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       if (source.template !== 'pinner') {
         input('reward').value = String(Number(source.rewardUnits) / 1e6);
         input('budget').value = String(Number(source.budgetUnits) / 1e6);
+      }
+      if (source.template === 'pinner') {
+        input('reward').value = String((source.rewardUsdCents || 500) / 100);
+        input('budget').value = String((source.rewardUsdCents || 500) * source.maxAwards / 100);
+        input('qualifyingDays').value = source.qualifyingDays || 30;
+        input('pinnerNftContract').value = source.supporterRewards?.[0]?.contract || '';
+        input('pinnerNftTokenId').value = source.supporterRewards?.[0]?.tokenId || '';
       }
       if (source.minPurchaseUnits) input('minPurchase').value = String(Number(source.minPurchaseUnits) / 1e6);
       if (source.minContributionUnits) input('minContribution').value = String(Number(source.minContributionUnits) / 1e6);
@@ -421,7 +459,7 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       <p>Approved: ${money(c.approvedUnits, campaignAsset(c))} · payment pending: ${money(c.paymentPendingUnits, campaignAsset(c))} · paid: ${money(c.paidUnits, campaignAsset(c))} · ${c.applications} claims (${c.awaitingReview} awaiting review)</p>
       <button type="button" data-promo-edit>${c.status === 'draft' ? 'Edit draft' : 'Duplicate as draft'}</button>
       <button type="button" data-promo-share>Copy offer link</button>
-      ${(c.template === 'pinner' ? c.status === 'draft' ? ['archived'] : [] : { draft: ['published', 'archived'], published: ['paused', 'closed'], paused: ['published', 'closed'], closed: ['archived'], archived: [] }[c.status])
+      ${({ draft: ['published', 'archived'], published: ['paused', 'closed'], paused: ['published', 'closed'], closed: ['archived'], archived: [] }[c.status])
         .map(s => `<button type="button" data-promo-state="${s}">${{ published: 'Publish offer', paused: 'Pause offer', closed: 'Close offer', archived: 'Archive' }[s]}</button>`).join('')}
       ${c.announcement?.status === 'sent' ? `<p>Discord poster sent: <a href="${escape(c.announcement.messageUrl)}" target="_blank" rel="noopener">view message</a></p>` : ''}
       ${c.announcement?.status === 'pending' ? '<p>Discord delivery is uncertain; do not send again.</p><button type="button" data-promo-reconcile-discord>Reconcile Discord delivery</button>' : ''}
@@ -505,6 +543,9 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     } finally { busy = false; }
   }
   form.addEventListener('change', event => { if (event.target.name === 'template') template(); });
+  form.addEventListener('input', () => {
+    if (input('template').value === 'pinner') input('budget').value = String(Number(input('reward').value) * Number(input('maxAwards').value));
+  });
   root.addEventListener('input', event => {
     if (event.target.matches('[data-promo-poster], [data-promo-sentence]') && state?.announcementPreview) {
       delete state.announcementPreview;
@@ -516,10 +557,25 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     void guard(async () => {
       let pinner = {};
       if (input('template').value === 'pinner') {
-        const rate = await loadEthUsd();
+        if (state?.features?.pinnerCampaign !== PINNER_CAMPAIGN_VERSION) throw new Error('The campaign worker needs the pinning-campaign upgrade before saving or publishing this offer');
+        const rate = await loadEthUsd({ force: true });
         if (!rate) throw new Error('ETH/USD quote unavailable. Draft was not saved; try again shortly.');
         const ethUsdMicros = String(Math.round(rate * 1e6));
-        pinner = { asset: 'eth', ...pinnerPromotionAmounts(ethUsdMicros),
+        const usdUnits = BigInt(promotionUnits(input('reward').value));
+        if (usdUnits % 10000n) throw new Error('Set the USD bonus target to whole cents');
+        const rewardUsdCents = Number(usdUnits / 10000n);
+        const maxAwards = Number(input('maxAwards').value);
+        if (Number(input('qualifyingDays').value) > pinnerCampaignFullDays(
+          promotionInputToUtc(input('startsAt').value), promotionInputToUtc(input('endsAt').value))) {
+          throw new Error('The required qualifying days do not fit inside this timebox; adjust the days or dates');
+        }
+        const contract = input('pinnerNftContract').value.trim();
+        const tokenId = input('pinnerNftTokenId').value.trim();
+        if (!!contract !== !!tokenId) throw new Error('Configure both the NFT contract and token ID, or leave both blank');
+        pinner = { asset: 'eth', qualificationVersion: PINNER_CAMPAIGN_VERSION, rewardUsdCents,
+          qualifyingDays: Number(input('qualifyingDays').value),
+          supporterRewards: contract ? [{ chainId: 8453, contract, tokenId, quantity: 1 }] : [],
+          ...pinnerPromotionAmounts(ethUsdMicros, { rewardUsdCents, maxAwards }),
           draftQuote: { ethUsdMicros, quotedAt: new Date().toISOString() } };
       }
       const campaign = { template: input('template').value, title: input('title').value,
@@ -527,6 +583,7 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
         rewardUnits: promotionUnits(input('reward').value), budgetUnits: promotionUnits(input('budget').value),
         maxAwards: Number(input('maxAwards').value), fund: input('fund').value.trim(),
         curatedReferrers: await (async () => {
+          if (!['referral', 'musician-referral'].includes(input('template').value)) return [];
           const values = String(input('curatedReferrers').value || '').split(/[\n,]/)
             .map(value => value.trim()).filter(Boolean);
           if (!values.length) return [];
@@ -596,7 +653,13 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
           for (const name of ['title', 'criteria', 'terms', 'template', 'maxAwards', 'fund']) input(name).value = campaign[name];
           input('reward').value = String(Number(campaign.rewardUnits) / 1e6);
           input('budget').value = String(Number(campaign.budgetUnits) / 1e6);
-          if (campaign.template === 'pinner') { input('reward').value = '5'; input('budget').value = '25'; }
+          if (campaign.template === 'pinner') {
+            input('reward').value = String((campaign.rewardUsdCents || 500) / 100);
+            input('budget').value = String((campaign.rewardUsdCents || 500) * campaign.maxAwards / 100);
+            input('qualifyingDays').value = campaign.qualifyingDays || 30;
+            input('pinnerNftContract').value = campaign.supporterRewards?.[0]?.contract || '';
+            input('pinnerNftTokenId').value = campaign.supporterRewards?.[0]?.tokenId || '';
+          }
           if (campaign.template === 'musician-referral' && campaign.status !== 'draft') input('budget').value = '150';
           if (campaign.minOriginalTracks) input('minOriginalTracks').value = campaign.minOriginalTracks;
           if (campaign.requiredReferrals) input('requiredReferrals').value = campaign.requiredReferrals;
@@ -613,7 +676,18 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
           await navigator.clipboard.writeText(promotionLink(campaign.id));
           return;
         }
-        if (target.dataset.promoState) return command({ action: 'status', campaignId: campaign.id, status: target.dataset.promoState });
+        if (target.dataset.promoState) {
+          if (target.dataset.promoState === 'published' && campaign.template === 'pinner' && campaign.status === 'draft') {
+            if (campaign.qualificationVersion !== PINNER_CAMPAIGN_VERSION) throw new Error('Edit and save this legacy draft with the campaign timebox first');
+            const rate = await loadEthUsd({ force: true });
+            if (!rate) throw new Error('Publication ETH/USD quote is unavailable; campaign was not published');
+            const draftQuote = { ethUsdMicros: String(Math.round(rate * 1e6)), quotedAt: new Date().toISOString() };
+            const amounts = pinnerPromotionAmounts(draftQuote.ethUsdMicros, campaign);
+            if (!confirm(`Publish ${campaign.title}?\n${date(campaign.startsAt)} – ${date(campaign.endsAt)}\n${campaign.qualifyingDays} qualifying full NY days; first ${campaign.maxAwards} finishers.\nFixed bonus ${money(amounts.rewardUnits, campaignAsset(campaign))}; total ${money(amounts.budgetUnits, campaignAsset(campaign))}.\n${promotionSupporterRewards(campaign).length ? 'Configured NFT gifts are also promised.' : 'No NFT gift.'}\nWeekly pinning rewards remain separate. Funding is required.`)) return;
+            await command({ action: 'save', campaignId: campaign.id, campaign: { ...campaign, draftQuote, ...amounts } });
+          }
+          return command({ action: 'status', campaignId: campaign.id, status: target.dataset.promoState });
+        }
       }
       const memberCard = target.closest('[data-member]');
       if (memberCard && target.matches('[data-promo-correct]')) return command({ action: 'correct-attribution',
@@ -727,7 +801,8 @@ export function mountPublicPromotion() {
       <button type="button" data-promo-join>Register for this offer</button>
       <button type="button" data-promo-correct-mine>Correct my campaign referrer</button>
       <button type="button" data-promo-invite>Copy my referral invite</button>
-      <p>With your wallet connected, 👍/👎 on the radio bar count automatically after one free sign-in (valid 7 days). Both directions qualify; anonymous past votes cannot be attributed retroactively. These buttons are a fallback that signs each vote.</p>
+      <button type="button" data-promo-node hidden>📌 Set up / enroll my node · weekly rewards</button>
+      <p data-promo-radio-help>With your wallet connected, 👍/👎 on the radio bar count automatically after one free sign-in (valid 7 days). Both directions qualify; anonymous past votes cannot be attributed retroactively. These buttons are a fallback that signs each vote.</p>
       <button type="button" data-promo-vote="1">Vote up on current song</button>
       <button type="button" data-promo-vote="-1">Vote down on current song</button>
       <form data-promo-claim>
@@ -764,14 +839,30 @@ export function mountPublicPromotion() {
       ? `Registered · ${activity.week} · ${activity.voted ? 'Song vote recorded this week' : 'No song vote recorded this week'} · Referrals for this offer: ${activity.registered} registered, ${activity.activeThisWeek} active this week, ${activity.activeDuringOffer} active during this offer`
       : 'Not registered for this offer.';
     const stats = participantState.participantStats?.find(item => item.campaignId === campaignId);
-    if (stats) {
+    let holder = overlay.querySelector('[data-promo-progress]');
+    if (!holder) { holder = document.createElement('div'); holder.dataset.promoProgress = ''; memberPanel.append(holder); }
+    holder.replaceChildren();
+    if (campaign.template === 'pinner') {
+      overlay.querySelector('[data-promo-activity]').textContent = member
+        ? 'Registered for this pinning bonus campaign. Weekly USDC pinning rewards remain separate.'
+        : 'Register for this campaign, then enroll your IPFS node and obtain admin approval.';
+      if (stats) holder.innerHTML = pinnerCampaignStatsCard(stats);
+    } else if (stats) {
       overlay.querySelector('[data-promo-activity]').textContent += ` · Qualified ${stats.qualifiedCount}; pending ${money(stats.pendingUnits)}; approved ${money(stats.approvedUnits)}; paid ${money(stats.paidUnits)}; maximum referrer earnings ${money(stats.maxEarningsUnits)}. ${stats.attributedMusicians.length} attributed musicians; curated referrers: ${stats.referrers.join(', ') || 'none'}. Supporter token: ${stats.supporterToken.eligible ? (stats.supporterToken.delivery === 'delivered' ? 'delivered' : 'earned; queued for delivery') : 'not yet earned'}.`;
       const progress = document.createElement('ul');
       progress.innerHTML = stats.referred.map(item => `<li>${escape(item.wallet)} · votes ${item.voteProgress}/10 · ${escape(item.trackState)}${item.track ? ` · token #${escape(item.track.tokenId)}` : ''}</li>`).join('');
-      let holder = overlay.querySelector('[data-promo-progress]');
-      if (!holder) { holder = document.createElement('div'); holder.dataset.promoProgress = ''; memberPanel.append(holder); }
       holder.replaceChildren(progress);
     }
+    const pinner = campaign.template === 'pinner';
+    overlay.querySelector('[data-promo-ref]').parentElement.hidden = pinner;
+    for (const selector of ['[data-promo-invite]', '[data-promo-correct-mine]', '[data-promo-vote="1"]', '[data-promo-vote="-1"]', '[data-promo-radio-help]']) {
+      overlay.querySelector(selector).hidden = pinner;
+    }
+    overlay.querySelector('[data-promo-node]').hidden = !pinner;
+    const evidenceInput = overlay.querySelector('[name="evidence"]');
+    evidenceInput.required = !pinner;
+    evidenceInput.parentElement.hidden = pinner;
+    overlay.querySelector('[data-promo-claim] button').disabled = pinner && (!stats?.eligible || stats.claimStatus !== 'not-submitted');
     overlay.querySelector('[data-promo-ref]').disabled = !!member && campaign.template !== 'musician-referral';
     overlay.querySelector('[data-promo-join]').disabled = !!member;
     const sponsor = overlay.querySelector('[data-promo-sponsor]');
@@ -784,7 +875,7 @@ export function mountPublicPromotion() {
     musician.hidden = campaign.template !== 'musician-referral';
     musician.querySelectorAll('input').forEach(el => { el.required = !musician.hidden; el.disabled = musician.hidden; });
     const claims = participantState.claims.filter(c => c.campaignId === campaignId && c.wallet === participantState.viewerWallet);
-    overlay.querySelector('[data-promo-my-claims]').innerHTML = claims.map(c => `<p>${escape(c.status)} · ${money(c.amountUnits)}</p>
+    overlay.querySelector('[data-promo-my-claims]').innerHTML = claims.map(c => `<p>${escape(c.status)} · ${money(c.amountUnits, campaignAsset(campaign))}</p>
       ${(c.legs || []).map(leg => `<p>${escape(leg.id)} · ${money(leg.amountUnits)} · ${escape(leg.status)}${leg.kind === 'funding-needed' ? ' · settlement funding needed, not paid' : leg.txHash ? ` · <a href="https://basescan.org/tx/${escape(leg.txHash)}">receipt</a>` : ''}</p>`).join('')}
       ${c.history.map(h => `<p>${escape(h.action)}: ${escape(h.reason)}</p>`).join('')}
       ${c.status === 'needs-evidence' ? `<button type="button" data-promo-evidence="${c.id}">Update evidence from the form above</button>` : ''}
@@ -817,11 +908,16 @@ export function mountPublicPromotion() {
         return;
       }
       if (target.matches('[data-promo-mine]')) return command({ action: 'view' });
+      if (target.matches('[data-promo-node]')) {
+        overlay.close();
+        window.dispatchEvent(new Event('open-community-pinning'));
+        return;
+      }
       if (target.matches('[data-promo-join]')) {
         if (!overlay.querySelector('[data-promo-accept]').checked) throw new Error('Accept the offer terms before registering');
         const campaign = state?.campaigns.find(c => c.id === campaignId);
         const entered = overlay.querySelector('[data-promo-ref]').value.trim();
-        const referrer = entered ? await resolvedWallet(entered, (await wallet()).provider) : '';
+        const referrer = entered && campaign.template !== 'pinner' ? await resolvedWallet(entered, (await wallet()).provider) : '';
         return command({ action: 'join', referrer,
           acceptTerms: true, termsVersion: campaign?.version });
       }
@@ -860,6 +956,9 @@ export function mountPublicPromotion() {
     event.preventDefault();
     void guard(async () => {
       const data = Object.fromEntries(new FormData(event.target));
+      if (state?.campaigns.find(c => c.id === campaignId)?.template === 'pinner') {
+        data.evidence = 'Server-verified independent pinning days for the registered campaign timebox';
+      }
       await command({ action: 'claim', ...data });
     });
   });

@@ -140,6 +140,18 @@ root CID. Keep the original root and pins until a replacement is verified.
 
 ### Deployment and recovery
 
+Pinning **promotional campaigns** are separate from the weekly allocation above.
+Admin DCal can schedule extra capped ETH bonuses and optional NFT gifts; public
+DCal links to joining, node enrollment and verified campaign stats in Profile.
+Completed New York daily check summaries are stored as additive `campaignDays`
+records in the same strict-restored pinner checkpoint before weekly checks are
+pruned. They use campaign-scoped identity hashes when qualifying a claim; marker
+bytes and private node endpoints are not published. Legacy checks without these
+identity-bound summaries do not become invented historical campaign days.
+See [Pinning bonus campaigns](PROMOTIONS.md#pinning-bonus-campaigns). Campaign
+bonuses use `dbusk-promotionals`, not `dbusk-pinners`; this does not alter weekly
+USDC policy, immutable receipts, replay protection or owner signing.
+
 The existing Render worker runs enrollment, isolated probes and weekly
 preparation. `npm install` installs the pinned official `kubo` binary at build
 time; runtime never downloads a missing binary. Probes use fresh temporary

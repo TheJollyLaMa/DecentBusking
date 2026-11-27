@@ -8,8 +8,81 @@ Admin DCal's campaign selector combines the presets and saved reusable campaigns
 **Custom** is last. Browsing uses public GET without signing. Custom campaigns
 reuse the promotion draft/checkpoint and protected save commands. Reusing a saved
 campaign copies offer terms into a new draft, not its claims or settlement state.
-**Pin Reward Campaign** remains draft-only with its unresolved qualification,
-ETH valuation and NFT decisions. See [Admin DCal](ADMIN-DCAL.md).
+**Pin Reward Campaign** uses verified daily pinning evidence, its own ETH bonus
+budget and optional NFT gifts. See [Admin DCal](ADMIN-DCAL.md).
+
+## Pinning bonus campaigns
+
+1. In **left ankh → Admin DCal**, select **Pin Reward Campaign** and drag its
+   text onto a calendar slot. The drop opens a proposal, not a live promise.
+2. Set the opening/closing dates, required qualifying days (1–365), USD bonus
+   target and maximum winners (default $5 each, five winners). The default
+   31-day window permits 30 full New York days when opening partway through a
+   day. Shorter/longer campaigns are editable; required days must fit the
+   timebox. Late joiners need enough remaining full days.
+3. Leave both NFT fields blank to offer no NFT. Optionally select a Base
+   ERC-1155 contract and token ID; one token per winner is owed separately from
+   the ETH bonus. Publishing checks admin inventory against outstanding
+   pinning-campaign promises. Tokens are not escrowed or minted.
+4. Save the draft, fund its dedicated `dbusk-promotionals` allocation with ETH
+   using the existing Fund Allocations controls, then **Publish offer**.
+   Publication refreshes the ETH/USD spot quote, shows exact fixed ETH units,
+   and requires signed review plus enough funds for every outstanding campaign
+   budget in the same fund/asset. The saved quote expires after five minutes;
+   published terms and ETH amounts are immutable, with no payout-time repricing.
+5. The published offer appears on **right ankh → DCal**. Opening it leads to
+   registration and the existing node setup/enrollment dialog. A listener or
+   musician signs acceptance of the campaign terms, enrolls their own
+   Discord-linked node and obtains owner approval. These are free signatures,
+   not payment transactions. No song votes or manually supplied uptime claims
+   count toward pinning bonuses.
+6. Each full **America/New_York** day inside the offer and after registration
+   needs at least **20 independent checks and 90% sampled availability**.
+   Days need not be consecutive. Partial opening/joining/closing days are
+   excluded. DST days use actual local midnight boundaries, not fixed 24-hour
+   intervals. Missing historical daily records are not invented.
+7. First finishers fill the bonus slots, ordered by completion midnight,
+   then campaign registration time, then wallet address. A hashed,
+   campaign-scoped Discord identity permits only one winner per identity.
+   Completing verified days is retained even if a node is later suspended;
+   disputes still require owner review. Rejecting a claim makes that slot
+   available to the next finisher.
+8. Profile **Campaign participation** cards show verified days/check ratios,
+   qualification/claim status, pending/approved/paid ETH, optional NFT delivery,
+   and payment proof. Registration does not promise payment. Claim submission
+   and approval recheck server-side evidence and ordering; unavailable
+   verification is shown explicitly, not as zero progress or success.
+9. Approved ETH bonuses use the existing protected promotion Payroll flow:
+   recipient approval, fixed fund/reference, pre-broadcast journal, two
+   canonical Base confirmations and exact payment reconciliation. Optional
+   NFTs enter the existing dev Payroll delivery queue. Pending/delivered NFTs
+   prevent reversing their approved award; owed gifts must settle before archive.
+
+**Weekly pinning rewards remain separate:** normal USDC awards from
+`dbusk-pinners` continue under their existing weekly checks and weighting.
+Campaign gifts use `dbusk-promotionals`, never the weekly pot. Separate
+campaigns may reward the same pinner for their own qualifying timeboxes.
+Reusing a saved campaign copies its terms into a new draft, not participants,
+claims, receipts or earned NFT state.
+
+Deploy the matching worker before the UI. `/api/promotions` advertises
+`features.pinnerCampaign: "pinner-days-v1"`; the editor refuses a pinning save
+against an older worker. Existing legacy pinner drafts restore as draft-only:
+edit/save them to explicitly choose the new timebox and terms. Daily summaries
+are durably stored in the existing pinner checkpoint before weekly hot-check
+pruning, so progress survives payroll rollover/restarts. An older worker cannot
+restore published new-version pinner campaigns: rollback requires a compatible
+worker, not deleting or silently resetting earned records.
+
+Reuse decision: adapt DecentBusking `04b5a8a`, specifically
+`createPinnerNetwork`/`pinnerWeekStats`, `createPromotions`/`promotionWorkReference`,
+`mountAdminPromotions`, `publicCalendarData`, `renderPromotionProfileSummary`
+and `supporterRewardQueue`. Canopy's curated pinning/schedule leads and existing
+pinner/promotions worktrees were inspected; no external code was copied and no
+shared subsystem was extracted. Ordinary weekly rewards and referral settlement
+contracts remain unchanged. Focused tests exercise actual independent-probe
+results through daily archival, week close, public DCal, profile qualification,
+claim approval and restart, plus ordering, funding and optional-gift safeguards.
 
 ## Storage and deployment
 

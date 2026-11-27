@@ -1,4 +1,4 @@
-import { currentPayrollPeriod, payrollPeriodFromKey } from './payroll-week.mjs';
+import { currentPayrollPeriod, payrollPeriodFromKey, newYorkDayPeriod } from './payroll-week.mjs';
 import { BASE_USDC_ADDRESS } from './settlement-funds.mjs';
 
 export function buildCommunityPinManifest({ checkpointCid = '', tracks = [], albumRoots = [], generatedAt = new Date().toISOString(),
@@ -245,7 +245,8 @@ export function validatePinnerCheckpoint(snapshot) {
     !Number.isFinite(Date.parse(snapshot.startedAt || '')) || !Number.isFinite(Date.parse(snapshot.nextWeekStartAt || '')) ||
     !/^0x[0-9a-fA-F]{40}$/.test(snapshot.routerAddress || '') ||
     !Array.isArray(snapshot.pinners) || !Array.isArray(snapshot.checks) ||
-    !Array.isArray(snapshot.receipts) || !Array.isArray(snapshot.nonces)) throw new Error('Invalid pinner checkpoint');
+    !Array.isArray(snapshot.receipts) || !Array.isArray(snapshot.nonces) ||
+    snapshot.campaignDays !== undefined && !Array.isArray(snapshot.campaignDays)) throw new Error('Invalid pinner checkpoint');
   const wallets = new Set(), peers = new Set(), members = new Set(), weeks = new Set();
   const firstPeriod = currentPayrollPeriod(Date.parse(snapshot.startedAt));
   if (currentPayrollPeriod(Date.parse(snapshot.nextWeekStartAt)).startAt !== snapshot.nextWeekStartAt ||
@@ -268,8 +269,21 @@ export function validatePinnerCheckpoint(snapshot) {
   }
   for (const check of snapshot.checks) {
     if (!check || !wallets.has(check.wallet) || !Number.isFinite(Date.parse(check.at || '')) || typeof check.ok !== 'boolean' ||
+      check.memberHash !== undefined && !/^0x[0-9a-f]{64}$/.test(check.memberHash) ||
       !/^[A-Za-z0-9]{20,128}$/.test(check.rootCid || '') || (check.blockCid && !/^[A-Za-z0-9]{20,128}$/.test(check.blockCid)) ||
       !Number.isSafeInteger(check.latencyMs) || check.latencyMs < 0) throw new Error('Invalid pinner availability evidence');
+  }
+  const days = new Set();
+  for (const record of snapshot.campaignDays || []) {
+    const key = `${record?.wallet}:${record?.memberHash}:${record?.day}`;
+    const period = newYorkDayPeriod(record?.day);
+    if (!wallets.has(record.wallet) || days.has(key) || !/^0x[0-9a-f]{64}$/.test(record.memberHash || '') ||
+        record.startAt !== period.startAt || record.endAt !== period.endAt ||
+        !Number.isSafeInteger(record.successfulChecks) || record.successfulChecks < 0 ||
+        !Number.isSafeInteger(record.failedChecks) || record.failedChecks < 0 ||
+        !Number.isSafeInteger(record.successfulChecks + record.failedChecks) ||
+        record.successfulChecks + record.failedChecks === 0) throw new Error('Invalid pinner campaign day');
+    days.add(key);
   }
   let cursor = firstPeriod.startAt;
   for (const record of snapshot.receipts) {

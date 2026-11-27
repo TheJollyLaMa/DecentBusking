@@ -33,6 +33,20 @@ flowchart LR
 A Pinata account or a single click on **Pin** doesn't earn rewards on its own.
 Rewards come from your own node answering our independent checks.
 
+### Extra campaign bonuses
+
+Watch **right ankh → DCal** for a published **Pin Reward Campaign**. Open it and
+register with your wallet; keep using the same approved node setup below.
+**Profile → Campaign participation** shows your qualifying days, daily checks
+and any pending, approved or paid bonus. Campaigns have their own dates, required
+days and limited winner slots. A full New York day needs at least 20 independent
+checks and 90% availability; days before joining and partial days do not count.
+
+These optional promotional ETH payments (and NFT gifts only when explicitly
+offered) are **in addition to**, not a replacement for, ordinary weekly USDC
+pinning rewards. Joining alone is not a payment; verified qualification and
+admin review/signing are still required.
+
 ## Choose your path
 
 | Path | Best for | Rewards |

@@ -63,24 +63,25 @@
       "./js/performer-room.mjs?v=20261116-curtain":"./js/performer-room.mjs?v=20261117-booking-assets",
       "./js/radio-schedule-ui.mjs?v=20261025-community-reminder":"./js/radio-schedule-ui.mjs?v=20261127-dcal",
       "./js/dbusk-calendar.mjs":"./js/dbusk-calendar.mjs?v=20261127-admin-dcal",
-      "./js/dbusk-calendar-core.mjs":"./js/dbusk-calendar-core.mjs?v=20261127-admin-dcal",
+      "./js/dbusk-calendar-core.mjs":"./js/dbusk-calendar-core.mjs?v=20261127-pinner-campaign",
+      "./js/payroll-week.mjs":"./js/payroll-week.mjs?v=20261127-pinner-campaign",
       "./js/radio-schedule.mjs":"./js/radio-schedule.mjs?v=20261127-admin-dcal",
       "./js/radio-schedule.mjs?v=20261116-longform":"./js/radio-schedule.mjs?v=20261127-admin-dcal",
-      "./js/promotions-ui.mjs?v=20261126-pinner-dashboard":"./js/promotions-ui.mjs?v=20261127-admin-dcal",
-      "./js/promotions.mjs?v=20261126-pinner-dashboard":"./js/promotions.mjs?v=20261127-admin-dcal",
+      "./js/promotions-ui.mjs?v=20261126-pinner-dashboard":"./js/promotions-ui.mjs?v=20261127-pinner-campaign",
+      "./js/promotions.mjs?v=20261126-pinner-dashboard":"./js/promotions.mjs?v=20261127-pinner-campaign",
       "./js/live-performance-admin.mjs?v=20261121-typed-review":"./js/live-performance-admin.mjs?v=20261127-admin-dcal",
       "./js/radio-calendar.mjs?v=20261024-programming-calendar":"./js/radio-calendar.mjs?v=20261127-dcal",
       "./js/tutorial.js?v=20261123-split-admin-pies":"./js/tutorial.js?v=20261127-dcal",
-      "./js/promotions-ui.mjs?v=20261116-promotions":"./js/promotions-ui.mjs?v=20261127-admin-dcal",
-      "./js/promotions-ui.mjs?v=20261122-musician-referral":"./js/promotions-ui.mjs?v=20261127-admin-dcal",
-      "./js/promotions-ui.mjs?v=20261126-eth-gifts":"./js/promotions-ui.mjs?v=20261127-admin-dcal",
-      "./js/promotions-ui.mjs?v=20261123-supporter-queue":"./js/promotions-ui.mjs?v=20261127-admin-dcal",
-      "./js/promotions-ui.mjs?v=20261126-referral-match":"./js/promotions-ui.mjs?v=20261127-admin-dcal",
-      "./js/promotions-ui.mjs":"./js/promotions-ui.mjs?v=20261127-admin-dcal",
-      "./js/promotions.mjs?v=20261126-eth-gifts":"./js/promotions.mjs?v=20261127-admin-dcal",
-      "./js/promotions.mjs?v=20261123-supporter-queue":"./js/promotions.mjs?v=20261127-admin-dcal",
-      "./js/promotions.mjs?v=20261126-referral-match":"./js/promotions.mjs?v=20261127-admin-dcal",
-      "./js/promotions.mjs":"./js/promotions.mjs?v=20261127-admin-dcal",
+      "./js/promotions-ui.mjs?v=20261116-promotions":"./js/promotions-ui.mjs?v=20261127-pinner-campaign",
+      "./js/promotions-ui.mjs?v=20261122-musician-referral":"./js/promotions-ui.mjs?v=20261127-pinner-campaign",
+      "./js/promotions-ui.mjs?v=20261126-eth-gifts":"./js/promotions-ui.mjs?v=20261127-pinner-campaign",
+      "./js/promotions-ui.mjs?v=20261123-supporter-queue":"./js/promotions-ui.mjs?v=20261127-pinner-campaign",
+      "./js/promotions-ui.mjs?v=20261126-referral-match":"./js/promotions-ui.mjs?v=20261127-pinner-campaign",
+      "./js/promotions-ui.mjs":"./js/promotions-ui.mjs?v=20261127-pinner-campaign",
+      "./js/promotions.mjs?v=20261126-eth-gifts":"./js/promotions.mjs?v=20261127-pinner-campaign",
+      "./js/promotions.mjs?v=20261123-supporter-queue":"./js/promotions.mjs?v=20261127-pinner-campaign",
+      "./js/promotions.mjs?v=20261126-referral-match":"./js/promotions.mjs?v=20261127-pinner-campaign",
+      "./js/promotions.mjs":"./js/promotions.mjs?v=20261127-pinner-campaign",
       "./js/supporter-payroll.mjs?v=20261123-supporter-queue":"./js/supporter-payroll.mjs?v=20261126-referral-match",
       "./js/eth-usd-quote.mjs?v=20261126-eth-gifts":"./js/eth-usd-quote.mjs?v=20261126-referral-match",
       "./js/mint.js?v=20261030-ad-cutoff":"./js/mint.js?v=20261126-release-batches",
@@ -1071,7 +1072,7 @@
     <div id="radio-programming-status" class="admin-status" role="status"></div>
     <section id="admin-radio-schedule" class="hidden" aria-label="Radio programming calendar">
         <div class="admin-section-header">
-          <p>Build your week. Drop a radio hour or referral campaign onto the calendar.</p>
+          <p>Build your week. Drop a radio hour or promotional campaign onto the calendar.</p>
           <button id="admin-radio-schedule-refresh" class="admin-btn admin-btn-secondary" type="button" aria-label="Refresh radio schedule" title="Refresh schedule">↻</button>
         </div>
         <div id="admin-programming-calendar"></div>
@@ -1422,7 +1423,7 @@
   <link rel="stylesheet" href="css/live-performance.css?v=20261121-action-status">
   <script type="module" src="js/live-booking-notifications.mjs?v=20261126-worker-gas-gauge"></script>
   <script type="module" src="js/live-performance-admin.mjs?v=20261127-admin-dcal"></script>
-  <link rel="stylesheet" href="css/promotions.css?v=20261116-promotions">
+  <link rel="stylesheet" href="css/promotions.css?v=20261127-pinner-campaign">
   <script type="module" src="js/admin.js?v=20261127-admin-dcal"></script>
   <link rel="stylesheet" href="css/content-review.css?v=20261107-flags">
   <script type="module" src="js/content-review-ui.mjs?v=20261107-flags"></script>
@@ -1438,7 +1439,7 @@
   <script type="module" src="js/top-ten-board.mjs?v=20261123-song-splits"></script>
   <script type="module" src="js/djuke.mjs?v=20261112-playlist-continuity"></script>
   <script type="module" src="js/devert-site.mjs?v=20261107-review"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261126-release-batches"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261127-pinner-campaign"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261118-artist-artwork"></script>
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/djuke-playlists-ui.mjs?v=20261025-scheduling-info"></script>
@@ -1514,7 +1515,7 @@
     </section>
     <section class="creator-care-summary" aria-labelledby="creator-promotions-title">
       <h3 id="creator-promotions-title">Campaign participation</h3>
-      <p data-profile-promotions>Public musician-referral campaign stats will appear when available.</p>
+      <div data-profile-promotions>Public campaign participation stats will appear when available.</div>
     </section>
     <details class="creator-dropdown" data-profile-earnings aria-labelledby="creator-earnings-title">
       <summary><span id="creator-earnings-title" class="creator-dropdown-title">Total earnings</span><strong class="creator-earnings-total" data-earnings-total>—</strong></summary>
