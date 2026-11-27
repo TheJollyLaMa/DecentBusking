@@ -87,7 +87,7 @@ function _injectAdminLink(shadowRoot) {
     const li = document.createElement('li');
     li.className = 'admin-nav-item';
     li.dataset.radioProgrammingItem = '1';
-    li.textContent = '☿ Admin Community Calendar';
+    li.textContent = '⚸ 🗓️ Admin DCal ⨘ 🜐';
     li.addEventListener('click', e => {
       e.stopPropagation();
       leftMenu.style.display = 'none';

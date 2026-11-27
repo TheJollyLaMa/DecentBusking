@@ -27,9 +27,12 @@ function normalizeLivePerformanceEvent(event) {
   }
   if (end - start > MAX_LIVE_EVENT_DURATION_MS) throw new Error('Live performance events cannot exceed four hours');
   const type = event.type || 'live_performance';
-  if (!['live_performance', 'playlist_show'].includes(type)) throw new Error('Invalid schedule event type');
+  const top10Cancellation = type === 'weekly_top10' && event.status === 'cancelled' &&
+    /^(friday-top10-hype|weekly-top10-final-listen):\d{4}-\d{2}-\d{2}$/.test(id) &&
+    id.endsWith(`:${localDateAndHour(start, PAYROLL_TIME_ZONE).date}`);
+  if (!['live_performance', 'playlist_show'].includes(type) && !top10Cancellation) throw new Error('Invalid schedule event type');
   const playlist = type === 'playlist_show' ? radioPlaylistDefinition(event.playlistId, event.playlistDefinition) : null;
-  const priority = playlist ? 50 : Number(event.priority ?? 200);
+  const priority = playlist ? 50 : top10Cancellation ? 90 : Number(event.priority ?? 200);
   if (!Number.isFinite(priority)) throw new Error('Invalid live performance event priority');
   const cancellation = {};
   if (event.status === 'cancelled') {
@@ -37,6 +40,9 @@ function normalizeLivePerformanceEvent(event) {
     if (!reason || reason.length > 500) throw new Error('Cancellation requires a public reason (up to 500 characters)');
     cancellation.status = 'cancelled';
     cancellation.cancellationReason = reason;
+    if (event.calendarHidden === true) cancellation.calendarHidden = true;
+  } else if (event.calendarHidden) {
+    throw new Error('Only canceled events can be hidden from the calendar');
   } else if (event.status && event.status !== 'scheduled') throw new Error('Invalid event status');
   return { id, type, ...(playlist ? { playlistId: playlist.id,
     ...(event.playlistDefinition ? { playlistDefinition: playlist } : {}) } : {}),
@@ -213,7 +219,7 @@ export function defaultRadioSchedule(weeklySchedule = {}) {
     { id: 'friday-top10-hype', type: 'weekly_top10', label: `${day('friday-top10-hype')} Top 10 Hype Hour`, priority: 90,
       weekday: overrides['friday-top10-hype']?.weekday ?? 5, startHourLocal: overrides['friday-top10-hype']?.startHourLocal ?? 20,
       endHourLocal: overrides['friday-top10-hype']?.endHourLocal ?? 21, timeZone: PAYROLL_TIME_ZONE },
-    { id: 'friday-live-performance', type: 'live_performance', label: `${day('friday-live-performance')} Live Performance Block`, priority: 200,
+    { id: 'friday-live-performance', type: 'live_performance', label: `${day('friday-live-performance')} Live Performance`, priority: 200,
       weekday: overrides['friday-live-performance']?.weekday ?? 5, startHourLocal: overrides['friday-live-performance']?.startHourLocal ?? 21,
       endHourLocal: overrides['friday-live-performance']?.endHourLocal ?? 22, timeZone: PAYROLL_TIME_ZONE },
     { id: 'weekly-top10-final-listen', type: 'weekly_top10', label: 'Sunday Top 10 Final Listen', priority: 90, window: 'final-payroll-hour' },
@@ -265,7 +271,10 @@ function localDateAndHour(now, timeZone) {
   return { weekday, hour: Number(parts.hour), date: `${parts.year}-${parts.month}-${parts.day}` };
 }
 
-function isShowActive(show, now) {
+function isShowActive(show, now, cancellations = []) {
+  const occurrenceId = `${show.id}:${localDateAndHour(now, show.timeZone || PAYROLL_TIME_ZONE).date}`;
+  if (cancellations.some(event => event.type === show.type && event.status === 'cancelled' && event.id === occurrenceId &&
+    Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc))) return false;
   if (show.window === 'final-payroll-hour') {
     if (show.type !== 'weekly_top10') return false;
     const endAt = Date.parse(currentPayrollPeriod(now).endAt);
@@ -289,7 +298,7 @@ export function resolveActiveShow({ now = Date.now(), schedule = defaultRadioSch
     .filter(event => {
       const start = Date.parse(event.startUtc || event.start || '1970-01-01T00:00:00Z');
       const end = Date.parse(event.endUtc || event.end || '1970-01-01T00:00:00Z');
-      return event.type !== 'playlist_show' && event.status !== 'cancelled' && Number.isFinite(start) && Number.isFinite(end) && now >= start && now < end;
+      return event.type === 'live_performance' && event.status !== 'cancelled' && Number.isFinite(start) && Number.isFinite(end) && now >= start && now < end;
     })
     .sort((first, second) => Number(second.priority || 0) - Number(first.priority || 0))[0];
 
@@ -304,7 +313,7 @@ export function resolveActiveShow({ now = Date.now(), schedule = defaultRadioSch
   }
 
   const liveShow = (schedule || []).find(show => show.type === 'live_performance' && isShowActive(show, now) &&
-    !live.some(event => event.type !== 'playlist_show' && event.status === 'cancelled' && (event.id === `${show.id}:${localDateAndHour(now, show.timeZone || PAYROLL_TIME_ZONE).date}` ||
+    !live.some(event => event.type === 'live_performance' && event.status === 'cancelled' && (event.id === `${show.id}:${localDateAndHour(now, show.timeZone || PAYROLL_TIME_ZONE).date}` ||
       (Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc)))));
   if (liveShow) {
     const localDate = localDateAndHour(now, liveShow.timeZone || PAYROLL_TIME_ZONE).date;
@@ -317,7 +326,7 @@ export function resolveActiveShow({ now = Date.now(), schedule = defaultRadioSch
     };
   }
 
-  const top10Show = (schedule || []).find(show => show.type === 'weekly_top10' && isShowActive(show, now));
+  const top10Show = (schedule || []).find(show => show.type === 'weekly_top10' && isShowActive(show, now, live));
   if (top10Show) {
     const result = { ...top10Show, type: 'weekly_top10' };
     if (top10Show.id === 'friday-top10-hype' && Number.isInteger(top10Show.startHourLocal) && Number.isInteger(top10Show.endHourLocal)) {

@@ -121,12 +121,117 @@ test('late schedule data cannot restore a disconnected wallet and queued close e
 test('calendar offers scheduling presets without a front-end rule builder', () => {
   const source = readFileSync(require.resolve('../js/radio-programming-calendar.mjs'), 'utf8');
   assert.doesNotMatch(source, /presetEditor|Rule preset|Save preset|Rule preset builder/);
-  assert.match(source, /for \(const preset of presets\(\)\)/);
-  assert.match(source, /button\('\+ Live block'/);
-  assert.match(source, /Referral campaign/);
-  assert.match(source, /drag = \{ referral: true, template \}/);
+  assert.match(source, /'Radio preset',/);
+  assert.match(source, /button\('🎤 Live Performance'/);
+  assert.match(source, /'Campaign preset',/);
+  assert.doesNotMatch(source, /button\('[^']*Schedule (radio|campaign)/);
   assert.match(source, /openReferralCampaignEditor/);
   assert.match(source, /openReferralCampaignEditor\(\{ campaign: event\.campaign/);
+});
+
+test('one draggable text disclosure changes both its visible option and its drag payload', async t => {
+  const { draggablePresetControl } = await import('../js/radio-programming-calendar.mjs');
+  const previous = global.document;
+  t.after(() => { if (previous === undefined) delete global.document; else global.document = previous; });
+  const element = tag => ({ tag, children: [], attributes: {}, handlers: {}, textContent: '',
+    append(...children) { this.children.push(...children); },
+    addEventListener(name, handler) { this.handlers[name] = handler; },
+    setAttribute(name, value) { this.attributes[name] = value; },
+    querySelectorAll() { return this.children.filter(child => child.tag === 'button'); }, focus() {},
+  });
+  global.document = { createElement: element };
+  for (const choices of [
+    [['long-form-hour', 'Long-Form'], ['songs-awaiting-your-vote', '0 Votes'], ['top10-hour', 'Top10'], ['rising-stars', 'Rising Stars']],
+    [['pinner', 'Pin Reward Campaign'], ['campaign:saved', 'Workshop template'], ['custom', 'Custom']],
+  ]) {
+    let selected, dragged;
+    const control = draggablePresetControl(choices, choices[0][0], 'Preset', id => { selected = id; }, id => { dragged = id; });
+    const [summary, options] = control.children;
+    assert.equal(summary.textContent, choices[0][1]);
+    assert.equal(summary.draggable, true);
+    options.children[1].handlers.click();
+    summary.handlers.dragstart({});
+    assert.equal(summary.textContent, choices[1][1]);
+    assert.equal(selected, choices[1][0]);
+    assert.equal(dragged, choices[1][0]);
+    assert.equal(control.open, false);
+    assert.equal(options.children[1].attributes['aria-pressed'], 'true');
+  }
+});
+
+test('calendar lifecycle distinguishes accepted/funding, phase0 earmarking, actual checks/live and unavailable or stale evidence', async () => {
+  const { liveCalendarEventLifecycle } = await import('../js/live-performance-admin.mjs');
+  const event = { id: 'linked-event' };
+  const now = Date.parse('2026-11-27T20:00:00Z');
+  const booking = { id: 'booking', eventId: event.id, mode: 'phase1', status: 'draft', stewardApproved: true, acknowledged: false };
+  const ledger = { bookings: [booking], checkedAt: now };
+  const state = (extra, options = {}) => liveCalendarEventLifecycle(event, {
+    now, ledger: { ...ledger, bookings: [{ ...booking, ...extra }] }, ...options,
+  });
+  assert.equal(state({}).state, 'invitation');
+  assert.equal(state({ acknowledged: true }).state, 'accepted');
+  assert.equal(state({ transactions: { funding: { status: 'pending' } } }).state, 'funding');
+  const funded = { acknowledged: true, transactions: { funding: { status: 'confirmed' } } };
+  assert.match(state(funded).steps[2].text, /Escrow/);
+  assert.match(state({ ...funded, mode: 'phase0' }).steps[2].text, /earmarked, NOT escrow/);
+  assert.equal(state(funded).steps[3].state, 'unavailable');
+  const audio = { bookingId: booking.id, serverTime: now, bookingVerification: { fresh: true }, configured: true,
+    phase: 'live', status: 'ON-AIR', verifiedAudioAt: new Date(now - 1000).toISOString(),
+    checks: { t60: new Date(now - 3600000).toISOString(), t15: new Date(now - 900000).toISOString() } };
+  assert.equal(state(funded, { liveAudio: audio }).state, 'live');
+  assert.equal(state(funded, { liveAudio: audio }).steps[3].state, 'confirmed');
+  assert.notEqual(state(funded, { liveAudio: { ...audio, bookingId: 'other' } }).state, 'live');
+  assert.notEqual(state(funded, { liveAudio: { ...audio, serverTime: now - 20000 } }).state, 'live');
+  assert.equal(state(funded, { ledger: { ...ledger, checkedAt: now - 313000 } }).state, 'unavailable');
+  assert.equal(state(funded, { ledger: { ...ledger, error: 'Index offline' } }).state, 'unavailable');
+  assert.equal(state({ ...funded, broadcastCompletion: { known: true, pending: false, actualEndedAt: now - 1000 } }).state, 'completed');
+  assert.notEqual(state({ status: 'paid' }).state, 'completed', 'paid and elapsed scheduled time are not proof a performance ended');
+  assert.equal(state({ ...funded, mode: 'unknown' }).state, 'unavailable');
+  assert.notEqual(state({ ...funded, broadcastCompletion: { known: true, pending: false, actualEndedAt: now + 1000 } }).state, 'completed');
+  assert.match(state({ ...funded, cancelled: true }).steps.at(-1).text, /Invitation canceled · calendar status separate/);
+});
+
+test('saved active Long-Form remains public until its end; future zero-vote hour is not confused with active playback', async () => {
+  const { serializeLiveSchedule, deserializeLiveSchedule, defaultRadioSchedule, resolveActiveShow } = await import('../js/radio-schedule.mjs');
+  const { publicCalendarData, publicCalendarEvents, calendarRange } = await import('../js/dbusk-calendar-core.mjs');
+  const weeklySchedule = { programs: [
+    program({ id: 'program-long', title: 'Long-Form', playlistId: 'long-form-hour', weekday: 5, startMinuteLocal: 900, startDateLocal: '2026-11-27' }),
+    program({ id: 'program-zero', title: '0 Votes', playlistId: 'songs-awaiting-your-vote', weekday: 5, startMinuteLocal: 960, startDateLocal: '2026-11-27' }),
+  ] };
+  const saved = deserializeLiveSchedule(serializeLiveSchedule({ events: [], weeklySchedule }));
+  const payload = { ...saved, schedule: defaultRadioSchedule(saved.weeklySchedule), ready: true };
+  const now = Date.parse('2026-11-27T20:44:00Z');
+  const events = publicCalendarEvents(publicCalendarData(payload), calendarRange('2026-11-27'), { now });
+  const long = events.find(e => e.id === 'program-long:2026-11-27');
+  assert.equal(long.startUtc, '2026-11-27T20:00:00.000Z');
+  assert.equal(long.endUtc, '2026-11-27T21:00:00.000Z');
+  assert.ok(events.some(e => e.id === 'program-zero:2026-11-27'));
+  assert.equal(resolveActiveShow({ now, schedule: payload.schedule }).playlistId, 'long-form-hour');
+  assert.equal(resolveActiveShow({ now: Date.parse(long.endUtc), schedule: payload.schedule }).playlistId, 'songs-awaiting-your-vote');
+  assert.equal(publicCalendarEvents(publicCalendarData(payload), calendarRange('2026-11-27'), {
+    now: Date.parse(long.endUtc),
+  }).some(e => e.id === long.id), false);
+});
+
+test('canceling one recurring occurrence persists its disposition, suppresses runtime, and preserves subscription cancellation without removing next week', async () => {
+  const { cancelLivePerformanceEvent, defaultRadioSchedule, resolveActiveShow, serializeLiveSchedule, deserializeLiveSchedule } = await import('../js/radio-schedule.mjs');
+  const { radioCalendarOccurrences, buildRadioCalendar } = await import('../js/radio-calendar.mjs');
+  const { publicCalendarData, publicCalendarEvents, calendarRange } = await import('../js/dbusk-calendar-core.mjs');
+  const now = Date.parse('2026-11-28T02:15:00Z');
+  const schedule = defaultRadioSchedule();
+  const occurrence = radioCalendarOccurrences({ schedule }, { now, days: 0 }).find(e => e.id === 'friday-live-performance:2026-11-27');
+  for (const calendarHidden of [false, true]) {
+    const events = cancelLivePerformanceEvent([], { ...occurrence, calendarHidden }, 'Taking this week off; regular radio continues.');
+    const saved = deserializeLiveSchedule(serializeLiveSchedule({ events }));
+    const payload = { ...saved, schedule };
+    assert.equal(resolveActiveShow({ now, schedule, livePerformanceEvents: saved.events }).type, 'normal_rotation');
+    assert.equal(publicCalendarEvents(publicCalendarData(payload), calendarRange('2026-11-27'), { now })
+      .some(e => e.id === occurrence.id && e.status === 'cancelled'), !calendarHidden);
+    const subscription = buildRadioCalendar(radioCalendarOccurrences(payload, { now, days: 8 }));
+    assert.match(subscription, /STATUS:CANCELLED/);
+    assert.match(subscription, /UID:friday-live-performance%3A2026-12-04/);
+    assert.equal(saved.weeklySchedule['friday-live-performance'], undefined);
+  }
 });
 
 test('current calendar date and half-hour slot follow New York time and DST', async () => {
@@ -136,6 +241,39 @@ test('current calendar date and half-hour slot follow New York time and DST', as
   assert.deepEqual(programmingNow(Date.parse('2026-10-26T04:00:00Z')), { date: '2026-10-26', minute: 0, slot: 0 });
   for (const value of ['2026-11-01T05:30:00Z', '2026-11-01T06:30:00Z']) {
     assert.deepEqual(programmingNow(Date.parse(value)), { date: '2026-11-01', minute: 90, slot: 3 });
+  }
+});
+
+test('default Top10 and Finish Line cancel only one occurrence through API validation/serialization, public projection and ICS', async () => {
+  const { defaultRadioSchedule, cancelLivePerformanceEvent, validateLivePerformanceSchedule,
+    serializeLiveSchedule, deserializeLiveSchedule, resolveActiveShow } = await import('../js/radio-schedule.mjs');
+  const { radioCalendarOccurrences, buildRadioCalendar } = await import('../js/radio-calendar.mjs');
+  const { publicCalendarData, publicCalendarEvents, calendarRange } = await import('../js/dbusk-calendar-core.mjs');
+  const schedule = defaultRadioSchedule();
+  for (const [id, time] of [
+    ['friday-top10-hype:2026-11-27', '2026-11-28T01:30:00Z'],
+    ['weekly-top10-final-listen:2026-11-29', '2026-11-30T04:30:00Z'],
+  ]) {
+    const now = Date.parse(time);
+    const occurrence = radioCalendarOccurrences({ schedule }, { now, days: 0 }).find(e => e.id === id);
+    assert.equal(resolveActiveShow({ now, schedule }).type, 'weekly_top10');
+    assert.throws(() => serializeLiveSchedule({ events: [{ ...occurrence, status: 'scheduled' }] }), /Invalid schedule event type/);
+    assert.throws(() => cancelLivePerformanceEvent([], { ...occurrence, id: 'invented:2026-11-27' }, 'Off this week'), /Invalid schedule event type/);
+    for (const calendarHidden of [false, true]) {
+      const events = validateLivePerformanceSchedule(cancelLivePerformanceEvent([], { ...occurrence, calendarHidden }, 'Off this week'), { now });
+      const saved = deserializeLiveSchedule(serializeLiveSchedule({ events }));
+      assert.equal(saved.events[0].type, 'weekly_top10');
+      assert.equal(saved.events[0].status, 'cancelled');
+      assert.equal(resolveActiveShow({ now, schedule, livePerformanceEvents: saved.events }).type, 'normal_rotation');
+      assert.equal(resolveActiveShow({ now: now + 7 * 86400000, schedule, livePerformanceEvents: saved.events }).type, 'weekly_top10');
+      const payload = { ...saved, schedule };
+      assert.equal(publicCalendarEvents(publicCalendarData(payload), calendarRange(id.split(':')[1]), { now })
+        .some(e => e.id === id && e.status === 'cancelled'), !calendarHidden);
+      const subscription = buildRadioCalendar(radioCalendarOccurrences(payload, { now, days: 8 }));
+      assert.match(subscription, /STATUS:CANCELLED/);
+      assert.match(subscription, new RegExp(`UID:${encodeURIComponent(id)}`));
+      assert.equal(saved.weeklySchedule[id.split(':')[0]], undefined);
+    }
   }
 });
 

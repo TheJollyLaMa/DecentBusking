@@ -271,7 +271,7 @@ export async function enablePromotionRecipient({ claim, snapshot, status, confir
 
 let promotionEditorDialog = null;
 
-export function openPromotionCalendarEditor({ startsAt, endsAt, campaignId, template } = {}) {
+export function openPromotionCalendarEditor({ startsAt, endsAt, campaignId, template, sourceCampaign } = {}) {
   if (promotionEditorDialog?.open) return;
   promotionEditorDialog = document.createElement('dialog');
   promotionEditorDialog.className = 'promotion-calendar-editor-dialog promotion-dialog';
@@ -288,7 +288,7 @@ export function openPromotionCalendarEditor({ startsAt, endsAt, campaignId, temp
     promotionEditorDialog.remove();
     promotionEditorDialog = null;
   }, { once: true });
-  mountAdminPromotions(body, { startsAt, endsAt, campaignId, template, calendarMode: true });
+  mountAdminPromotions(body, { startsAt, endsAt, campaignId, template, sourceCampaign, calendarMode: true });
   promotionEditorDialog.showModal();
 }
 
@@ -297,11 +297,12 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
   let state;
   let busy = false;
   let generation = 0;
+  let browseId = 0;
   let editId = '';
   root.innerHTML = `${calendarOptions.calendarMode ? '' : '<summary>Invites &amp; Promotions</summary>'}
     <p>${termsNotice}</p>
     <p>Create/deposit into <strong>Promotionals (${PROMOTIONS_FUND})</strong> in Payroll → Settlements Router. No funds are created or moved here automatically.</p>
-    <button type="button" data-promo-unlock>Unlock / refresh promotions</button>
+    <button type="button" data-promo-unlock>Refresh campaigns · no signature</button>
     <p role="status" data-promo-status></p><div data-promo-funding></div>
     <div data-promo-workspace hidden>
       <details ${calendarOptions.calendarMode && !calendarOptions.campaignId ? 'open' : ''}><summary>Create or edit a draft</summary>
@@ -371,6 +372,9 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       input('reward').value = '5'; input('budget').value = '25'; input('maxAwards').value = '5';
       input('terms').value = 'UNPUBLISHED DRAFT. First five admin-approved pinners completing 30 qualifying days; $5 equivalent in Base ETH each, total cap $25. NFT award is unconfigured and changes by campaign. Not an active offer. Final daily qualification, first-five ordering, ETH/USD valuation time, launch dates and NFT contract/token must be reviewed before publication. No automatic payment or NFT minting. Existing weekly USDC pinner rewards remain separate. Promotion records are public on IPFS; do not include private information.';
     }
+    if (t.id === 'custom') {
+      for (const name of ['title', 'criteria', 'terms', 'reward', 'budget']) input(name).value = '';
+    }
     templateFields();
   }
   function reset() {
@@ -385,6 +389,25 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     if (calendarOptions.startsAt) input('startsAt').value = utcToNewYorkInput(calendarOptions.startsAt);
     if (calendarOptions.endsAt) input('endsAt').value = utcToNewYorkInput(calendarOptions.endsAt);
     if (calendarOptions.endsAt) input('claimDeadline').value = utcToNewYorkInput(calendarOptions.endsAt);
+    const source = calendarOptions.sourceCampaign;
+    if (source) {
+      for (const name of ['title', 'criteria', 'terms', 'template', 'maxAwards', 'fund',
+        'minOriginalTracks', 'requiredReferrals', 'activityWindow', 'matchTargetFund']) {
+        if (source[name] !== undefined) input(name).value = source[name];
+      }
+      if (source.template !== 'pinner') {
+        input('reward').value = String(Number(source.rewardUnits) / 1e6);
+        input('budget').value = String(Number(source.budgetUnits) / 1e6);
+      }
+      if (source.minPurchaseUnits) input('minPurchase').value = String(Number(source.minPurchaseUnits) / 1e6);
+      if (source.minContributionUnits) input('minContribution').value = String(Number(source.minContributionUnits) / 1e6);
+      input('curatedReferrers').value = (source.curatedReferrers || []).join('\n');
+      const start = Date.parse(calendarOptions.startsAt || source.startsAt);
+      input('startsAt').value = utcToNewYorkInput(new Date(start).toISOString());
+      input('endsAt').value = utcToNewYorkInput(new Date(start + Date.parse(source.endsAt) - Date.parse(source.startsAt)).toISOString());
+      input('claimDeadline').value = utcToNewYorkInput(new Date(start + Date.parse(source.claimDeadline) - Date.parse(source.startsAt)).toISOString());
+      templateFields();
+    }
   }
   function render() {
     root.querySelector('[data-promo-workspace]').hidden = false;
@@ -462,6 +485,7 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     </article>`).join('') || '<p>No registrations.</p>';
   }
   async function command(c) {
+    browseId++;
     const result = await signed({ ...c, revision: state?.revision });
     state = result;
     render();
@@ -523,8 +547,18 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
   root.addEventListener('click', event => {
     const target = event.target.closest('button');
     if (!target || target.type === 'submit') return;
+    if (target.matches('[data-promo-unlock]')) {
+      const version = generation;
+      const read = ++browseId;
+      if (busy) return;
+      status.textContent = 'Loading campaigns…';
+      request().then(result => {
+        if (version !== generation || read !== browseId || !root.isConnected) return;
+        state = result; render(); status.textContent = 'Campaigns loaded · no signature.';
+      }).catch(error => { if (version === generation && read === browseId) status.textContent = error.message; });
+      return;
+    }
     void guard(async () => {
-      if (target.matches('[data-promo-unlock]')) return command({ action: 'view' });
       if (target.matches('[data-promo-new]')) return reset();
       const campaign = state?.campaigns.find(c => c.id === target.closest('[data-campaign]')?.dataset.campaign);
       if (campaign) {
@@ -658,6 +692,14 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
   };
   for (const name of ['wallet-connected', 'wallet-disconnected']) document.addEventListener(name, clear);
   reset();
+  const version = generation;
+  const read = ++browseId;
+  request().then(result => {
+    if (version !== generation || read !== browseId || !root.isConnected) return;
+    state = result;
+    render();
+    status.textContent = 'Campaigns loaded. Only protected changes require an admin signature.';
+  }).catch(error => { if (version === generation && read === browseId) status.textContent = error.message; });
 }
 
 export function mountPublicPromotion() {

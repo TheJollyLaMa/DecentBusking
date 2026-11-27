@@ -248,3 +248,23 @@
 .rc-math { flex-basis: 100%; margin: 2px 0 0; color: #9fd0ff; font-size: .8rem; }
 .rc-math[data-tone=error] { color: #ffb4b4; }
 .rc-name { width: 9ch; }
+.radio-programming-calendar .radio-calendar-event.is-live > small { display: none; }
+.radio-programming-calendar .radio-calendar-event .radio-calendar-live-blurb { display: flex; }
+.radio-programming-calendar .radio-calendar-event .radio-calendar-live-blurb small { display: inline; font-size: .56rem; line-height: 1.1; }
+.radio-programming-calendar .radio-calendar-event.is-live[data-live-state="invitation"] { border-color: #b899de; border-style: dashed; }
+.radio-programming-calendar .radio-calendar-event.is-live[data-live-state="accepted"] { border-color: #62c6c9; }
+.radio-programming-calendar .radio-calendar-event.is-live[data-live-state="funding"] { border-color: #e5bc69; border-style: dashed; }
+.radio-programming-calendar .radio-calendar-event.is-live[data-live-state="funded"] { border-color: #71b68c; }
+.radio-programming-calendar .radio-calendar-event.is-live[data-live-state="live"] { border-color: #ff6666; outline: 2px solid #ff6666; }
+.radio-programming-calendar .radio-calendar-event.is-live[data-live-state="completed"] { border-color: #9aafff; }
+.radio-programming-calendar .radio-calendar-event.is-live[data-live-state="unavailable"] { border-color: #aaa; border-style: dotted; }
+.radio-calendar-live-blurb [data-state="confirmed"] { color: #9be4b1; }
+.radio-calendar-live-blurb [data-state="pending"] { color: #e5bc69; }
+.radio-calendar-live-blurb [data-state="cancelled"] { color: #ff6666; }
+.radio-programming-calendar .radio-calendar-event.is-short-live { padding: 4px; gap: 2px; }
+.radio-calendar-event.is-short-live strong { -webkit-line-clamp: 1; }
+.radio-calendar-event.is-short-live .radio-calendar-live-blurb { gap: 1px 4px; }
+.radio-programming-calendar .radio-calendar-event.is-short-live .radio-calendar-live-blurb small:not(:nth-child(3)):not(:last-child) { font-size: 0; }
+.radio-calendar-event.is-short-live .radio-calendar-live-blurb small:not(:nth-child(3)):not(:last-child)::before { content: attr(data-icon); font-size: .6rem; }
+.radio-programming-calendar .radio-calendar-event.is-cancelled,
+.radio-programming-calendar .radio-calendar-event.is-live[data-live-state="cancelled"] { border-color: #ef6262; border-style: solid; }

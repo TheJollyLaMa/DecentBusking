@@ -251,7 +251,8 @@ export const PROMOTION_TEMPLATES = [
   { id: 'sponsor-match', title: 'First sponsor match', criteria: 'A capped match to the selected artist fund after a sponsor’s first qualifying contribution. Fund contributions are not refundable ad purchases. Draft only until a fund-to-fund settlement path is verified.' },
   { id: 'session', title: 'Village listening session', criteria: 'Organize a listening session and supply event and participation evidence. Never condition rewards on positive votes or claim anonymous activity proves unique humans.' },
   { id: 'musician-referral', title: MUSICIAN_REFERRAL_PILOT.title, criteria: 'For each new musician with a verified minted playlist track and 10 distinct campaign-scoped signed song votes. One conversion creates four auditable $25 allocation legs, capped at six conversions.' },
-  { id: 'pinner', title: 'Founding pinners · first five', criteria: 'Draft only: first five admin-approved pinners who complete 30 qualifying days of independently verified pinning. $5 equivalent in Base ETH each, $25 total. NFT reward not configured. Daily qualification accounting and final launch terms still need review.' },
+  { id: 'pinner', title: 'Pin Reward Campaign', criteria: 'Draft only: first five admin-approved pinners who complete 30 qualifying days of independently verified pinning. $5 equivalent in Base ETH each, $25 total. NFT reward not configured. Daily qualification accounting and final launch terms still need review.' },
+  { id: 'custom', title: 'Custom', criteria: '' },
 ];
 export function promotionAuthorization({ address, origin, issuedAt, command }) {
   return ['DecentBusking Promotions authorization v1', `Wallet: ${address.toLowerCase()}`,

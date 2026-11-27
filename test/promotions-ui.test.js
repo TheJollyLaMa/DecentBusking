@@ -182,7 +182,6 @@ test('money preserves six-decimal amounts and invite links keep the deployment s
   assert.throws(() => promotionUnits('1e3'), /USDC amount/);
   assert.equal(promotionLink('offer', owner, 'https://site.example/DecentBusking/?tutorial=splits#old'),
     `https://site.example/DecentBusking/?promotion=offer&ref=${owner}`);
-  assert.equal(PROMOTION_TEMPLATES.length, 7);
   assert.ok(PROMOTION_TEMPLATES.some(template => template.id === 'musician-referral'));
 });
 test('conversion UI pays one wallet leg with its own amount and work reference', async t => {
@@ -200,10 +199,10 @@ test('entry points expose the admin section and public offer while suppressing a
   const leftAnkh = fs.readFileSync(root + '/js/components/header-admin-inject.js', 'utf8');
   const ui = fs.readFileSync(root + '/js/promotions-ui.mjs', 'utf8');
   const tutorial = fs.readFileSync(root + '/js/tutorial.js', 'utf8');
-  assert.match(html, /id="admin-promotions"/);
-  assert.match(admin, /mountAdminPromotions/);
+  assert.match(html, /id="admin-programming-calendar"/);
+  assert.match(admin, /mountRadioProgrammingCalendar/);
   assert.match(admin, /mountPublicPromotion\(\)/);
-  assert.match(leftAnkh, /☿ Admin Community Calendar/);
+  assert.match(leftAnkh, /⚸ 🗓️ Admin DCal ⨘ 🜐/);
   assert.match(leftAnkh, /new CustomEvent\('open-radio-programming'\)/);
   assert.match(admin, /document\.addEventListener\('open-radio-programming'/);
   assert.match(admin, /_radioModal\.showModal\(\)/);
