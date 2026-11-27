@@ -79,6 +79,103 @@ function renderAfterpartyStatus(b, now) {
 let state;
 let busy = false;
 let section;
+let calendarDialog;
+let selectedCalendarEventId = '';
+let calendarLedger;
+export function getLiveCalendarLedger() {
+ if (!isAdminWallet() || calendarLedger?.wallet !== window._wallet?.address?.toLowerCase()) return null;
+ return calendarLedger;
+}
+export function liveCalendarEventLifecycle(event, { ledger, liveAudio, now = Date.now() } = {}) {
+ const unknown = text => ({ text, state: 'unavailable' });
+ if (!ledger || ledger.error || !Number.isFinite(ledger.checkedAt) || now < ledger.checkedAt || now - ledger.checkedAt > 312000) return { state: event.status === 'cancelled' ? 'cancelled' : 'unavailable', steps: [
+   unknown('📨 Invitation unavailable'), unknown('✅ Acceptance unavailable'), unknown('💵 Funding unavailable'),
+   unknown('🎧 Checks unavailable · open workflow'), unknown('🎤 Live unavailable'),
+ ] };
+ const matches = (ledger.bookings || []).filter(b => b.eventId === event.id);
+ if (matches.length !== 1) return { state: event.status === 'cancelled' ? 'cancelled' : 'unavailable', steps: [
+   unknown(matches.length ? '📨 Multiple linked invitations · open workflow' : '📨 No linked invitation'),
+   unknown('🎧 Checks unavailable · open workflow'), unknown('🎤 No verified live performance'),
+ ] };
+ const b = matches[0];
+ const confirmed = (text, yes) => ({ text, state: yes ? 'confirmed' : 'pending' });
+ const funding = Object.entries(b.transactions || {}).filter(([name]) => ['BookingFunded', 'Funded', 'funding'].includes(name));
+ const funded = funding.some(([, tx]) => tx.status === 'confirmed');
+ const fundingPending = funding.some(([, tx]) => tx.status === 'pending');
+ const financialUnknown = b.status === 'unavailable' || !['phase0', 'phase1'].includes(b.mode);
+ const escrow = b.mode === 'phase1';
+ const finance = financialUnknown ? unknown('💵 Funding unavailable') : confirmed(
+   `${escrow ? '🔒 Escrow' : '🏦 Community fund · earmarked, NOT escrow'} · ${fundingPending ? 'funding pending' : funded ? 'funding confirmed, not paid' : 'not confirmed funded'}`, funded);
+ const audioFresh = liveAudio?.bookingId === b.id && liveAudio.bookingVerification?.fresh === true &&
+   Number.isFinite(liveAudio.serverTime) && now >= liveAudio.serverTime && now - liveAudio.serverTime < 15000;
+ const checks = audioFresh && liveAudio.checks;
+ const passed = key => Number.isFinite(Date.parse(checks?.[key])) && Date.parse(checks[key]) <= liveAudio.serverTime;
+ const sound = checks ? confirmed(`🎧 Checks · T−60 ${passed('t60') ? 'passed' : 'pending'} / T−15 ${passed('t15') ? 'passed' : 'pending'}`,
+   passed('t60') && passed('t15')) : unknown('🎧 Checks unavailable · open workflow');
+ const onAir = audioFresh && b.acknowledged && liveAudio.configured && liveAudio.phase === 'live' &&
+   liveAudio.status === 'ON-AIR' && now - Date.parse(liveAudio.verifiedAudioAt) >= 0 && now - Date.parse(liveAudio.verifiedAudioAt) < 15000;
+ const completion = b.broadcastCompletion;
+ const ended = completion?.known === true && completion.pending === false && Number.isFinite(completion.actualEndedAt) && completion.actualEndedAt <= now;
+ const cancelled = event.status === 'cancelled' || b.cancelled;
+ const state = cancelled ? 'cancelled' : onAir ? 'live' : ended ? 'completed' : financialUnknown ? 'unavailable'
+   : fundingPending ? 'funding' : funded ? 'funded' : b.acknowledged ? 'accepted' : 'invitation';
+ return { state, steps: [
+   confirmed(`📨 ${b.stewardApproved ? 'Invitation offered' : 'Invitation draft'}`, b.stewardApproved),
+   confirmed(`✅ ${b.acknowledged ? 'Accepted' : 'Awaiting acceptance'}`, b.acknowledged),
+   finance, sound, cancelled ? { text: event.status === 'cancelled' ? '⊘ Calendar canceled · settlement separate' : '⊘ Invitation canceled · calendar status separate', state: 'cancelled' }
+     : onAir ? confirmed('🔴 Live · verified audio', true)
+       : ended ? confirmed('🏁 Performance ended · not payment', true)
+         : unknown('🎤 No verified live performance'),
+ ] };
+}
+export function liveCalendarCancellationImpact(event) {
+ if (!state) return 'Booking/settlement ledger not loaded. Open Live Performance and refresh before deciding; calendar cancellation cannot verify or settle obligations.';
+ const bookings = state.bookings.filter(b => b.eventId === event.id);
+ if (!bookings.length) return 'No linked invitation in the loaded booking ledger. Calendar cancellation alone does not cancel other invitations or payments.';
+ return bookings.map(b => `${b.displayName || 'Invited performer'}: ${formatLiveAsset(b.amountUnits,
+   b.assetDecimals ?? 6, b.assetSymbol || 'USDC')} · ${b.status} · ${[LIVE_PILOT_POLICY, LIVE_ASSET_POLICY].includes(b.payoutPolicy)
+   ? 'guaranteed fee remains owed under agreed terms' : 'review agreed cancellation/kill-fee terms'}${b.gift || b.nftGift ? ' · NFT gift is separately settled' : ''}.`).join(' ');
+}
+export function openLivePerformanceCalendar({ event, startsAt } = {}) {
+ mount();
+ if (!section) throw new Error('Live Performance controls are unavailable. Reopen the admin calendar.');
+ if (calendarDialog?.open) return;
+ const parent = section.parentElement;
+ const next = section.nextSibling;
+ calendarDialog = document.createElement('dialog');
+ selectedCalendarEventId = event?.id || '';
+ calendarDialog.className = 'radio-calendar-editor-host live-performance-calendar-dialog';
+ calendarDialog.setAttribute('aria-label', 'Live Performance workflow');
+ const close = document.createElement('button');
+ close.type = 'button';
+ close.textContent = 'Close Live Performance';
+ close.onclick = () => calendarDialog.close();
+ calendarDialog.append(close, section);
+ document.body.append(calendarDialog);
+ section.open = true;
+ const form = section.querySelector('[data-live-create]');
+ if (startsAt && !event) {
+   form.elements.startLocal.value = startsAt;
+   form.closest('details').open = true;
+ }
+ const walletChanged = () => calendarDialog?.close();
+ document.addEventListener('wallet-connected', walletChanged);
+ document.addEventListener('wallet-disconnected', walletChanged);
+ for (const card of section.querySelectorAll('[data-live-actions]')) {
+   const booking = state?.bookings.find(b => b.id === card.dataset.liveActions);
+   card.classList.toggle('is-calendar-selected', !!event && booking?.eventId === event.id);
+ }
+ calendarDialog.addEventListener('close', () => {
+   document.removeEventListener('wallet-connected', walletChanged);
+   document.removeEventListener('wallet-disconnected', walletChanged);
+   parent.insertBefore(section, next?.parentElement === parent ? next : null);
+   calendarDialog.remove();
+   calendarDialog = null;
+   selectedCalendarEventId = '';
+   section.querySelectorAll('.is-calendar-selected').forEach(card => card.classList.remove('is-calendar-selected'));
+ }, { once: true });
+ calendarDialog.showModal();
+}
 let accountRevision = 0;
 const pendingReleaseHashes = new Map();
 export function applyConfirmedRelease(card, result) {
@@ -91,22 +188,31 @@ export function applyConfirmedRelease(card, result) {
  }
 }
 async function api(body) {
+ const address = window._wallet?.address?.toLowerCase();
  const response = await fetch(`${base()}/api/live-bookings`, body ? { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(body) } : { cache:'no-store' });
  const result = await response.json();
  if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
- publishLiveBookingState(result);
+ if (isAdminWallet() && address === window._wallet?.address?.toLowerCase()) {
+   calendarLedger = { wallet: address, checkedAt: Date.now(), bookings: result.bookings, error: result.storageError || result.error };
+   publishLiveBookingState(result);
+ }
  return result;
 }
 async function wallet() {
  const ethers = window.ethers;
- const provider = new ethers.BrowserProvider(window.ethereum);
- const signer = await provider.getSigner();
+ const connected = window._wallet;
+ const signer = connected?.signer;
+ const provider = signer?.provider;
+ if (!signer || !provider || !connected.address) throw new Error('Connect the owner wallet using the header, then retry');
  const address = await signer.getAddress();
+ if (address.toLowerCase() !== connected.address.toLowerCase()) throw new Error('Wallet changed; reconnect using the header');
  if (!isAdminWallet(address)) throw new Error('Connect the owner wallet');
  if ((await provider.getNetwork()).chainId !== 8453n) throw new Error('Switch to Base (8453) and retry');
  const revision = accountRevision;
  return { ethers, provider, signer, address, check: async () => {
-   if (accountRevision !== revision || (await provider.getNetwork()).chainId !== 8453n || (await signer.getAddress()).toLowerCase() !== address.toLowerCase()) throw new Error('Wallet/network changed; refresh and reconcile any submitted transaction before retry');
+   if (accountRevision !== revision || window._wallet?.signer !== signer ||
+     window._wallet?.address?.toLowerCase() !== address.toLowerCase() ||
+     (await provider.getNetwork()).chainId !== 8453n || (await signer.getAddress()).toLowerCase() !== address.toLowerCase()) throw new Error('Wallet/network changed; refresh and reconcile any submitted transaction before retry');
  } };
 }
 async function command(input) {
@@ -163,6 +269,10 @@ function render() {
    ? bookings.map(b => renderLivePerformanceAdminBooking(b)).join('')
    : '<p class="live-booking-empty">No bookings in this group.</p>'}</details>`;
  }).join('');
+ for (const card of section.querySelectorAll('[data-live-actions]')) {
+   const booking = state.bookings.find(b => b.id === card.dataset.liveActions);
+   card.classList.toggle('is-calendar-selected', !!selectedCalendarEventId && booking?.eventId === selectedCalendarEventId);
+ }
 }
 export function renderLivePerformanceAdminBooking(b, now = Date.now()) {
  const roomUrl = liveAudioRoomUrl(b, now) || (b.broadcastCompletion?.known && b.broadcastCompletion?.pending &&
@@ -181,7 +291,13 @@ export function renderLivePerformanceAdminBooking(b, now = Date.now()) {
   <a data-live-release-report${b.reportUri ? ` href="https://gateway.pinata.cloud/ipfs/${escapeLive(b.reportUri.replace(/^ipfs:\/\//, ''))}" target="_blank" rel="noopener"` : ' hidden'}>Read public fee report</a>
   <output data-live-release-status role="status" aria-live="polite"></output>
   </section>` : '';
- return `${liveBookingRows([b])}${renderLiveBroadcastCompletion(b)}${renderAfterpartyStatus(b, now)}${room}<div data-live-actions="${escapeLive(b.id)}">${releaseCard}<details class="live-booking-actions"><summary>${release ? 'Advanced · booking & manual review' : '🛠️ Booking actions'}</summary><div>${bookingActionButtons(b)}</div></details><output class="live-action-status" data-live-action-status role="status" aria-live="polite"></output></div>`;
+ const calendarLifecycle = liveCalendarEventLifecycle({ id: b.eventId, status: b.cancelled ? 'cancelled' : undefined }, {
+   ledger: { bookings: [b], checkedAt: now }, now,
+ });
+ const lifecycle = `<ol class="live-calendar-lifecycle" aria-label="Live Performance lifecycle">
+   ${calendarLifecycle.steps.map(step => `<li data-state="${step.state}">${escapeLive(step.text)}</li>`).join('')}
+ </ol>`;
+ return `${liveBookingRows([b])}${lifecycle}${renderLiveBroadcastCompletion(b)}${renderAfterpartyStatus(b, now)}${room}<div data-live-actions="${escapeLive(b.id)}">${releaseCard}<details class="live-booking-actions"><summary>${release ? 'Advanced · booking & manual review' : '🛠️ Booking actions'}</summary><div>${bookingActionButtons(b)}</div></details><output class="live-action-status" data-live-action-status role="status" aria-live="polite"></output></div>`;
 }
 export function renderLiveBroadcastCompletion(b) {
  if (!Object.hasOwn(b, 'broadcastCompletion')) return '';
@@ -663,11 +779,21 @@ function mount() {
  document.addEventListener('live-booking-state-updated', event => {
    if (busy || !isAdminWallet(window._wallet?.address)) return;
    state = event.detail.state;
+   calendarLedger = { wallet: window._wallet.address.toLowerCase(), checkedAt: Date.now(), bookings: state.bookings,
+     error: state.storageError || state.error };
    render();
  });
  document.addEventListener('live-booking-notification-error', event => {
    if (!isAdminWallet()) return;
    section.querySelector('[data-live-status]').textContent = `Could not refresh performer acceptance status: ${event.detail.message}`;
+   if (calendarLedger) calendarLedger = { ...calendarLedger, error: event.detail.message };
  });
+ const clearCalendarEvidence = () => {
+   calendarLedger = null;
+   selectedCalendarEventId = '';
+   section.querySelectorAll('.is-calendar-selected').forEach(card => card.classList.remove('is-calendar-selected'));
+ };
+ document.addEventListener('wallet-connected', clearCalendarEvidence);
+ document.addEventListener('wallet-disconnected', clearCalendarEvidence);
 }
 if (typeof document !== 'undefined') { if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount); else mount(); }

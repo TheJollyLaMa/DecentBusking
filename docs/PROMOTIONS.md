@@ -4,6 +4,13 @@ The admin panel supports small, capped, owner-reviewed promotional pilots.
 Deploying the code does not create, publish, announce, fund, approve, or pay
 any offer. An actual funded pilot requires separate steward authorization.
 
+Admin DCal's campaign selector combines the presets and saved reusable campaigns;
+**Custom** is last. Browsing uses public GET without signing. Custom campaigns
+reuse the promotion draft/checkpoint and protected save commands. Reusing a saved
+campaign copies offer terms into a new draft, not its claims or settlement state.
+**Pin Reward Campaign** remains draft-only with its unresolved qualification,
+ETH valuation and NFT decisions. See [Admin DCal](ADMIN-DCAL.md).
+
 ## Storage and deployment
 
 All promotion data is public, using DecentBusking's existing Pinata account and
@@ -62,7 +69,7 @@ preserve them and arrange an explicit verified export if any exist.
 
 ## Funding and offers
 
-In **Left ankh → Admin Community Calendar → Fund Allocations**, create and deposit native Base USDC into
+In **Left ankh → Admin DCal → Fund Allocations**, create and deposit native Base USDC into
 **Promotionals (`dbusk-promotionals`)** with the existing owner-confirmed
 controls. Creation, token approval if needed, and deposit are separate wallet
 actions. The admin may instead choose a dedicated slug beginning
@@ -77,7 +84,7 @@ The campaign editor separately checks available budget and commitments.
 
 ### Running a referral campaign from the calendar
 
-Drag **🤝 Referral campaign** onto a day in **Left ankh → Admin Community Calendar**
+Choose the referral preset from the campaign control's text dropdown, then drag that same selected title onto a day in **Left ankh → Admin DCal**
 (or tap it on a phone to use the selected day). A compact editor opens with the
 title, start, end, claims-close, referrers and 💵 budget. The default
 title is "Referral Campaign"; a custom title is shown as "<title> Referral

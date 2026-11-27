@@ -3420,6 +3420,7 @@ async function startWebsiteRadio(client, config) {
       djuke: _radioPaidQueues,
       livePerformanceEvents,
       schedule: defaultRadioSchedule(liveWeeklySchedule),
+      getRadioSchedule: () => ({ schedule: defaultRadioSchedule(liveWeeklySchedule), events: livePerformanceEvents }),
       devertPlayback: _devertPlaybackRuntime,
       mainRadioAdStateStore: config.jukeLoopMainRadioAdStore,
       topTenHypeStore: config.topTenHypeStore,

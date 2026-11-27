@@ -320,7 +320,7 @@ export async function buildMainRadioAdCountdown({ session, now = Date.now(), son
     return { status: 'unavailable', reason: 'radio session unavailable', updatedAt: now, includesCurrentSong: false };
   }
 
-  const activeShow = applyLiveAudioShow(resolveActiveShow({
+  const activeShow = session._resolveShow ? session._resolveShow(now) : applyLiveAudioShow(resolveActiveShow({
     now, schedule: session.schedule, livePerformanceEvents: session.livePerformanceEvents,
   }), session.liveAudioPolicy);
   const summary = {
@@ -805,7 +805,7 @@ export class JukeLoopSession {
     * @param {() => void} [opts.onTerminalDisconnect] - Called after Discord voice recovery fails
    */
     constructor({ voiceChannel, textChannel, client, ipfsGateway, onTerminalDisconnect, djuke, devertPlayback,
-      schedule, livePerformanceEvents, audioPlayer, createStream, mainRadioAdStateStore, restoreMainRadioAdState, saveMainRadioAdState,
+      schedule, livePerformanceEvents, getRadioSchedule, audioPlayer, createStream, mainRadioAdStateStore, restoreMainRadioAdState, saveMainRadioAdState,
       topTenHype, topTenHypeStore, playlistShow, playlistShowStore, isContentAllowed = () => true,
       audioReadyTimeoutMs = NEXT_TRACK_READY_TIMEOUT_MS, websitePlayback = false, durationBackfill, publicBroadcast }) {
     this.websitePlayback = websitePlayback;
@@ -846,6 +846,7 @@ export class JukeLoopSession {
     this._failedDevertCampaigns = new Map();
     this._lastMainRadioAdSkip = null;
     this.schedule     = Array.isArray(schedule) ? schedule : defaultRadioSchedule();
+    this.getRadioSchedule = getRadioSchedule;
     this.livePerformanceEvents = Array.isArray(livePerformanceEvents) ? livePerformanceEvents : [];
     this._liveEventId = null;
     this._unbookedLiveOccurrenceId = null;
@@ -1191,6 +1192,11 @@ export class JukeLoopSession {
   }
 
   _resolveShow(now = Date.now()) {
+    const current = this.getRadioSchedule?.();
+    if (current) {
+      this.schedule = current.schedule;
+      this.livePerformanceEvents = current.events;
+    }
     return applyLiveAudioShow(resolveActiveShow({ now, schedule: this.schedule,
       livePerformanceEvents: this.livePerformanceEvents }), this.liveAudioPolicy);
   }
@@ -1266,7 +1272,8 @@ export class JukeLoopSession {
       }
       if (show.type === 'playlist_show') {
         this._playlistShow.ensure(show, getPlaylist()).catch(error => console.warn('[playlist-show]', error.message));
-        this._sendPlaybackNotice(`📻 **${show.label}** · Vote up OR down! The opening pool is shuffled; voted songs are dropped before their turn.`);
+        const definition = radioPlaylistDefinition(show.playlistId, show.playlistDefinition);
+        this._sendPlaybackNotice(`📻 **${show.label}** · ${definition.rule} ${definition.invitation}`);
       }
       if (show.instanceId && show.id === 'friday-top10-hype') {
         this._ensureTopTenHype(show).catch(error => console.error('[top10-hype] Opening chart blocked:', error.message));

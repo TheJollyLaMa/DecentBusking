@@ -14,7 +14,7 @@ const START = Date.parse('2026-10-23T01:00:00Z');
 const event = { id: 'tonight', type: 'playlist_show', playlistId: 'songs-awaiting-your-vote', title: 'Songs Awaiting Your Vote',
   startUtc: new Date(START).toISOString(), endUtc: new Date(START + 3600_000).toISOString() };
 
-async function fixture(t, { count = 2, voted = false, store: customStore, showEvent = event, seconds = 180 } = {}) {
+async function fixture(t, { count = 2, voted = false, store: customStore, showEvent = event, seconds = 180, getRadioSchedule } = {}) {
   let now = START;
   t.mock.method(Date, 'now', () => now);
   const { JukeLoopSession, buildRadioState, buildNowPlayingMessage, synchronizeDiscordRating } = await import('../discord-bot/jukeloop.js');
@@ -33,7 +33,7 @@ async function fixture(t, { count = 2, voted = false, store: customStore, showEv
   let paidCalls = 0;
   let adCalls = 0;
   const session = new JukeLoopSession({ voiceChannel: { guild: { id: 'playlist-runtime-test' } }, client: {},
-    livePerformanceEvents: [showEvent], audioPlayer: player, playlistShowStore: store,
+    livePerformanceEvents: [showEvent], getRadioSchedule, audioPlayer: player, playlistShowStore: store,
     createStream: () => { const stream = new PassThrough(); stream.write(Buffer.alloc(100));
       const ffmpegProcess = new EventEmitter(); ffmpegProcess.kill = () => stream.destroy(); return { stream, ffmpegProcess }; },
     djuke: { nextPaid: async () => { paidCalls++; return null; } },
@@ -65,6 +65,34 @@ test('a long recording finishes past its slot and Top10 boundary; completion, no
   await f.session._collectReactions();
   assert.equal(f.value().occurrences[0].cursor, 1);
   assert.equal(f.value().occurrences[0].lastCompleted.trackId, trackId);
+});
+
+test('website runtime reads the durable schedule source after save/restore and actually admits only intact Long-Form tracks', async t => {
+  const { serializeLiveSchedule, deserializeLiveSchedule, defaultRadioSchedule } = await import('../js/radio-schedule.mjs');
+  let saved = { events: [], weeklySchedule: {} };
+  const f = await fixture(t, { seconds: 1200, getRadioSchedule: () => ({
+    schedule: defaultRadioSchedule(saved.weeklySchedule), events: saved.events,
+  }) });
+  f.setNow(Date.parse('2026-11-27T20:44:00Z'));
+  f.loadPlaylist([...f.getPlaylist(), verifiedRecording({ trackId: 'ordinary', title: 'Ordinary', likes: 0, dislikes: 0 }, 180)]);
+  assert.equal(f.session.getShowState().activeShow.type, 'normal_rotation');
+  saved = deserializeLiveSchedule(serializeLiveSchedule({ events: [], weeklySchedule: { programs: [
+    { id: 'program-saved-long', title: 'Saved Long-Form', playlistId: 'long-form-hour',
+      weekday: 5, startMinuteLocal: 900, startDateLocal: '2026-11-27', announce: true },
+  ] } }));
+  assert.equal((await f.session.getMainRadioAdCountdown()).activeShow.type, 'playlist_show');
+  assert.equal(f.session.getShowState().activeShow.playlistId, 'long-form-hour');
+  const notices = [];
+  f.session._sendPlaybackNotice = message => notices.push(message);
+  f.session._syncScheduledShow({ requestPlayback: false });
+  assert.match(notices.join(' '), /strictly longer than 10 minutes, played intact/);
+  assert.doesNotMatch(notices.join(' '), /voted songs are dropped/);
+  await f.session._playNext();
+  assert.equal(f.heard.length, 1);
+  assert.notEqual(f.heard[0], 'ordinary');
+  assert.equal(f.session._nowPlaying.playlistShow.fallback, false);
+  assert.equal(f.value().occurrences[0].playlistId, 'long-form-hour');
+  assert.equal(f.value().occurrences[0].cursor, 0, 'long tracks advance on completed playback, not admission');
 });
 
 test('long recordings that cannot finish before a protected live event yield to short fallback without losing attribution', async t => {

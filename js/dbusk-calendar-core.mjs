@@ -58,7 +58,8 @@ export function publicCalendarData(schedule, promotions) {
   const events = (schedule?.events || []).filter(event =>
     !event.private && !event.draft && event.published !== false && [undefined, 'scheduled', 'published', 'cancelled'].includes(event.status))
     .map(event => ({ id: event.id, title: event.title, startUtc: event.startUtc, endUtc: event.endUtc,
-      type: event.type || 'live_performance', status: event.status, cancellationReason: event.cancellationReason }));
+      type: event.type || 'live_performance', status: event.status, cancellationReason: event.cancellationReason,
+      calendarHidden: event.calendarHidden === true }));
   const rules = (schedule?.schedule || []).filter(rule =>
     !rule.private && !rule.draft && rule.published !== false && [undefined, 'scheduled', 'published'].includes(rule.status))
     .map(rule => Object.fromEntries(['id', 'label', 'type', 'weekday', 'window', 'startMinuteLocal', 'endMinuteLocal',
@@ -80,10 +81,10 @@ export function publicCalendarEvents(data, range, { now = Date.now(), showPastRu
     { now: start, days: days + 1, pastDays: 1 });
   const recordedIds = new Set(recorded.map(event => event.id));
   return [
-    ...recorded.map(event => ({ ...event, audience: 'public', provenance: 'ipfs-record',
+    ...recorded.filter(event => !event.calendarHidden).map(event => ({ ...event, audience: 'public', provenance: 'ipfs-record',
       status: event.status === 'cancelled' ? 'cancelled' : 'scheduled', archived: Date.parse(event.endUtc) <= now,
       details: event.cancellationReason ? [event.cancellationReason] : [] })),
-    ...recurrence.filter(event => !recordedIds.has(event.id) && (showPastRules || Date.parse(event.startUtc) >= now) &&
+    ...recurrence.filter(event => !recordedIds.has(event.id) && (showPastRules || Date.parse(event.endUtc) > now) &&
       !recorded.some(record => (record.type || 'live_performance') === event.type &&
         Date.parse(record.startUtc) < Date.parse(event.endUtc) && Date.parse(record.endUtc) > Date.parse(event.startUtc)))
       .map(event => ({ ...event, audience: 'public', provenance: 'current-rule', status: 'scheduled',

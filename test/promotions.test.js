@@ -73,6 +73,23 @@ test('pinner pilot persists only as a capped ETH draft with an unconfigured NFT 
   assert.throws(() => validatePromotionCheckpoint(invalid), /Invalid promotions checkpoint/);
   await assert.rejects(f.create(input({ template: 'pinner', asset: 'eth', maxAwards: 6, draftQuote, ...amounts })), /five.*25/);
 });
+
+test('custom campaign drafts reuse the promotion checkpoint and are publicly browsable without approving rewards or copying settlement state', async () => {
+  const f = await fixture();
+  const custom = await f.create(input({ template: 'custom', title: 'Community workshop', criteria: 'Workshop evidence reviewed by steward' }));
+  assert.equal(custom.status, 'draft');
+  const publicState = await f.service.publicState();
+  assert.equal(publicState.campaigns.find(c => c.id === custom.id).template, 'custom');
+  const { validatePromotionCheckpoint, createPromotions } = await import('../discord-bot/promotions.js');
+  assert.doesNotThrow(() => validatePromotionCheckpoint(f.stored()));
+  const restored = createPromotions({ ...f.cfg, restore: async () => f.stored() });
+  assert.equal((await restored.publicState()).campaigns.find(c => c.id === custom.id).criteria, custom.criteria);
+  const duplicate = await f.create(input({ template: 'custom', title: custom.title, criteria: custom.criteria }));
+  assert.notEqual(duplicate.id, custom.id);
+  assert.equal(duplicate.status, 'draft');
+  assert.equal(duplicate.paidUnits, '0');
+  await assert.rejects(f.exec({ action: 'save', campaign: input({ template: 'custom' }) }, alice), /owner|admin/i);
+});
 async function matchFixture({ slots = 1, gifts = [], rewards, stock = 11n } = {}) {
   const musician = Wallet.createRandom();
   const f = await fixture({ readPlaylist: () => [{ trackId: 'match-track', title: 'Trial song', mintStatus: 'minted', tokenId: '7',

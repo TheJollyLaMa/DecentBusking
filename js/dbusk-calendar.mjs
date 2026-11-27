@@ -254,7 +254,7 @@ export function mountDBuskCalendar(root, { dialog, status, serviceUrl, fetchImpl
     if (event.audience === 'personal' || event.attention) el.append(node('span',
       `${event.audience === 'personal' ? '◈ For you' : ''}${event.attention ? ` · ✦ ${event.attention.split(' · ')[0]}` : ''}`,
       event.attention ? 'dbcal-action-badge' : 'dbcal-personal-badge'));
-    if (event.status === 'cancelled') el.append(node('span', '⊘ Cancelled'));
+    if (event.status === 'cancelled') el.append(node('span', 'Canceled', 'dbcal-cancel-stamp'));
     if (event.projectedPast) el.append(node('small', 'Rule projection'));
     return el;
   }

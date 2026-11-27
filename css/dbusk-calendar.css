@@ -31,7 +31,8 @@
 .dbcal-event strong { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .dbcal-event.is-personal { border-color: #d5a8ff; background: #4b3b67; }
 .dbcal-personal-badge, .dbcal-action-badge { font-size: .65rem; font-weight: 700; }
-.dbcal-event.is-cancelled { opacity: .7; text-decoration: line-through; border-color: #ffb5ae; }
+.dbcal-event.is-cancelled { position: relative; opacity: .8; border-color: #ff5555; }
+.dbcal-cancel-stamp { position: absolute; left: 20%; top: 20%; border: 2px solid currentColor; padding: 2px 6px; color: #ff5555; font-weight: 900; transform: rotate(-45deg); pointer-events: none; }
 .dbcal-event.is-projection { opacity: .65; border-style: dashed; }
 .dbcal-bars { gap: 4px 0; padding: 5px 0; }
 .dbusk-calendar[data-mode=week] .dbcal-bars { position: sticky; top: 42px; z-index: 3; background: #182435; }

@@ -358,10 +358,17 @@ Friday's **Top 10 Hype Hour** (8-9 p.m. America/New_York by default) plays a che
 
 ### Announcing a radio hour to Discord (owner only)
 
-**Left ankh → Radio Programming** opens the standalone calendar directly, not
+**Left ankh → ⚸ 🗓️ Admin DCal ⨘ 🜐** opens the standalone calendar directly, not
 the Admin panel. The calendar retains owner-wallet and contract-role checks;
-the right-ankh schedule remains the public view. Drag **🤝 Referral campaign**
-onto a day to open the compact campaign editor. Set the budget, per-musician
+the right-ankh schedule remains the public view. Select a radio preset and drag
+the single radio button to a time; clicks and moves open centered decision
+dialogs before saving. Active weekly hours remain on the public calendar.
+Choose a campaign preset (including reusable saved campaigns or **Custom**) and
+click the campaign control's selected title to choose, then drag that same text onto a day. Browsing campaigns is unsigned;
+protected writes and payments still use the existing authorization controls.
+**🎤 Live Performance** opens the existing invitation/escrow workflow, not a
+second booking system. See [Admin DCal](docs/ADMIN-DCAL.md) for cancellation
+impacts, subscriptions and verification limits. Set the budget, per-musician
 breakdown, vote count and named referrers there. **Run Campaign** funds
 `dbusk-referrals` if needed, signs once, and places a continuous bar across the
 week. Campaigns can run in USDC or ETH, with a ≈ USD estimate shown for ETH, and
