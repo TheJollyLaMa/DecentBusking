@@ -152,7 +152,9 @@ aliases keep cached header/About/tutorial entry points on one contribution UI.
 It temporarily shows USDC so every fund is represented, then restores the prior currency. It
 does not connect a wallet, fill contribution amounts or request transactions.
 Only Playback/Top10 describe weekly artist allocations; work/booking/campaign
-funds follow their own approvals, and public pinner rewards remain inactive.
+funds follow their own approvals. Approved, qualifying pinners have a separate
+weekly Base USDC reward path; see [Earn by Pinning](../wiki/Earn-by-Pinning.md)
+and the live IPFS panel for current status.
 New funds use their metadata `description` and optional text `earningRules`
 (up to 2000 characters); missing rules explicitly make no weekly reward promise.
 Newly discovered funds enter the chart, selector, splits and guide together.

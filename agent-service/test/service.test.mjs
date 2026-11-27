@@ -31,6 +31,7 @@ async function fixture(t, options = {}) {
   let time = Date.now();
   const server = createAgentServer(settings, { modelCall, ...(options.chainRead ? { chainRead: options.chainRead } : {}),
     ...(options.billingFetch ? { billingFetch: options.billingFetch } : {}),
+    ...(options.musicRead ? { musicRead: options.musicRead } : {}),
     now: () => time, logger: { error: message => logs.push(message) } });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -297,6 +298,55 @@ test('direct API access requires origin, session and explicit consent', async t 
   assert.equal((await f.request('/chat', { message: 'hello' }, session.token)).status, 400);
   assert.equal((await f.request('/chat', { message: 'x'.repeat(2001), consent: true }, session.token)).status, 400);
   assert.equal(f.calls.length, 0);
+});
+
+test('music questions use live public evidence; ordinary questions do not', async t => {
+  let musicReads = 0;
+  const f = await fixture(t, {
+    musicRead: async () => {
+      musicReads++;
+      return [
+        { id: 'live-music-test', kind: 'live-music', file: 'Live DecentBusking music catalog',
+          line: 1, url: 'https://decentbusking.onrender.com/api/nfts?offset=0&limit=25',
+          text: '{"newestTracks":[{"title":"Truckin"}]}' },
+        { id: 'live-radio-test', kind: 'live-music', file: 'Live DecentBusking radio now-playing',
+          line: 1, url: 'https://decentbusking.onrender.com/api/radio',
+          text: '{"nowPlaying":{"title":"China Cat Rider"}}' },
+      ];
+    },
+    modelCall: async input => {
+      const liveSources = input.sources.filter(item => item.kind === 'live-music');
+      const citations = input.messages.at(-1).content.includes('latest songs') ? liveSources : [input.sources[0]];
+      if (input.messages.at(-1).content.includes('latest songs')) assert.equal(citations.length, 2);
+      return { answer: 'The current catalog and radio data are available.', abstained: false, review: 'ready',
+        sources: citations.map(source => ({ id: source.id, file: source.file, line: source.line, url: source.url })) };
+    },
+  });
+  const session = await f.login();
+  const response = await f.request('/chat', {
+    message: 'What are the latest songs and albums on the radio?', consent: true,
+  }, session.token);
+  assert.equal(response.status, 200);
+  assert.equal(response.body.sources[0].file, 'Live DecentBusking music catalog');
+  assert.equal(response.body.sources[1].file, 'Live DecentBusking radio now-playing');
+  assert.equal(musicReads, 1);
+
+  const other = await f.login(f.other);
+  const ordinary = await f.request('/chat', { message: 'How do payroll funds work?', consent: true }, other.token);
+  assert.equal(ordinary.status, 200);
+  assert.equal(musicReads, 1);
+});
+
+test('music questions fail closed when live services are unavailable', async t => {
+  let modelCalls = 0;
+  const f = await fixture(t, { musicRead: async () => { throw new Error('private upstream details'); },
+    modelCall: async () => { modelCalls++; throw new Error('must not run'); } });
+  const session = await f.login();
+  const response = await f.request('/chat', { message: 'What is playing now?', consent: true }, session.token);
+  assert.equal(response.status, 503);
+  assert.match(response.body.error, /Live music details are temporarily unavailable/);
+  assert.equal(modelCalls, 0);
+  assert.doesNotMatch(f.logs.join('\n'), /private upstream details/);
 });
 
 test('conversations stay isolated and clearing a session destroys its history', async t => {

@@ -97,6 +97,33 @@
     "files": ["docs/PAYROLL.md", "js/top-ten-prizes.mjs", "js/radio-payroll.mjs", "js/fund-tour.mjs"]
   },
   {
+    "id": "earning-paths",
+    "entryFiles": ["agent-service/handoff/participation.md", "docs/PAYROLL.md", "docs/LIVE_PERFORMANCE_RUNBOOK.md", "wiki/Earn-by-Pinning.md", "docs/BUG_REPORTS.md", "docs/PROMOTIONS.md", "docs/DVERT-PAID-QUEUE.md"],
+    "entryEvidence": {
+      "agent-service/handoff/participation.md": "## Preserving the shared signal: IPFS pinning",
+      "docs/PAYROLL.md": "### Weekly Artist Payments",
+      "docs/LIVE_PERFORMANCE_RUNBOOK.md": "## Settlement mode",
+      "wiki/Earn-by-Pinning.md": "## At a glance",
+      "docs/BUG_REPORTS.md": "## Owner review and complete closeout",
+      "docs/PROMOTIONS.md": "## Funding and offers",
+      "docs/DVERT-PAID-QUEUE.md": "## Agreed policy"
+    },
+    "aliases": ["earn money", "make money", "where can i earn", "ways to earn", "earning opportunities", "earn around here", "get paid around here", "how do i get paid", "how can i get paid", "paid for helping", "money around here"],
+    "terms": ["artist playback Top10 weekly fund eligibility qualified plays votes settlement payment report issue bug catcher bounty contributor developer tester pinner pinning IPFS availability live performance performer booking referral referrals promotion promotions promotional campaign DVert advertiser advertising ads"],
+    "files": ["docs/PAYROLL.md", "docs/BUG_REPORTS.md", "wiki/Earn-by-Pinning.md", "docs/PINNER-NETWORK.md", "docs/LIVE_PERFORMANCE_RUNBOOK.md", "docs/DVERT-PAID-QUEUE.md", "docs/PROMOTIONS.md", "README.md", ".github/ISSUE_TEMPLATE/whitelist-request.yml"]
+  },
+  {
+    "id": "music-catalog",
+    "entryFiles": ["README.md", "docs/DJUKE-ROLLOUT.md"],
+    "entryEvidence": {
+      "README.md": "The archive initially loads the latest 25 music NFTs.",
+      "docs/DJUKE-ROLLOUT.md": "The browser fetches only the first 25."
+    },
+    "aliases": ["latest songs", "latest music", "newest songs", "new music", "latest tracks", "latest albums", "new albums", "recently added music", "latest additions", "latest uploads", "what songs have we added", "what albums did we add", "music just added", "what songs are on the radio", "whats on the radio", "what s on the radio", "what is playing now", "what s playing", "what s playing right now", "whats playing", "who is playing right now", "now playing", "current song", "browse music", "music archive", "latest artists"],
+    "terms": ["verified music NFT catalog newest minted title artist release album live radio now playing current song music archive latest 25"],
+    "files": ["README.md", "docs/DJUKE-ROLLOUT.md", "docs/DJUKE-PLAYLISTS.md", "js/nft-loader.js", "js/space.js"]
+  },
+  {
     "id": "tutorial",
     "entryFiles": ["js/tutorial.js", "js/fund-tour.mjs"],
     "aliases": ["bunny", "rabbit", "tutorial", "tutorials", "walkthrough", "show me around"],

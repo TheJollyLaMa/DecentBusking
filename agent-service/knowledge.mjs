@@ -126,7 +126,8 @@ export function createRetriever(sources, topics = []) {
       perFile.set(source.file, (perFile.get(source.file) || 0) + 1);
     };
     // Keep reviewed entry points visible instead of drowning short forms in code matches.
-    for (let index = 0; index < 2; index++) {
+    const entryDepth = Math.max(0, ...matches.map(({ topic }) => topic.entryFiles?.length || 0));
+    for (let index = 0; index < entryDepth; index++) {
       for (const { topic } of matches) {
         const file = topic.entryFiles?.[index];
         const evidence = topic.entryEvidence?.[file];

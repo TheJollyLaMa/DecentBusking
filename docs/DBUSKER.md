@@ -652,13 +652,16 @@ Human factual evaluation remains essential.
 
 ## Community context and updating knowledge
 
-The central frame is **how people participate and how value reaches them**:
+The central frame is **how people participate and how value reaches them**.
+For a quick, current map of earning and contribution routes, use the
+[participation handoff](../agent-service/handoff/participation.md).
 
 - Repo development: a useful issue/test, agreed bounty, contributor request,
   accepted work, queue and owner-authorized settlement are separate stages.
-- IPFS: additional available community copies are useful, but at the indexed
-  baseline the UI explicitly marks availability rewards **not active**. An
-  allocation algorithm or funded pinner pot is not a public payout program.
+- IPFS: additional available community copies are useful. The current public
+  guide documents weekly Base USDC rewards for approved, qualifying pinners;
+  use the live IPFS panel for current node health and eligibility. A source
+  snapshot cannot establish a visitor's status or guarantee a future payout.
 - Top 10, Playback and Live Performance: explain their distinct qualification,
   allocation, review, funding, escrow/earmark and actual transfer/claim stages.
 - DVert: distinguish campaigns and optional priority from settled fund deposits,
@@ -669,6 +672,13 @@ The central frame is **how people participate and how value reaches them**:
   walkthrough are actual teaching sources, not invented UI instructions.
 - Independent communities: help people learn enough to maintain their own
   beacon while respecting artists, attribution and operational independence.
+
+For music questions, DBusker also reads the public, newest-first music catalog
+and radio now-playing endpoint on demand. It receives at most the latest 25
+catalog entries plus the current radio state, with their service timestamps.
+This is not a complete archive search or a claim that every catalog item is
+currently playing. If either live endpoint is unavailable or malformed, the
+current-music answer fails closed instead of falling back to an old snapshot.
 
 ### Jolly, the seed, and handing responsibility onward
 
@@ -780,11 +790,12 @@ The byte check uses the exact serialized instructions/input shape sent to
 Responses, including the evidence wrapper and JSON escaping; fixed request
 options and the output schema are outside that context ceiling.
 
-Repo discussions, current issue/PR contents, live balances/deployments, other
-repositories and uncommitted work are not included. Stale or conflicting
-version/deployment claims in public docs must be identified, not reconciled by
-guessing. Public Git history cannot establish whether a current bounty or a
-specific payout is available.
+Apart from the bounded public catalog and radio state described above, repo
+discussions, current issue/PR contents, live balances/deployments, other
+repositories and uncommitted work are not included. Music access is not a full
+archive search. Stale or conflicting version/deployment claims in public docs
+must be identified, not reconciled by guessing. Public Git history cannot
+establish whether a current bounty or a specific payout is available.
 
 From `agent-service`, after fetching public `origin/main`:
 

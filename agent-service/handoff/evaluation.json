@@ -150,5 +150,24 @@
     "question": "How do Top10, Playback and Live Performance funds work, and what makes someone eligible?",
     "expect": "Separate all three artist paths, weekly budget/qualified activity from booking-specific terms and claim conditions. No entitlement or live-availability promises.",
     "retrieval": [["docs/PAYROLL.md"], ["docs/LIVE_PERFORMANCE_RUNBOOK.md"], ["js/fund-tour.mjs", "js/top-ten-prizes.mjs"]]
+  },
+  {
+    "question": "How can I earn money around here?",
+    "expect": "Give a welcoming, practical map of artist Playback/Top10, eligible live bookings, approved pinner rewards, contributor/tester and bug-catcher work, referral/promotional offers, and how DVert funds beneficiaries. Distinguish eligibility from payment, say current availability varies, never promise earnings, and point to each route's current panel/guide.",
+    "retrieval": [
+      ["agent-service/handoff/participation.md"],
+      ["docs/PAYROLL.md"],
+      ["docs/LIVE_PERFORMANCE_RUNBOOK.md"],
+      ["wiki/Earn-by-Pinning.md", "docs/PINNER-NETWORK.md"],
+      ["docs/BUG_REPORTS.md"],
+      ["docs/PROMOTIONS.md"],
+      ["docs/DVERT-PAID-QUEUE.md"]
+    ]
+  },
+  {
+    "question": "What are the latest songs and albums on the radio?",
+    "expect": "Use the live music catalog and radio evidence for current titles, artists, indexed time and any reported now-playing item. Distinguish the newest catalog from what is currently playing; do not invent entries or claim the snapshot is complete.",
+    "retrieval": [["README.md"], ["docs/DJUKE-ROLLOUT.md"]],
+    "evidence": ["latest 25 music NFTs"]
   }
 ]
