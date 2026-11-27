@@ -118,6 +118,7 @@ export function buildFundWeeklyArchive({ fundSlug, fund, weeklyPayflow = {}, now
   const orderedWeeks = [...weeks.values()].sort((first, second) => second.period.startAt.localeCompare(first.period.startAt));
   const unmatchedPayouts = payouts.filter(payout => !matchedPayouts.has(payout));
   return { fundSlug, weeks: orderedWeeks, unmatchedPayouts,
+    payoutsAvailable: fund?.payoutsAvailable !== false,
     unmatchedPaidUnits: unmatchedPayouts.reduce((sum, payout) => sum + parseBigInt(payout.amountUnits), 0n).toString(),
     currentWeek: weeklyPayflow.currentPeriod || null, now };
 }

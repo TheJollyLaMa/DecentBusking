@@ -46,3 +46,45 @@
   .playback-controls { gap: .3rem; }
   #playback-explorer select { padding-inline: .15rem; }
 }
+
+#playback-week { border-top: 1px solid var(--panel-border); }
+#playback-week h3 { font-size: 1.05rem; margin: 1rem 0 .4rem; }
+.playback-week-nav { display: flex; justify-content: center; align-items: end; gap: .6rem; padding-top: .8rem; }
+.playback-week-nav label { display: grid; gap: .2rem; min-width: 0; color: var(--text-dim); font-size: .75rem; }
+.playback-week-nav select { max-width: 100%; }
+.playback-week-nav button, .playback-week-nav select, .playback-previous-week {
+  min-height: 36px; border: 1px solid var(--panel-border); border-radius: 6px;
+  color: var(--text-primary); background: #131b21; padding: .3rem .6rem; font: inherit;
+}
+.playback-week-nav button:disabled { opacity: .35; }
+.playback-week-scores { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; padding: 1rem 0; }
+.playback-week-scores > div { display: grid; gap: .2rem; }
+.playback-week-scores strong, .playback-week-money strong { color: var(--teal); font-size: 1.7rem; font-variant-numeric: tabular-nums; }
+.playback-week-scores span, .playback-week-money span { color: var(--text-dim); font-size: .8rem; }
+.playback-week-chart { margin: .4rem 0 1.1rem; background: linear-gradient(165deg,#102827,#11171e); padding: .6rem; border-radius: 8px; }
+.playback-week-chart svg { width: 100%; display: block; min-height: 110px; overflow: visible; }
+.playback-week-chart path { stroke: var(--teal,#60d4b5); stroke-width: 2; fill: none; vector-effect: non-scaling-stroke; }
+.playback-week-chart circle { fill: var(--teal,#60d4b5); stroke: var(--teal,#60d4b5); stroke-width: 2; }
+.playback-week-chart circle.partial { fill: #102827; }
+.playback-week-days { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: .15rem; }
+.playback-day { display: grid; gap: .3rem; padding: .45rem .1rem; background: none; color: var(--text-dim); border: 1px solid transparent; border-radius: 4px; cursor: pointer; min-width: 0; }
+.playback-day strong { color: var(--text-primary); font-size: .9rem; font-variant-numeric: tabular-nums; }
+.playback-day[aria-pressed=true] { border-color: var(--teal); background: #60d4b511; }
+.playback-day:focus-visible { outline: 2px solid var(--gold); }
+.playback-week-readout { font-size: .8rem; min-height: 2.4em; margin-top: .7rem; }
+.playback-week-chart small, .playback-week-eyebrow { color: var(--text-dim); font-size: .7rem; }
+.playback-day-songs ul { max-height: 10rem; overflow: auto; font-size: .8rem; padding-left: 1.2rem; line-height: 1.7; }
+.playback-week-funding { border-top: 1px solid var(--panel-border); padding-top: .3rem; }
+.playback-week-receipts { border-top: 1px solid var(--panel-border); }
+.playback-week-paid-date { font-size: .8rem; color: var(--text-primary); margin-top: .2rem; }
+.playback-week-money { display: grid; gap: .25rem; padding: .6rem 0; }
+.playback-week-pending { color: var(--gold); font-size: .85rem; }
+.playback-payees { list-style: none; padding: 0; margin: .6rem 0; max-height: 22rem; overflow-y: auto; }
+.playback-payees li { padding: .75rem 0; border-bottom: 1px solid var(--panel-border); }
+.playback-payee-heading { display: flex; justify-content: space-between; gap: .75rem; align-items: baseline; font-size: .82rem; }
+.playback-payee-heading span { overflow-wrap: anywhere; min-width: 0; }
+.playback-payee-heading strong { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.playback-payees a, .playback-payees small { display: block; font-size: .72rem; margin-top: .35rem; line-height: 1.5; }
+.playback-payees a { color: var(--teal); }
+.playback-share-rail { background: #263634; border-radius: 3px; height: 4px; margin: .5rem 0; overflow: hidden; }
+.playback-share-rail i { background: var(--teal,#60d4b5); height: 100%; display: block; border-radius: inherit; }

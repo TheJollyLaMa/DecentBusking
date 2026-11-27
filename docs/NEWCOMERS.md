@@ -155,13 +155,17 @@ You can request that we stop future playlist playback or unpin our copy; that do
 1. Connect the **same artist wallet used to receive your music NFT**.
 2. Click the **Right Ankh** at the top-right of the title.
 3. Choose **My Playbacks**. This opens **My Playback Tally**, filtered to the connected artist wallet.
-4. Start with **My songs**, then use **Choose songs** or **Album** to narrow the graph. Both **My Playbacks** and the public **Playback Tally** have the same **Period** filter: **Daily** (14 days), **4 / 8 / 12 weeks**, **Monthly** (12 months), or **All time**. Switching periods keeps your selection. A song in two albums still counts once.
+4. **Week in review** opens first: how many times your music aired, how many different songs played, and your Playback Fund money for that earning week. Tap a day beneath the line to see the songs. Use the week selector or arrows to look back.
+5. This week shows a **provisional estimate**, not a payment. Closed weeks show **USDC actually received**, any **allocated amount awaiting payment**, and dated BaseScan receipts. **Last week's plays & payments** takes you straight to the prior week. The public **Playback Tally** shows the same story for the station and all recipients.
+6. For album, song-group, or longer-range exploration, choose **Explore longer trends**. Its **Period** filter retains **Daily** (14 days), **4 / 8 / 12 weeks**, **Monthly** (12 months), and **All time**. A song in two albums still counts once.
 
-Dates use New York time. An airing counts on the date it **finishes** after at least 30 audible seconds. Weeks start Monday. A dash means no dated history, not zero; a striped bar is partial or in progress. Older weekly totals count toward a month only when the entire week fits. Net votes reflect site votes and observed Discord reaction changes, not a listener count.
+Dates use New York time. An airing counts on the date it **finishes** after at least 30 audible seconds. Weeks start Monday. Airings are not individual listeners: one song aired four times is four airings and one distinct song. A gap means no dated history, not zero. Hollow dots in the weekly line are partial or in progress. The longer-range chart uses stripes for incomplete bars. Older weekly totals count toward a month only when the entire week fits. Net votes reflect site votes and observed Discord reaction changes, not a listener count.
 
 Daily history starts with the retained checkpoint’s dated events and fills in as the station plays. Opening the chart does not scan old archives or use start times to guess missing finishes.
 
 **All time** shows the lifetime count and song ranking, including older Discord activity. The bars beneath it span all available dated weeks; they need not add up to the lifetime count. **Song totals** still shows lifetime likes and dislikes. **My funding estimates** is a separate view, not a playback metric or a payment receipt.
+
+The weekly money story covers the **Playback Fund only**, in Base USDC, not tips, Top 10 prizes, live-performance fees, or DJuke income. It groups payments by the radio week that earned them and shows the actual transfer date, which may be later. Missing allocations or indexing errors are shown as unavailable, not invented from airplay; mismatched or unmatched payment evidence is flagged. Wallet totals are not separate per-song payments.
 
 **You have reached this step when:** you can find your own song and distinguish its lifetime activity from the selected week's qualified plays. If the list is empty, check the wallet, the date/search filters, and **All Time** first. Counts are not a withdrawable balance; owner-reviewed payments need a funded budget.
 

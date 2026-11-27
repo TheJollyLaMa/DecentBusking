@@ -1473,8 +1473,10 @@ export function createWorkerRequestHandler({
         const history = await getRadioHistory({ weeks, wallet, includeAllTime, ...(calendar ? { calendar } : {}) });
         const catalog = requestUrl.searchParams.get('catalog') === '1' && getRadioHistoryCatalog
           ? await getRadioHistoryCatalog({ wallet }) : undefined;
+        const dayWeek = requestUrl.searchParams.get('dayWeek') || undefined;
+        if (dayWeek) payrollPeriodFromKey(dayWeek);
         const periods = requestUrl.searchParams.get('periods') === '1' && getAirplayCalendar
-          ? await getAirplayCalendar({ wallet }) : undefined;
+          ? await getAirplayCalendar({ wallet, ...(dayWeek ? { dayWeek } : {}) }) : undefined;
         sendJson(response, 200, { weeks: history, catalog, periods }, '*');
         return;
       }

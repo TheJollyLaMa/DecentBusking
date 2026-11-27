@@ -45,6 +45,7 @@ function historyPage(fetchImpl, funding) {
   const window = { _wallet: { address: walletA }, DecentConfig: { ipfsUploadServiceUrl: 'https://worker.example' } };
   const context = vm.createContext({ window, URLSearchParams, AbortSignal, setInterval: () => {},
     mountPlaybackExplorer: root => ({ clear: () => { root.textContent = ''; }, load: (_reports, _catalog, address) => { root.textContent = address || 'station'; } }),
+    mountPlaybackWeek: root => ({ clear: () => { root.textContent = ''; }, load: (_reports, _catalog, address) => { root.textContent = address || 'station'; } }),
     fetch: url => new URL(url).pathname === '/api/payroll/weekly'
     ? Promise.resolve({ ok: Boolean(funding), json: async () => funding || {} }) : fetchImpl(url),
     document: { getElementById: node, createElement: () => new Node(),
@@ -70,7 +71,9 @@ test('public Playback Tally stays global and its song/artist/date filters remain
   assert.equal(page.node('radio-history-title').textContent, 'Playback Tally');
   assert.equal(page.node('radio-history-rewards').hidden, true);
   assert.equal(page.node('radio-history-content').hidden, true);
-  assert.equal(page.node('playback-explorer').hidden, false);
+  assert.equal(page.node('playback-explorer').hidden, true);
+  assert.equal(page.node('playback-week').hidden, false);
+  assert.equal(page.node('playback-week').textContent, 'station');
   page.view('songs');
   assert.match(page.node('radio-history-content').textContent, /7 qualifying plays/);
   page.node('radio-history-search').value = 'Song A';
@@ -94,12 +97,14 @@ test('My Playback Tally uses only the connected wallet and refreshes on account 
   assert.equal(new URL(requests[0]).searchParams.get('wallet'), walletA);
   assert.equal(page.node('radio-history-title').textContent, 'My Playback Tally');
   assert.equal(page.node('playback-explorer').textContent, walletA);
+  assert.equal(page.node('playback-week').textContent, walletA);
   assert.equal(page.node('radio-history-rewards').hidden, true);
   page.window._wallet.address = walletB;
   page.events.get('wallet-connected')();
   assert.equal(new URL(requests[1]).searchParams.get('wallet'), walletB);
   page.window._wallet.address = null;
   page.events.get('wallet-disconnected')();
+  assert.equal(page.node('playback-week').textContent, '');
   assert.equal(page.node('radio-history-dialog').open, false);
   assert.equal(page.node('radio-history-rewards').hidden, true);
   await page.open('personal');
@@ -231,7 +236,8 @@ test('view selector shows a single surface and keeps the chart when returning fr
   const page = historyPage(async () => ({ ok: true, json: async () => ({ weeks: [report] }) }));
   await page.open('totals');
   const content = page.node('radio-history-content');
-  assert.equal(page.node('playback-explorer').hidden, false);
+  assert.equal(page.node('playback-explorer').hidden, true);
+  assert.equal(page.node('playback-week').hidden, false);
   page.view('songs');
   assert.equal(page.node('playback-explorer').hidden, true);
   assert.equal(section(content, 'artists'), undefined);

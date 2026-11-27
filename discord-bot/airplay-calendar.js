@@ -1,4 +1,4 @@
-import { currentPayrollPeriod, newYorkDay } from '../js/payroll-week.mjs';
+import { currentPayrollPeriod, newYorkDay, payrollPeriodFromKey } from '../js/payroll-week.mjs';
 
 const metrics = ['plays', 'votes'];
 const civil = day => new Date(`${day}T00:00:00Z`);
@@ -52,9 +52,11 @@ function addRows(rows, trackId, metric, value) {
 }
 
 // Reporting only: no IPFS traversal or changes to weekly accounting on a page open.
-export function buildAirplayCalendar(playlist, { wallet, now = Date.now() } = {}) {
+export function buildAirplayCalendar(playlist, { wallet, now = Date.now(), dayWeek } = {}) {
   const today = newYorkDay(now), first = monthStart(today, -11);
-  const firstDaily = shiftDay(today, -13);
+  if (dayWeek) payrollPeriodFromKey(dayWeek);
+  const firstDaily = dayWeek ? dayWeek.slice(3) : shiftDay(today, -13);
+  const lastDaily = dayWeek ? shiftDay(firstDaily, 6) : today;
   const days = new Map(), months = new Map();
   for (let day = first; day <= today; day = shiftDay(day, 1)) {
     days.set(day, { rows: new Map(), evidence: new Set() });
@@ -114,7 +116,7 @@ export function buildAirplayCalendar(playlist, { wallet, now = Date.now() } = {}
         if (Object.hasOwn(row, metric)) addRows(month.rows, row.trackId, metric, row[metric]);
       }
     }
-    if (day >= firstDaily) daily.push({ date: day, coverage, current: day === today, tracks: [...bucket.rows.values()] });
+    if (day >= firstDaily && day <= lastDaily) daily.push({ date: day, coverage, current: day === today, tracks: [...bucket.rows.values()] });
   }
   const monthly = [...months].map(([date, month]) => ({
     date, current: date === today.slice(0, 7), tracks: [...month.rows.values()],

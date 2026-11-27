@@ -978,13 +978,15 @@
     <div class="playback-nav">
       <span id="radio-history-context" class="radio-history-note"></span>
       <label><span class="sr-only">Tally view</span><select id="radio-history-view">
-        <option value="trends">Airplay trends</option>
+        <option value="week">Week in review</option>
+        <option value="trends">Explore longer trends</option>
         <option value="songs">Song totals</option>
         <option value="artists">Artist totals</option>
         <option value="adverts">Advert totals</option>
         <option value="funding" hidden>My funding estimates</option>
       </select></label>
     </div>
+    <section id="playback-week" aria-label="Weekly airplay and Playback Fund payments" hidden></section>
     <section id="playback-explorer" aria-label="Airplay trends" hidden>
       <div class="playback-controls">
         <label>Show<select id="playback-scope">
@@ -1416,8 +1418,8 @@
 
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
   <script type="module" src="js/payroll.js?v=20261126-pinner-dashboard"></script>
-  <link rel="stylesheet" href="css/playback-trends.css?v=20261126">
-  <script type="module" src="js/radio-history.js?v=20261126-airplay-trends"></script>
+  <link rel="stylesheet" href="css/playback-trends.css?v=20261127-weekly-story">
+  <script type="module" src="js/radio-history.js?v=20261127-weekly-story"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261124-public-personal"></script>
   <link rel="stylesheet" href="css/fund-tour.css?v=20261124-fund-bunny">
   <script type="module" src="js/fund-header.mjs?v=20261126-playback-help"></script>
