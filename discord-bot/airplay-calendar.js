@@ -30,19 +30,24 @@ export function seedDatedAirplay(playlist, journal = []) {
   const seen = new Set();
   for (const e of journal) {
     const track = tracks.get(e.trackId);
-    if (!track || !e.id) continue;
-    const play = e.type === 'play';
-    if (play ? !e.playId || e.qualified !== true || !Number.isFinite(e.audibleMs) || e.audibleMs < 30_000
-      : e.type !== 'vote' || (e.source === 'site' ? ![1, -1].includes(e.vote)
-        : e.source !== 'discord' || !Number.isSafeInteger(e.likesDelta) || !Number.isSafeInteger(e.dislikesDelta))) continue;
-    const time = Date.parse(play ? e.endedAt : e.source === 'discord' ? e.observedAt : e.occurredAt);
-    const count = play ? 1 : e.source === 'discord' ? e.likesDelta - e.dislikesDelta : e.vote;
-    if (!Number.isFinite(time) || !Number.isSafeInteger(count)) continue;
-    const key = JSON.stringify([e.trackId, e.type, play ? e.playId : e.id]);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    countDatedAirplay(track, newYorkDay(time), play ? 'plays' : 'votes', count);
+    const dated = datedAirplayEvent(e);
+    if (!track || !dated || seen.has(dated.key)) continue;
+    seen.add(dated.key);
+    countDatedAirplay(track, dated.day, dated.metric, dated.value);
   }
+}
+
+export function datedAirplayEvent(e) {
+  if (!e.trackId || !e.id) return null;
+  const play = e.type === 'play';
+  if (play ? !e.playId || e.qualified !== true || !Number.isFinite(e.audibleMs) || e.audibleMs < 30_000
+    : e.type !== 'vote' || (e.source === 'site' ? ![1, -1].includes(e.vote)
+      : e.source !== 'discord' || !Number.isSafeInteger(e.likesDelta) || !Number.isSafeInteger(e.dislikesDelta))) return null;
+  const time = Date.parse(play ? e.endedAt : e.source === 'discord' ? e.observedAt : e.occurredAt);
+  const value = play ? 1 : e.source === 'discord' ? e.likesDelta - e.dislikesDelta : e.vote;
+  if (!Number.isFinite(time) || !Number.isSafeInteger(value)) return null;
+  return { trackId: e.trackId, key: JSON.stringify([e.trackId, e.type, play ? e.playId : e.id]),
+    day: newYorkDay(time), metric: play ? 'plays' : 'votes', value };
 }
 
 function addRows(rows, trackId, metric, value) {
@@ -52,7 +57,7 @@ function addRows(rows, trackId, metric, value) {
 }
 
 // Reporting only: no IPFS traversal or changes to weekly accounting on a page open.
-export function buildAirplayCalendar(playlist, { wallet, now = Date.now(), dayWeek } = {}) {
+export function buildAirplayCalendar(playlist, { wallet, now = Date.now(), dayWeek, history = [] } = {}) {
   const today = newYorkDay(now), first = monthStart(today, -11);
   if (dayWeek) payrollPeriodFromKey(dayWeek);
   const firstDaily = dayWeek ? dayWeek.slice(3) : shiftDay(today, -13);
@@ -67,10 +72,21 @@ export function buildAirplayCalendar(playlist, { wallet, now = Date.now(), dayWe
   const since = starts('airplayTrackingSince'), weeklySince = starts('payrollTrackingStartedAt');
   const sinceDay = since && newYorkDay(Date.parse(since));
   const weeklySinceDay = weeklySince && newYorkDay(Date.parse(weeklySince));
+  const archived = new Map(history.map(day => [day.date, day]));
+  const archivedTracks = new Map();
+  for (const day of history) for (const row of day.tracks) {
+    if (!archivedTracks.has(row.trackId)) archivedTracks.set(row.trackId, {});
+    archivedTracks.get(row.trackId)[day.date] = { plays: row.plays };
+  }
   const weeks = new Map(), thisWeek = currentPayrollPeriod(now).week.slice(3);
   for (const track of playlist) {
     const inScope = !wallet || track.mintRecipient?.toLowerCase() === wallet.toLowerCase();
+    const dated = { ...archivedTracks.get(track.trackId) };
     for (const [day, counts] of Object.entries(track.airplayDays || {})) {
+      // Closed-day archive and live counters overlap; adding them would double-count.
+      dated[day] = { ...counts, ...(dated[day] ? { plays: Math.max(dated[day].plays, counts.plays || 0) } : {}) };
+    }
+    for (const [day, counts] of Object.entries(dated)) {
       const bucket = days.get(day);
       if (!bucket) continue;
       for (const metric of metrics) if (Object.hasOwn(counts, metric)) {
@@ -110,6 +126,7 @@ export function buildAirplayCalendar(playlist, { wallet, now = Date.now(), dayWe
       const observed = bucket.evidence.size > 0 || day === today;
       coverage[metric] = observed && sinceDay && day > sinceDay ? 'tracked'
         : (observed && day === sinceDay) || bucket.evidence.has(metric) ? 'partial' : 'missing';
+      if (metric === 'plays' && archived.has(day)) coverage.plays = archived.get(day).coverage;
       const weekly = covered.get(day)?.[metric];
       month[metric].push(weekly || coverage[metric]);
       if (!weekly) for (const row of bucket.rows.values()) {

@@ -53,6 +53,7 @@ export function createFundLedger({
   let scannedFrom = null;
   let scannedThrough = null;
   let lastCheckedAt = null;
+  let historyThrough = null;
   let lastError = '';
   let backupPending = false;
   let sources = [];
@@ -291,6 +292,7 @@ export function createFundLedger({
           scannedThrough = to;
         }
         lastCheckedAt = new Date(now()).toISOString();
+        historyThrough = scannedThrough;
         if (changed || previousCursor === null) backupPending = true;
         else if (scannedThrough !== previousCursor) {
           if (schedule && !backupPending) schedule(snapshot());
@@ -324,6 +326,7 @@ export function createFundLedger({
       payouts = payouts.filter(payout => normalizeAddress(payout.asset) === normalizeAddress(asset.address));
       if (scannedFrom != null && (!Number.isSafeInteger(scannedFrom) || scannedFrom < 0)) throw new Error('Invalid fund scan checkpoint');
       if (scannedThrough != null && (!Number.isSafeInteger(scannedThrough) || scannedThrough < scannedFrom - 1)) throw new Error('Invalid fund scan checkpoint');
+      historyThrough = Array.isArray(saved.payouts) ? scannedThrough : null;
     }
     return refresh();
   }
@@ -451,5 +454,19 @@ export function createFundLedger({
     };
   }
 
-  return { initialize, refresh, getState, getCurrentState: buildFundState };
+  function getHistoryState() {
+    const checked = Number.isFinite(Date.parse(lastCheckedAt)) && Number.isSafeInteger(historyThrough);
+    return {
+      schemaVersion: 1, ...evidence, chainId: 8453, routerAddress, ready: checked, lastCheckedAt, lastError, scannedThrough: historyThrough,
+      funds: Object.fromEntries(funds.map(fund => [fund.slug, {
+        ...fund,
+        sources: sources.filter(source => checked && source.slug === fund.slug && source.blockNumber <= historyThrough),
+        payouts: payouts.filter(payout => checked && payout.slug === fund.slug && payout.blockNumber <= historyThrough),
+        payoutsAvailable: checked && typeof provider.getLogs === 'function',
+        historyCheckedAt: lastCheckedAt,
+      }])),
+    };
+  }
+
+  return { initialize, refresh, getState, getHistoryState, getCurrentState: buildFundState };
 }

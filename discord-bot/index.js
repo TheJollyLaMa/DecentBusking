@@ -64,6 +64,7 @@ import { createFundLedger } from './fund-ledger.js';
 import { createWeeklyPayflow, findBlockAtOrBefore, readClosingFundBalance } from './weekly-payflow.js';
 import { createWeeklyPayrollReporter } from './weekly-payroll-report.js';
 import { currentPayrollPeriod, payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs';
+import historicalAirplay from '../data/radio-airplay-history.json' with { type: 'json' };
 
 import { loadConfig }    from './config.js';
 import { uploadToIPFS, createIpfsUploader }  from './ipfs.js';
@@ -2396,6 +2397,7 @@ async function main() {
       return removal;
     } : undefined,
     getFunds: async () => fundLedger.getCurrentState(),
+    getFundHistory: () => fundLedger.getHistoryState(),
     getEarnings: async ({ address }) => {
       const state = earningsLedger.getAddressState(address);
       if (!playlistReady || !state.entries.some(entry => entry.songId)) return state;
@@ -2478,7 +2480,7 @@ async function main() {
     onDevertLoopVote: payload => _devertLoopWorker ? _devertLoopWorker.submitVote(payload) : Promise.reject(new Error('VertLoop is not ready')),
     getAirplayCalendar: options => {
       if (!playlistReady) throw new Error('Radio history is still loading');
-      return buildAirplayCalendar(getPlaylist(), options);
+      return buildAirplayCalendar(getPlaylist(), { ...options, history: historicalAirplay.days });
     },
     getRadioHistoryCatalog: options => {
       if (!playlistReady) throw new Error('Radio catalog is still loading');

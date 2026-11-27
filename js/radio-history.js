@@ -1,7 +1,7 @@
 // Public totals from the Left Ankh and connected-wallet history from the Right Ankh.
 import { formatUsdcUnits as usdc } from './usdc-format.mjs?v=20261017-mercury-release';
 import { mountPlaybackExplorer } from './playback-trends.mjs';
-import { mountPlaybackWeek } from './playback-week.mjs';
+import { mountPlaybackWeek } from './playback-week.mjs?v=20261127-history-repair';
 
 let dialog;
 let weekSelect;

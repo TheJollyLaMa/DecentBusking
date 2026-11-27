@@ -350,6 +350,43 @@ test('history scan failure makes totals unavailable while independently healthy 
   assert.equal(fund.historyError, 'History RPC unavailable');
 });
 
+test('historical receipts survive failed refreshes without balance RPC or unverified scan progress', async () => {
+  const { createFundLedger } = await import(url);
+  const paid = new Interface(['event PayrollPaid(bytes32 indexed fundId, address indexed asset, address indexed recipient, uint256 amount, bytes32 workReference, bytes32 repositoryIdHash, bytes32 contributorIdHash, string metadataUri, bytes32 metadataHash)']);
+  const paymentLog = blockNumber => {
+    const encoded = paid.encodeEventLog('PayrollPaid', [id(funds.playback), usdc, `0x${'1'.repeat(40)}`, 1500000n,
+      id('work'), id('repo'), id('artist'), 'ipfs://receipt', id('metadata')]);
+    return { ...encoded, address: routerAddress, blockNumber, index: 0, transactionHash: `0x${String(blockNumber).padStart(64, '0')}` };
+  };
+  let head = 10, failed = false, balances = 0;
+  const provider = { getBlockNumber: async () => head, getBlock: async () => ({ timestamp: 1795444981 }),
+    getLogs: async ({ fromBlock }) => {
+      if (failed && fromBlock >= 12) throw new Error('RPC rate limited');
+      return [paymentLog(fromBlock)];
+    } };
+  const options = { provider, router: { target: routerAddress, fundBalances: async () => { balances++; return 0n; } },
+    startBlock: 10, chunkSize: 1, now: () => Date.parse('2026-11-23T15:00:00Z'),
+    config: { routerAddress, radioFunds: { playback: funds.playback }, assets: { USDC: { address: usdc } } } };
+  const ledger = createFundLedger(options);
+  assert.equal(ledger.getHistoryState().ready, false);
+  await ledger.initialize();
+  const checkpoint = structuredClone(ledger.getState());
+  balances = 0; head = 12; failed = true;
+  await assert.rejects(ledger.refresh(), /rate limited/);
+  const history = ledger.getHistoryState();
+  assert.equal(balances, 0, 'archive reads and failed refreshes do not fetch current balances');
+  assert.equal(history.ready, true);
+  assert.equal(history.scannedThrough, 10, 'a failed scan cannot advance the verified history watermark');
+  assert.equal(history.lastError, 'RPC rate limited');
+  assert.equal(history.funds[funds.playback].payoutsAvailable, true);
+  assert.equal(history.funds[funds.playback].payouts.length, 1);
+  assert.equal(history.funds[funds.playback].payouts[0].amountUnits, '1500000');
+  const restored = createFundLedger({ ...options, restore: () => checkpoint });
+  await assert.rejects(restored.initialize(), /rate limited/);
+  assert.equal(restored.getHistoryState().ready, true, 'restored receipts do not wait for the first fresh scan');
+  assert.equal(restored.getHistoryState().funds[funds.playback].payouts.length, 1);
+});
+
 test('public evidence filters other assets and backfills legacy deposits with missing asset identity', async () => {
   const { createFundLedger } = await import(url);
   const logs = [

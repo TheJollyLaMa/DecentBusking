@@ -314,6 +314,7 @@ export function createWorkerRequestHandler({
   getPaymentLedger,
   getTipLedger,
   getFunds,
+  getFundHistory,
   liveBookings,
   liveAudio,
   liveFeedback,
@@ -1346,11 +1347,13 @@ export function createWorkerRequestHandler({
           if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(fundSlug)) {
             sendJson(response, 400, { error: 'Invalid fund slug' }, '*'); return;
           }
-          if (!getFunds || !getWeeklyPayflow) {
+          if ((!getFundHistory && !getFunds) || !getWeeklyPayflow) {
             sendJson(response, 503, { error: 'Fund payout history is not configured' }, '*'); return;
           }
-          const [funds, weekly] = await Promise.all([readFunds(), getWeeklyPayflow({})]);
-          if (funds?.ready === false || weekly?.ready === false || funds?.lastError || weekly?.lastError) {
+          const [funds, weekly] = await Promise.all([getFundHistory ? getFundHistory() : readFunds(), getWeeklyPayflow({})]);
+          if (funds?.ready === false || (weekly?.ready === false && weekly.allocationsReady !== true) ||
+            (funds?.lastError && !(getFundHistory && Number.isFinite(Date.parse(funds.lastCheckedAt)))) ||
+            (weekly?.lastError && !Array.isArray(weekly.allocations))) {
             sendJson(response, 503, { error: 'Fund payout history is still indexing; retry shortly' }, '*'); return;
           }
           const fund = funds?.funds?.[fundSlug];
@@ -1362,6 +1365,8 @@ export function createWorkerRequestHandler({
           }
           const archive = buildFundWeeklyArchive({ fundSlug, fund, weeklyPayflow: weekly, now: now(),
             activity: Boolean(selectedWeek || requestUrl.searchParams.get('index')) });
+          archive.historyCheckedAt = fund.historyCheckedAt || funds.lastCheckedAt || null;
+          archive.refreshError = funds.lastError || weekly.lastError || '';
           if (selectedWeek) archive.weeks = archive.weeks.filter(week => week.week === selectedWeek);
           if (requestUrl.searchParams.get('index') === '1') {
             archive.weeks = archive.weeks.map(({ entries, sources, activityPayouts, ...summary }) => summary);

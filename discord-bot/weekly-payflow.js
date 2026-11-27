@@ -171,7 +171,7 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
       lastCheckedAt, lastError, backupPending, funds,
       accountingStartedAt: latestReports.find(report => report.current)?.accountingStartedAt || null,
       partial: Boolean(latestReports.find(report => report.current)?.partial),
-      allocations: allocations.filter(record => record.published) };
+      allocationsReady: ready, allocations: allocations.filter(record => record.published) };
     if (!wallet) return result;
     const key = wallet.toLowerCase();
     const totalPlays = (latestReports.find(report => report.current)?.tracks || []).reduce((sum, track) =>
