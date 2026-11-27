@@ -1,6 +1,7 @@
 // Public totals from the Left Ankh and connected-wallet history from the Right Ankh.
 import { formatUsdcUnits as usdc } from './usdc-format.mjs?v=20261017-mercury-release';
 import { mountPlaybackExplorer } from './playback-trends.mjs';
+import { mountPlaybackWeek } from './playback-week.mjs';
 
 let dialog;
 let weekSelect;
@@ -17,6 +18,7 @@ let toInput;
 let rewardsEl;
 let viewSelect;
 let explorer, explorerEl, historyReady;
+let weekStory, weekStoryEl;
 let fundingState = null;
 const openSections = new Map();
 let requestId = 0;
@@ -257,8 +259,9 @@ function renderWeek() {
 
 function refresh() {
   const view = viewSelect.value, snapshots = ['songs', 'artists', 'adverts'].includes(view);
+  weekStoryEl.hidden = !historyReady || view !== 'week';
   explorerEl.hidden = !historyReady || view !== 'trends';
-  document.getElementById('radio-history-snapshot').hidden = !historyReady || view === 'trends';
+  document.getElementById('radio-history-snapshot').hidden = !historyReady || ['week', 'trends'].includes(view);
   document.getElementById('radio-history-extra').hidden = !historyReady || !['songs', 'artists'].includes(view);
   weekSelect.parentElement.hidden = view === 'funding';
   rewardsEl.hidden = !historyReady || view !== 'funding' || mode !== 'personal';
@@ -279,11 +282,12 @@ async function openHistory(event) {
   fundingState = null;
   historyReady = false;
   explorer.clear();
+  weekStory.clear();
   openSections.clear();
   weekSelect.replaceChildren();
   searchInput.value = '';
   if (viewSelect) {
-    viewSelect.value = 'trends';
+    viewSelect.value = 'week';
     viewSelect.querySelector?.('option[value="funding"]')?.toggleAttribute?.('hidden', mode !== 'personal');
     viewSelect.querySelector?.('option[value="adverts"]')?.toggleAttribute?.('hidden', mode === 'personal');
   }
@@ -324,6 +328,7 @@ async function openHistory(event) {
     }
     weekSelect.value = (reports.find(report => report.week === 'all-time') || reports.at(-1)).week;
     explorer.load(reports, result.catalog, wallet, result.periods);
+    weekStory.load(reports, result.catalog, wallet, result.periods, service);
     historyReady = true;
     refresh();
   } catch (error) {
@@ -344,8 +349,10 @@ function init() {
   rewardsEl = document.getElementById('radio-history-rewards');
   viewSelect = document.getElementById('radio-history-view');
   explorerEl = document.getElementById('playback-explorer');
-  if (!dialog || !weekSelect || !content || !explorerEl) return;
+  weekStoryEl = document.getElementById('playback-week');
+  if (!dialog || !weekSelect || !content || !explorerEl || !weekStoryEl) return;
   explorer = mountPlaybackExplorer(explorerEl);
+  weekStory = mountPlaybackWeek(weekStoryEl);
   setInterval(() => {
     if (!dialog.open || !historyReady || viewSelect.value !== 'funding' || mode !== 'personal' || !wallet) return;
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
@@ -360,6 +367,7 @@ function init() {
     ++requestId;
     historyReady = false;
     explorer.clear();
+    weekStory.clear();
     reports = [];
     wallet = '';
     fundingState = null;
@@ -375,6 +383,7 @@ function init() {
     ++requestId;
     historyReady = false;
     explorer.clear();
+    weekStory.clear();
     fundingState = null;
     reports = [];
   });
