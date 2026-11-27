@@ -43,7 +43,6 @@ class CleanRightAnkh extends HTMLElement {
           text-align: left;
         }
         .wallet-btn:hover { opacity: 0.8; }
-        .calendar-icon { width: 16px; height: 16px; margin-right: 6px; vertical-align: -3px; filter: invert(1); }
       </style>
       <div class="ankh-wrapper">
         <div class="ankh-container">
@@ -52,7 +51,7 @@ class CleanRightAnkh extends HTMLElement {
               style="display:none;">
             <li class="wallet-item"><button class="wallet-btn" id="creator-profile-btn">Profile</button></li>
             <li class="wallet-item">
-                <button class="wallet-btn" id="radio-schedule-btn"><img class="calendar-icon" src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/calendar-days.svg" alt="" /> Public Schedule</button>
+                <button class="wallet-btn" id="radio-schedule-btn">☿🗓️ DCal ⨘ 🜐</button>
             </li>
             <li class="wallet-item">
               <button class="wallet-btn" id="radio-history-btn" style="display:none;">My Playbacks</button>

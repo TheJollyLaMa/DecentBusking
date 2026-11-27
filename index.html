@@ -61,7 +61,11 @@
       "./js/performer-room.mjs?v=20261110-wallet-practice":"./js/performer-room.mjs?v=20261117-booking-assets",
       "./js/performer-room.mjs?v=20261114-allocated-stage":"./js/performer-room.mjs?v=20261117-booking-assets",
       "./js/performer-room.mjs?v=20261116-curtain":"./js/performer-room.mjs?v=20261117-booking-assets",
-      "./js/radio-schedule-ui.mjs?v=20261025-community-reminder":"./js/radio-schedule-ui.mjs?v=20261124-public-personal",
+      "./js/radio-schedule-ui.mjs?v=20261025-community-reminder":"./js/radio-schedule-ui.mjs?v=20261127-dcal",
+      "./js/dbusk-calendar.mjs":"./js/dbusk-calendar.mjs?v=20261127-dcal",
+      "./js/dbusk-calendar-core.mjs":"./js/dbusk-calendar-core.mjs?v=20261127-dcal",
+      "./js/radio-calendar.mjs?v=20261024-programming-calendar":"./js/radio-calendar.mjs?v=20261127-dcal",
+      "./js/tutorial.js?v=20261123-split-admin-pies":"./js/tutorial.js?v=20261127-dcal",
       "./js/promotions-ui.mjs?v=20261116-promotions":"./js/promotions-ui.mjs?v=20261126-pinner-dashboard",
       "./js/promotions-ui.mjs?v=20261122-musician-referral":"./js/promotions-ui.mjs?v=20261126-pinner-dashboard",
       "./js/promotions-ui.mjs?v=20261126-eth-gifts":"./js/promotions-ui.mjs?v=20261126-pinner-dashboard",
@@ -96,7 +100,7 @@
     }}
   </script>
   <link rel="stylesheet" href="css/radio-programming.css?v=20261126-pinner-dashboard" />
-  <link rel="stylesheet" href="css/dbusk-calendar.css?v=20261124-public-personal" />
+  <link rel="stylesheet" href="css/dbusk-calendar.css?v=20261127-dcal" />
   <link rel="stylesheet" href="css/fund-admin.css?v=20261124-admin-funds" />
   <link rel="stylesheet" href="css/profile-inbox.css?v=20261126-eth-gifts" />
   <link rel="stylesheet" href="css/inviter-prompt.css?v=20261125-inviter" />
@@ -1030,21 +1034,23 @@
 
   <dialog id="radio-schedule-dialog" aria-labelledby="radio-schedule-title">
     <header class="radio-history-header">
-      <h2 id="radio-schedule-title">☿ DBusk DCal</h2>
+      <div class="dbcal-title">
+        <h2 id="radio-schedule-title">☿🗓️ DecentBusking, DecentCalendar ⨘ 🜐</h2>
+        <button id="radio-schedule-info" class="dbcal-icon" type="button" aria-label="About DCal and timezone settings">ⓘ</button>
+      </div>
       <button id="radio-schedule-close" type="button" aria-label="Close radio schedule">✕</button>
     </header>
-    <p class="radio-schedule-note">Public hours · your invitations, campaigns &amp; receipts · America/New_York</p>
-    <p id="radio-schedule-status" role="status" aria-live="polite">Loading programming schedule…</p>
-    <button id="radio-schedule-refresh" class="payroll-btn payroll-btn-secondary" type="button">Refresh schedule</button>
-    <details class="radio-calendar-subscription">
-      <summary>📅 Sync the community radio calendar</summary>
-      <p>Subscribe once in a calendar account synced across your devices. Includes the next 90 days, schedule changes and cancellations, with 15-minute reminders. Your calendar app controls refresh timing and may require enabling alerts for subscribed calendars.</p>
-      <a id="radio-calendar-subscribe" hidden>Subscribe in your calendar app</a>
-      <label for="radio-calendar-feed">Subscription URL (Google / Apple / Outlook)</label>
-      <input id="radio-calendar-feed" type="url" readonly aria-label="Community radio calendar subscription URL" />
-      <button id="radio-calendar-copy" type="button" class="payroll-btn payroll-btn-secondary">Copy calendar URL</button>
-      <p>Google Calendar: Other calendars → From URL. Apple / Outlook: Add calendar → Subscribe from web. Subscription updates are not instant; check this schedule for last-minute changes.</p>
-    </details>
+    <div class="dbcal-clockbar">
+      <time id="radio-schedule-clock" aria-label="Current New York time"></time>
+      <div class="dbcal-clock-actions">
+        <button id="radio-schedule-refresh" class="dbcal-icon" type="button" aria-label="Refresh calendar" title="Refresh calendar">↻</button>
+        <a id="radio-calendar-subscribe" class="dbcal-icon" aria-label="Subscribe in your calendar" title="Subscribe in your calendar" hidden>🔗🗓️</a>
+        <button id="radio-calendar-copy" class="dbcal-icon" type="button" aria-label="Copy subscription URL" title="Copy subscription URL">⧉</button>
+        <button id="radio-calendar-info" class="dbcal-icon" type="button" aria-label="Calendar subscription information">ⓘ</button>
+      </div>
+    </div>
+    <p id="radio-schedule-status" role="status" aria-live="polite"></p>
+    <input id="radio-calendar-feed" type="url" readonly aria-label="Community radio calendar subscription URL" hidden />
     <section id="dbusk-public-calendar" aria-label="Public and personal DBusk calendar"></section>
   </dialog>
 
@@ -1387,7 +1393,7 @@
   <script type="module" src="js/components/about-override.js?v=20261124-fund-bunny-keys"></script>
 
   <!-- Override right-ankh BEFORE CDN header so the OMMM token code never runs -->
-  <script type="module" src="js/components/header-right-ankh-override.js?v=20261025-header-compat"></script>
+  <script type="module" src="js/components/header-right-ankh-override.js?v=20261127-dcal"></script>
 
   <!-- Load DecentHead components without its legacy IPFS status widget -->
   <script type="module" src="js/components/header.js?v=20261025-header-compat"></script>
@@ -1420,7 +1426,7 @@
   <script type="module" src="js/payroll.js?v=20261126-pinner-dashboard"></script>
   <link rel="stylesheet" href="css/playback-trends.css?v=20261127-weekly-story">
   <script type="module" src="js/radio-history.js?v=20261127-weekly-story"></script>
-  <script type="module" src="js/radio-schedule-ui.mjs?v=20261124-public-personal"></script>
+  <script type="module" src="js/radio-schedule-ui.mjs?v=20261127-dcal"></script>
   <link rel="stylesheet" href="css/fund-tour.css?v=20261124-fund-bunny">
   <script type="module" src="js/fund-header.mjs?v=20261126-playback-help"></script>
   <script type="module" src="js/fund-tour.mjs?v=20261124-visible-payments"></script>

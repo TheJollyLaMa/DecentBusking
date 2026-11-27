@@ -372,25 +372,36 @@ Invited referrers see a live invite card in their profile's **✨ For you**
 inbox. See
 [docs/PROMOTIONS.md](docs/PROMOTIONS.md#running-a-referral-campaign-from-the-calendar).
 
-**Right ankh → Public Schedule → ☿ DBusk DCal** is a read-only weekly/monthly
+**Right ankh → ☿🗓️ DCal ⨘ 🜐** opens the DecentCalendar widget customized for DecentBusking, a read-only weekly/monthly
 calendar with a month picker for past dates. Published radio hours and campaigns
 are readable without a wallet. Your connected wallet adds its own invitations,
 soundchecks/shows, referral involvement, indexed payroll/music/tip receipts and
 DVert campaign terms. **◈ For you** marks personal entries; **✦** marks an
-available next step. Select an event for the existing Profile acceptance/payment,
+available next step. Select an event to open its detail modal with evidence and the existing Profile acceptance/payment,
 performer-room, campaign or DVert portal. There are no public edit, drag, cancel,
 programming or admin controls—even for the owner wallet. Browsing never signs or
 moves funds; explicit actions in the destination portal keep their existing terms.
 
-An ended schedule is not labelled completed or paid. Past **recorded** entries
-are distinct from the optional **Show past projections of today’s rules**
-checkbox; those projections are not historical evidence. Empty old months do
+The centered NY clock stays anchored to the scheduling timezone. The title's
+information button offers New York only, your timezone only, or either as the
+main calendar timezone with the other in parentheses. Calendar days and slots
+follow the selected main timezone; UTC events are never rescheduled. Wallet
+labels reuse verified ENS resolution and the four breathing ETH/ENS icons.
+Overlay checkboxes hide or show public shows, personal invitations, promotions,
+adverts and receipts. Same-kind entries are grouped per calendar day and wallet,
+including overlapping campaigns; their popup retains each original event, amount,
+status and proof.
+The subscription and copy icons retain the existing public ICS feed.
+
+An ended schedule is not labelled completed or paid. Past dates show recorded
+entries, never projections of today's rules. Empty old months do
 not establish complete historical coverage. The schedule currently retains
 limited dated events, the earnings index covers its configured contracts/blocks,
 and each configured tip router supplies only its newest 25 incoming receipts
 (older pages remain in Profile). Outgoing wallet activity and arbitrary contract
 history are not exhaustively indexed here. Failed/restoring sources are marked
-unavailable/partial, not silently treated as successful empty results.
+unavailable/partial in the information panel, with a compact visible warning,
+not silently treated as successful empty results.
 
 **Storage:** this UI makes read-only projections. Payroll/music/tip events use
 existing Base contract-log/receipt provenance, and DVert terms use its contract
@@ -417,6 +428,10 @@ continuous-bar layout) at `3230c38`, plus the existing `performerRoomUrl`,
 `decent-calendar-vanilla/js/calendar-layers.js:createLayerStore` at `08e60c4`
 (Apache-2.0) provided generation/partial-state prior art, not a bundled dependency:
 its Base appointment registry, global FullCalendar and wallet hooks differ.
+The DCal presentation refresh also reuses Busking's `wallet-label.mjs:renderWallet`
+and `ens-client.mjs:lookupEnsName`; no donor source is copied or new dependency
+introduced. DecentCalendar's `calendar.js` event-click/booking modals at
+`08e60c4` were inspected as prior art, not integrated.
 Scope checked: Canopy's curated DecentCalendar lead, the receiving sources and
 relevant local worktrees; no finished public weekly/monthly widget was found
 within those checks. Admin rendering/actions remain in their existing overlay.

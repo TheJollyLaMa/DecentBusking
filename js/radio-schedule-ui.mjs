@@ -142,11 +142,13 @@ export function initRadioScheduleBoard() {
     try {
       if (!feed?.value) throw new Error('Calendar service is not configured');
       await navigator.clipboard.writeText(feed.value);
+      status.hidden = false;
       status.textContent = 'Calendar URL copied. Add it as a subscribed calendar (Google: Other calendars → From URL; Apple/Outlook: Subscribe from web). Refresh timing and alerts are controlled by your calendar app.';
     } catch (error) {
       console.warn('[radio-calendar] Could not copy subscription URL:', error.message);
+      status.hidden = false;
       status.textContent = `Could not copy calendar URL: ${error.message}. Select and copy the URL below.`;
-      feed?.select();
+      if (feed) { feed.hidden = false; feed.select(); }
     }
   });
   const calendar = mountDBuskCalendar(root, { dialog, status, serviceUrl: service,

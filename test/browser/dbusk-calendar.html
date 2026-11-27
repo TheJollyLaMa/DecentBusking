@@ -3,33 +3,40 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="../../">
   <title>DBusk DCal · fixture preview</title>
+  <link rel="stylesheet" href="../../css/styles.css">
   <link rel="stylesheet" href="../../css/dbusk-calendar.css">
   <style>
     body { color: #eef4fb; background: #090d18; font: 16px system-ui; margin: 12px; }
     dialog { color: inherit; background: #090d18; border: 1px solid #8bd5ff; border-radius: 20px; }
-    button { padding: 10px; margin: 3px; }
-    #fixture-controls { display: flex; flex-wrap: wrap; gap: 6px; }
   </style>
 </head>
 <body>
-  <h1>Fixture preview · no live wallet, requests or transactions</h1>
-  <button id="open">Open DBusk DCal</button>
-  <dialog id="radio-schedule-dialog" aria-labelledby="title">
-    <h2 id="title">☿ DBusk DCal · fixtures</h2>
-    <div id="fixture-controls">
-      <button id="connect-a">Fixture wallet A</button>
-      <button id="connect-b">Switch to fixture wallet B</button>
-      <button id="disconnect">Disconnect fixture wallet</button>
-      <button id="fail-source">Campaign source offline</button>
-      <button id="radio-schedule-refresh">Refresh</button>
-      <button id="radio-schedule-close">Close</button>
+  <dialog id="radio-schedule-dialog" aria-labelledby="radio-schedule-title">
+    <header class="radio-history-header">
+      <div class="dbcal-title">
+        <h2 id="radio-schedule-title">☿🗓️ DecentBusking, DecentCalendar ⨘ 🜐</h2>
+        <button id="radio-schedule-info" class="dbcal-icon" aria-label="About DCal and timezone settings">ⓘ</button>
+      </div>
+      <button id="radio-schedule-close" type="button" aria-label="Close radio schedule">✕</button>
+    </header>
+    <div class="dbcal-clockbar">
+      <time id="radio-schedule-clock" aria-label="Current New York time"></time>
+      <div class="dbcal-clock-actions">
+        <button id="radio-schedule-refresh" class="dbcal-icon" aria-label="Refresh calendar" title="Refresh calendar">↻</button>
+        <a id="radio-calendar-subscribe" class="dbcal-icon" aria-label="Subscribe in your calendar" title="Subscribe in your calendar" hidden>🔗🗓️</a>
+        <button id="radio-calendar-copy" class="dbcal-icon" aria-label="Copy subscription URL" title="Copy subscription URL">⧉</button>
+        <button id="radio-calendar-info" class="dbcal-icon" aria-label="Calendar subscription information">ⓘ</button>
+      </div>
     </div>
     <p id="radio-schedule-status" role="status" aria-live="polite"></p>
-    <section id="calendar"></section>
+    <input id="radio-calendar-feed" type="url" readonly aria-label="Community radio calendar subscription URL" hidden>
+    <section id="dbusk-public-calendar"></section>
   </dialog>
   <script type="module">
     import { mountDBuskCalendar } from '../../js/dbusk-calendar.mjs';
+    import { initRadioScheduleBoard } from '../../js/radio-schedule-ui.mjs';
     const A = '0x' + 'a'.repeat(40);
     const B = '0x' + 'b'.repeat(40);
     const clock = Date.parse('2026-11-24T15:00:00Z');
@@ -69,6 +76,8 @@
         campaigns: [
           { id: 'winter-referrals', title: 'Winter musician referrals', status: 'published',
             startsAt: '2026-11-23T05:00:00Z', endsAt: '2026-12-06T05:00:00Z', curatedReferrers: [A] },
+          { id: 'open-mic-promotion', title: 'Open mic month', status: 'paused',
+            startsAt: '2026-11-25T05:00:00Z', endsAt: '2026-11-29T05:00:00Z', curatedReferrers: [A] },
           { id: 'secret-draft', title: 'Unpublished privileged draft', status: 'draft',
             startsAt: '2026-11-23T05:00:00Z', endsAt: '2026-12-06T05:00:00Z' },
         ], members: [],
@@ -78,21 +87,31 @@
         ] } : { ready: true, through: 40000000, entries: [
           { recipient: A, kind: 'payroll', txHash: '0x' + '2'.repeat(64), timestamp: Date.parse('2026-11-23T17:00:00Z') / 1000,
             blockNumber: 39999999, logIndex: 0, units: '20000000', asset: 'USDC' },
+          { recipient: A, kind: 'payroll', txHash: '0x' + '3'.repeat(64), timestamp: Date.parse('2026-11-23T19:00:00Z') / 1000,
+            blockNumber: 40000000, logIndex: 1, units: '5000000', asset: 'USDC' },
+          { recipient: A, kind: 'music', txHash: '0x' + '4'.repeat(64), timestamp: Date.parse('2026-11-23T23:00:00Z') / 1000,
+            blockNumber: 40000001, logIndex: 0, units: '3000000', asset: 'USDC' },
         ] };
       return { ok: true, json: async () => data };
     };
-    const calendar = mountDBuskCalendar(document.getElementById('calendar'), {
+    window.DecentConfig = { ipfsUploadServiceUrl: 'https://fixture.invalid' };
+    const root = document.getElementById('dbusk-public-calendar');
+    initRadioScheduleBoard().destroy();
+    const calendar = mountDBuskCalendar(root, {
       dialog: document.getElementById('radio-schedule-dialog'), status: document.getElementById('radio-schedule-status'),
       serviceUrl: 'https://fixture.invalid', getWallet: () => wallet, now: () => clock, fetchImpl,
+      resolveName: async address => address === A ? 'busker.eth' : null,
     });
-    document.getElementById('open').onclick = calendar.open;
-    for (const [id, value] of [['connect-a', A], ['connect-b', B], ['disconnect', '']]) {
-      document.getElementById(id).onclick = () => {
+    root.dataset.mounted = 'true';
+    window.dbcalFixture = {
+      setWallet(value) {
         wallet = value;
         document.dispatchEvent(new CustomEvent(value ? 'wallet-connected' : 'wallet-disconnected'));
-      };
-    }
-    document.getElementById('fail-source').onclick = () => { offline = !offline; calendar.refresh(true); };
+      },
+      walletA: A,
+      walletB: B,
+      setCampaignOffline(value) { offline = value; return calendar.refresh(true); },
+    };
     calendar.open();
   </script>
 </body>

@@ -1,4 +1,13 @@
 #radio-schedule-dialog { box-sizing: border-box; width: min(1200px, 96vw); max-width: 96vw; max-height: 94dvh; padding: clamp(12px, 2vw, 24px); }
+#radio-schedule-title { font-size: clamp(1rem, 2.2vw, 1.5rem); text-wrap: balance; }
+#radio-schedule-dialog .radio-history-header { gap: 10px; align-items: center; }
+.dbcal-title { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.dbcal-clockbar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; margin: 20px 0 8px; }
+.dbcal-clockbar time { grid-column: 2; color: #b6f1dc; font: 600 .95rem system-ui; font-variant-numeric: tabular-nums; }
+.dbcal-clock-actions { grid-column: 3; display: flex; align-items: center; gap: 8px; padding-left: 8px; }
+#radio-schedule-dialog .dbcal-icon { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; min-height: 36px; padding: 4px; border: 1px solid #6bada580; border-radius: 50%; color: #d7fff1; background: #193438; cursor: pointer; text-decoration: none; font-size: 1.1rem; }
+#radio-schedule-dialog .dbcal-icon[hidden] { display: none; }
+.dbcal-icon:hover { box-shadow: 0 0 12px #80e9c933; }
 .dbusk-calendar { color: #eef4fb; background: #131d2c; border: 1px solid #40536b; border-radius: 22px; padding: 16px; margin: 16px 0; font: .88rem/1.4 system-ui, sans-serif; }
 .dbcal-controls, .dbcal-options { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin-bottom: 12px; }
 .dbcal-controls h3 { flex: 1 1 250px; margin: 0; font-size: 1.2rem; }
@@ -32,7 +41,7 @@
 .dbcal-event.needs-action { animation: dbcal-glow 4s ease-in-out infinite; }
 @keyframes dbcal-glow { 50% { box-shadow: 0 0 12px #d5a8ff88; } }
 @media(prefers-reduced-motion: reduce) { .dbcal-event.needs-action { animation: none; box-shadow: 0 0 0 1px #d5a8ff; } }
-.dbcal-detail { margin-top: 14px; padding: 16px; border: 1px solid #60728b; border-radius: 16px; background: #202c3c; }
+.dbcal-detail { padding: 12px 0; }
 .dbcal-detail h4 { margin: 6px 0; font-size: 1.1rem; }
 .dbcal-detail > button:first-child { float: right; }
 .dbcal-detail a, .dbcal-detail button { display: inline-block; margin: 6px 8px 0 0; }
@@ -41,6 +50,34 @@
 .dbcal-sources .is-unavailable { color: #ffcf9c; }
 .dbcal-coverage { font-size: .75rem; line-height: 1.6; }
 .dbcal-day-picker { display: none; }
+.dbcal-popup { box-sizing: border-box; position: fixed; inset: 0; margin: auto; width: min(640px, 92vw); max-height: 85dvh; overflow-y: auto; padding: clamp(20px, 4vw, 36px); border: 1px solid #85d8c6; border-radius: 24px; color: #eef4fb; background: radial-gradient(ellipse at top, #23434a, #111e30 70%); box-shadow: 0 24px 100px #000b; font: .95rem/1.65 system-ui, sans-serif; }
+.dbcal-popup::backdrop { background: #020916bf; backdrop-filter: blur(7px); }
+.dbcal-popup > button:first-child { float: right; border-radius: 50%; }
+.dbcal-popup h3 { margin: 12px 0 20px; font-size: 1.45rem; line-height: 1.3; }
+.dbcal-popup p { margin: 18px 0; }
+.dbcal-popup label { display: grid; gap: 8px; margin: 16px 0; }
+.dbcal-popup select, .dbcal-popup input { width: 100%; min-width: 0; box-sizing: border-box; padding: 10px; border: 1px solid #60728b; border-radius: 10px; color: #f3f7fc; background: #1b2b40; font: inherit; }
+.dbcal-detail-symbol { font-size: 3rem; color: #9ce8d1; margin: 8px 0 20px; }
+.dbcal-detail-state { display: inline-block; padding: 4px 14px; border: 1px solid #91e0d455; border-radius: 999px; color: #c4f6e8; }
+.dbcal-detail-facts { display: grid; gap: 12px; margin: 24px 0; }
+.dbcal-detail-facts p { margin: 0; padding: 18px; border: 1px solid #6d8aab44; border-radius: 14px; background: #adc8f009; }
+.dbcal-detail-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+.dbcal-detail-actions a, .dbcal-detail-actions button { margin: 0; text-decoration: none; }
+.dbcal-callout { padding: 16px; border-left: 3px solid #d5a8ff; background: #d5a8ff12; }
+.dbcal-group-list { display: grid; gap: 12px; margin-top: 24px; }
+.dbcal-group-list button { display: grid; gap: 8px; text-align: left; padding: 18px; }
+.dbcal-group-list small, .dbcal-popup small { color: #c5d6e5; }
+.dbcal-time-settings { border: 1px solid #60728b; border-radius: 16px; margin: 24px 0; padding: 16px; }
+.dbcal-source-notices { color: #ffcf9c; }
+.dbcal-filters { display: flex; flex-wrap: wrap; gap: 12px 20px; border: 0; border-top: 1px solid #60728b66; margin: 18px 0 0; padding: 16px 0 0; color: #c5d6e5; }
+.dbcal-filters legend { padding-right: 12px; font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; }
+.dbcal-filters label { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-size: .8rem; }
+.dbcal-filters input { accent-color: #9ce8d1; width: 17px; height: 17px; }
+.dbcal-secondary-time { color: #d2e8fb; }
+.dbcal-options .creator-profile-wallet-icons { display: inline-flex; gap: 2px; margin: 0 5px; vertical-align: middle; }
+.dbcal-options .creator-profile-wallet-icons img { width: 16px; height: 16px; animation: dbcal-breathe 3s ease-in-out infinite; }
+@keyframes dbcal-breathe { 50% { opacity: .6; transform: scale(.9); } }
+@media(prefers-reduced-motion: reduce) { .dbcal-options .creator-profile-wallet-icons img { animation: none; } }
 .dbusk-calendar[data-mode=month] .dbcal-week { min-width: 700px; }
 .dbusk-calendar[data-mode=month] .dbcal-day { min-height: 110px; padding: 4px; }
 .dbusk-calendar[data-mode=month] .dbcal-day .dbcal-event { width: 100%; margin: 3px 0; }
@@ -58,5 +95,9 @@
   .dbusk-calendar[data-mode=week] .dbcal-bars .dbcal-event { grid-column: 1 / -1 !important; grid-row: auto !important; }
   .dbusk-calendar[data-mode=week] .dbcal-bars .is-off-day { display: none; }
   .dbcal-detail a, .dbcal-detail button { min-height: 44px; }
+  #radio-schedule-dialog .dbcal-icon { min-width: 44px; min-height: 44px; }
+  .dbcal-clockbar { grid-template-columns: 1fr; gap: 8px; }
+  .dbcal-clockbar time, .dbcal-clock-actions { grid-column: 1; justify-self: center; padding-left: 0; }
+  .dbcal-popup { overflow-wrap: anywhere; }
 }
 [hidden].dbcal-bars, [hidden].dbcal-detail, [hidden].dbcal-day-picker { display: none; }
