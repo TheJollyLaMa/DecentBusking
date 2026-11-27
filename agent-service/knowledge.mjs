@@ -17,6 +17,7 @@ export function sourceDisposition(file, mode = '100644') {
   if (['contributor-accounts.json', 'payroll-queue.json'].includes(file) ||
       file.startsWith('docs/reports/')) return 'individual accounting or generated operational report';
   if (file === 'agent-service/handoff/sources.json') return 'generated knowledge snapshot (avoid recursive ingestion)';
+  if (file === 'agent-service/handoff/evaluation.json') return 'expected-answer test rubric, not project evidence';
   if (/(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(file)) return 'dependency lockfile';
   if (file.startsWith('img/')) return 'creative or binary asset; no asset-content ingestion';
   if (!textExtensions.has(path.extname(file).toLowerCase()) &&
