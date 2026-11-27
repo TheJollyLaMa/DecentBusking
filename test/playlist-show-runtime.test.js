@@ -107,6 +107,47 @@ test('long recordings that cannot finish before a protected live event yield to 
   assert.ok(f.value().occurrences[0].skipped.every(entry => /protected live event/.test(entry.reason)));
 });
 
+test('historical allocation with null public live state cannot override saved Long-Form or zero-vote actual playback', async t => {
+  const { createLiveAudioService } = await import('../discord-bot/live-audio.js');
+  const { defaultRadioSchedule } = await import('../js/radio-schedule.mjs');
+  for (const [playlistId, at, minute, seconds] of [
+    ['long-form-hour', '2026-11-27T20:44:00Z', 900, 1200],
+    ['songs-awaiting-your-vote', '2026-11-27T21:49:00Z', 960, 180],
+  ]) await t.test(playlistId, async t => {
+    const weeklySchedule = { programs: [{ id: 'program-saved-hour', title: 'Saved hour', weekday: 5,
+      startMinuteLocal: minute, startDateLocal: '2026-11-27', playlistId }] };
+    const f = await fixture(t, { count: 1, seconds,
+      getRadioSchedule: () => ({ schedule: defaultRadioSchedule(weeklySchedule), events: [] }) });
+    f.setNow(Date.parse(at));
+    f.loadPlaylist([...f.getPlaylist(), verifiedRecording({ trackId: 'ineligible', title: 'Ordinary voted song', likes: 1, dislikes: 0 }, 180)]);
+    const past = { id: 'historical-paid-booking', eventId: 'historical-live-event', mode: 'phase1', status: 'paid',
+      acknowledged: true, wallet: `0x${'2'.repeat(40)}`, payoutPolicy: 'pilot-guaranteed-v1', amountUnits: '20000000',
+      startUtc: '2026-11-21T02:25:00Z', endUtc: '2026-11-21T02:45:00Z', title: 'Past performance' };
+    let state = { version: 1, rooms: [{ bookingId: past.id, armed: false, checks: {}, lastVerifiedAt: 0,
+      allocation: { id: 'historical-allocation', revision: 5, plannedStartAt: 1795232040000,
+        startedAt: 1795232133043, endedAt: 1795233933043, endReason: 'authorization-expired',
+        durationMs: 1200000, encoreMs: 600000, choice: 'full', choiceAt: 1795232040000,
+        previousBookingId: null, nextBookingId: null, delayNotifiedAt: null,
+        finishedId: null, finishedAt: null, priorityFollowup: false } }] };
+    const liveAudio = createLiveAudioService({ getBookings: async () => ({ bookings: [past] }),
+      ownerWallet: `0x${'1'.repeat(40)}`, transport: { ready: true, close: async () => {}, stop: async () => {} },
+      store: { restore: async () => structuredClone(state), save: async next => { state = structuredClone(next); } },
+      onPolicy: policy => f.session.setLiveAudioPolicy(policy) });
+    t.after(() => liveAudio.stop());
+    assert.equal(await liveAudio.current(), null, 'null public liveAudio is compatible with a historical room policy');
+    assert.equal(await liveAudio.tick(), null, 'completed historical allocation no longer occupies the canonical policy');
+    assert.equal(f.session.getShowState().activeShow.playlistId, playlistId);
+    f.session.setLiveAudioPolicy({ mode: 'radio', controlled: true, bookingId: past.id, eventId: past.eventId });
+    assert.equal((await f.session.getMainRadioAdCountdown()).activeShow.type, 'playlist_show', 'a stale copied radio policy also yields to the actual schedule');
+    await f.session._playNext();
+    assert.deepEqual(f.heard, ['song-0']);
+    assert.equal(f.session._nowPlaying.playlistShow.fallback, false);
+    assert.equal(f.value().occurrences[0].playlistId, playlistId);
+    assert.equal(past.status, 'paid');
+    assert.equal(past.amountUnits, '20000000', 'expiry does not mutate agreed fees or settlement');
+  });
+});
+
 test('a minted twenty-minute live set waits for long-form programming and records replay only after complete playback', async t => {
   const f = await fixture(t, { count: 0 });
   const p = await import('../discord-bot/playlist-store.js');

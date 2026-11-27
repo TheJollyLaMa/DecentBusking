@@ -88,6 +88,7 @@ async function setup(options = {}) {
       signature: await wallet.signMessage(challenge.message) }, origin);
     return result;
   }
+
   async function prepare() {
     const auth = await authorize();
     receiver({ samples: 960 });
@@ -101,6 +102,31 @@ async function setup(options = {}) {
     at: value => { time = value; }, frame: samples => receiver({ samples }), pcm: frame => pcmReceiver(frame),
     persisted: () => structuredClone(persisted) };
 }
+
+test('completed allocation control expires after both the actual outro and original reservation', async () => {
+  const { liveAudioPolicy } = await import('../js/live-audio.mjs');
+  const b = booking();
+  const early = { allocation: { id: 'early', plannedStartAt: START, startedAt: START,
+    endedAt: START + 5 * 60000, durationMs: 20 * 60000, encoreMs: 0 } };
+  assert.equal(liveAudioPolicy(early, b, START + 5 * 60000).breakKind, 'outro');
+  assert.equal(liveAudioPolicy(early, b, START + 15 * 60000).mode, 'radio', 'an ended show does not reopen its remaining reserved slot');
+  assert.equal(liveAudioPolicy(early, b, START + 20 * 60000), null);
+  const delayed = { allocation: { ...early.allocation, startedAt: START + 30 * 60000, endedAt: START + 50 * 60000 } };
+  assert.equal(liveAudioPolicy(delayed, b, START + 49 * 60000).mode, 'live');
+  assert.equal(liveAudioPolicy(delayed, b, START + 54 * 60000).breakKind, 'outro');
+  assert.equal(liveAudioPolicy(delayed, b, START + 55 * 60000), null, 'delayed authorized airtime and its actual outro are not truncated');
+});
+
+test('radio policies without program configuration preserve scheduled playlists and Top10, but still suppress their canceled reservation', async () => {
+  const { applyLiveAudioShow } = await import('../js/live-audio.mjs');
+  const policy = { mode: 'radio', controlled: true, bookingId: 'past', eventId: 'past-event' };
+  for (const type of ['playlist_show', 'weekly_top10']) {
+    const show = { id: 'scheduled', type, playlistId: 'long-form-hour' };
+    assert.equal(applyLiveAudioShow(show, policy), show);
+  }
+  const reserved = { id: 'past-event', type: 'live_performance', event: { id: 'past-event' } };
+  assert.equal(applyLiveAudioShow(reserved, policy).type, 'normal_rotation');
+});
 
 test('live audio is fail-closed without explicit hosting and durable state', async () => {
   const { createLiveAudioService } = await import('../discord-bot/live-audio.js');
