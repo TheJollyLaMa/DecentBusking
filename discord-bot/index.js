@@ -15,6 +15,7 @@ import { createLiveRecorder, createLiveRecordingStore, downloadRecordingSegment,
 import { createRehearsalService } from './rehearsal.js';
 import { createRehearsalStore } from './rehearsal-store.js';
 import { createPromotions } from './promotions.js';
+import { OMMM_V1_BASE } from '../js/promotions.mjs';
 import { createFirstProjectVerifier } from './first-project.js';
 import { createInviterNudge } from './inviter-nudge.js';
 import { createPromotionStore } from './promotions-store.js';
@@ -2088,7 +2089,7 @@ async function main() {
       promotions = createPromotions({ restore: promotionsStore.restore, save: promotionsStore.save,
         getCheckpointUri: promotionsStore.getCheckpointUri,
         provider: paymentProvider, routerAddress: payrollAssets.routerAddress, ownerWallet: config.mintOwnerWallet,
-        ommmAddress: process.env.OMMM_V1_ADDRESS,
+        ommmAddress: process.env.OMMM_V1_ADDRESS || OMMM_V1_BASE,
         readFirstProject: createFirstProjectVerifier({ provider: paymentProvider,
           collectionAddress: process.env.SUPPORTER_CREATOR_COLLECTION_ADDRESS,
           listingsAddress: process.env.SUPPORTER_SELLER_LISTINGS_ADDRESS }),

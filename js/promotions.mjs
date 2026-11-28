@@ -5,6 +5,8 @@ export const PROMOTIONS_FUND = 'dbusk-promotionals';
 export const REFERRALS_FUND = 'dbusk-referrals';
 export const PROMOTIONS_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 export const PROMOTIONS_ETH = '0x0000000000000000000000000000000000000000';
+// Shared Ommm v1 on Base (DLang public/dlang/ommm-deployment.json), deployed 2026-11-28.
+export const OMMM_V1_BASE = '0xD3244Ac3552e983bdf2b9DD5c0FE51410447b778';
 export const CAMPAIGN_ASSETS = Object.freeze({
   usdc: Object.freeze({ id: 'usdc', address: PROMOTIONS_USDC, decimals: 6, symbol: 'USDC', icon: '💵' }),
   eth: Object.freeze({ id: 'eth', address: PROMOTIONS_ETH, decimals: 18, symbol: 'ETH', icon: 'Ξ' }),

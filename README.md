@@ -766,13 +766,15 @@ gift reserves are additional to the reward budget. Ommm does not enter the exist
 ETH/USDC musician-referral conversion/matching flow. Unknown assets and all three old
 Ommm prototypes are rejected, never silently treated as USDC.
 
-Set `OMMM_V1_ADDRESS` only after separately approved shared-token deployment and
-router asset/fund authorization. Fund summaries distinguish actual token addresses.
+Shared Ommm v1 is deployed on Base at
+[`0xD3244Ac3552e983bdf2b9DD5c0FE51410447b778`](https://basescan.org/address/0xD3244Ac3552e983bdf2b9DD5c0FE51410447b778)
+and is the bot's default (`OMMM_V1_ADDRESS` overrides it). Ommm campaigns stay
+unavailable until the Settlements Router approves Ommm and the Promotionals fund holds it. Fund summaries distinguish actual token addresses.
 The optional ArtFi `OmmmSettlementFundingAdapter` credits named allowlisted router
 funds from its own Ommm pool; it does not pay participants or consume DLang's learning
 allowance. Actual contract-backed local rehearsal verifies mint-time price invariance,
 independent learning allowance, the on-chain 10% dilution threshold and rollback.
-No shared Ommm deployment or production DLang manifest switch is implied.
+
 
 Canopy First Project reuses this worker's durable promotion journal, with a distinct
 signed authorization domain, `decentcanopy-promotionals` allocation and once-per-wallet
