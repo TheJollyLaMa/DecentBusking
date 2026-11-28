@@ -104,7 +104,7 @@ test('pinning campaigns publish funded fixed bonuses with editable timeboxes, no
   assert.equal(c.rewardUsdCents, undefined);
   assert.match(c.terms, /0\.002 ETH per approved participant\. The ETH amount is fixed/);
   assert.match(c.terms, /from dbusk-pinner-campaigns/);
-  await assert.rejects(f.create({ ...campaignInput, budgetUnits: '20000000000000000' }), /Invalid fixed ETH bonus/);
+  await assert.rejects(f.create({ ...campaignInput, budgetUnits: '20000000000000000' }), /Invalid fixed bonus/);
   const huge = f.shared.pinnerEthAmounts('100000000000000000000', 1);
   await assert.rejects(f.create({ ...campaignInput, maxAwards: 1, rewardUnits: `${huge.rewardUnits}1`, budgetUnits: `${huge.budgetUnits}1` }), /at most 100 ETH/);
   await assert.rejects(f.create(input({ fund: f.shared.PINNER_CAMPAIGN_FUND })), /dedicated/);
@@ -134,6 +134,38 @@ test('pinning campaigns publish funded fixed bonuses with editable timeboxes, no
   const invalid = structuredClone(f.stored());
   invalid.campaigns[0].rewardUnits = '1';
   assert.throws(() => validatePromotionCheckpoint(invalid), /Invalid promotions checkpoint/);
+});
+
+test('pinning campaigns can promise a fixed USDC bonus from the same pinner fund without changing ETH terms', async () => {
+  const f = await fixture({ readPinnerProgress: () => ({ status: 'not-enrolled', days: [], completedDays: 0 }) });
+  assert.deepEqual((await f.view()).features.pinnerCampaignAssets, ['eth', 'usdc']);
+  const usdc = input({ template: 'pinner', qualificationVersion: f.shared.PINNER_CAMPAIGN_VERSION,
+    asset: 'usdc', maxAwards: 4, qualifyingDays: 3, supporterRewards: [],
+    ...f.shared.pinnerCampaignAmounts('5000000', 4, 'usdc') });
+  const c = await f.create(usdc);
+  assert.equal(c.asset, 'usdc');
+  assert.equal(c.fund, f.shared.PINNER_CAMPAIGN_FUND);
+  assert.equal(c.budgetUnits, '20000000');
+  assert.match(c.terms, /5\.00 USDC per approved participant\. The USDC amount is fixed\./);
+  assert.doesNotMatch(c.terms, /live estimate/);
+  await assert.rejects(f.create({ ...usdc, asset: 'dai' }), /ETH or USDC/);
+  await assert.rejects(f.create({ ...usdc, budgetUnits: '20000001' }), /Invalid fixed bonus/);
+  f.setBalance(20000000n);
+  await f.publish(c);
+  assert.equal((await f.view()).campaigns.find(x => x.id === c.id).status, 'published');
+  const eth = { ...usdc, asset: 'eth', ...f.shared.pinnerEthAmounts('2000000000000000', 4) };
+  assert.match((await f.create(eth)).terms, /0\.002 ETH per approved participant\. The ETH amount is fixed; any USD value shown is a live estimate/);
+  const { validatePromotionCheckpoint } = await import('../discord-bot/promotions.js');
+  assert.doesNotThrow(() => validatePromotionCheckpoint(structuredClone(f.stored())));
+});
+
+test('pinning requirements default to about 90% of the full New York days in the timebox', async () => {
+  const shared = await import('../js/promotions.mjs');
+  assert.equal(shared.pinnerCampaignFullDays('2026-11-28T17:00:00.000Z', '2026-12-05T17:00:00.000Z'), 6);
+  assert.equal(shared.pinnerDefaultQualifyingDays('2026-11-28T17:00:00.000Z', '2026-12-05T17:00:00.000Z'), 6);
+  assert.equal(shared.pinnerDefaultQualifyingDays('2026-12-01T05:00:00.000Z', '2026-12-31T05:00:00.000Z'), 27);
+  assert.equal(shared.pinnerDefaultQualifyingDays('2026-12-01T05:00:00.000Z', '2026-12-11T05:00:00.000Z'), 9);
+  assert.equal(shared.pinnerDefaultQualifyingDays('2026-12-01T05:00:00.000Z', '2026-12-01T12:00:00.000Z'), 1);
 });
 
 test('pinning bonuses use first-finisher order, deduplicate identities, expose profile stats and permit separate repeat campaigns', async () => {

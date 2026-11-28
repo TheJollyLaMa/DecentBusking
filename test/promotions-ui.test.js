@@ -599,3 +599,39 @@ test('Supporter queue reports blocked browser storage without breaking the payro
   await loadSupporterPayroll({ getElementById: () => root });
   assert.match(root.textContent, /Supporter queue unavailable: Storage blocked/);
 });
+
+test('pinner campaign popout keeps a draft in place, separates requirements and steps through one funding button', async () => {
+  const editor = await import('../js/pinner-campaign-editor.mjs');
+  const shared = await import('../js/promotions.mjs');
+  const draft = { id: 'draft-1', status: 'draft', template: 'pinner', title: 'Test Pilot Pin Reward Campaign', asset: 'eth',
+    qualificationVersion: shared.PINNER_CAMPAIGN_VERSION, rewardUnits: '100000000000000', maxAwards: 5, qualifyingDays: 1,
+    startsAt: '2026-11-28T17:00:00.000Z', endsAt: '2026-12-05T17:00:00.000Z', claimDeadline: '2027-01-05T17:00:00.000Z',
+    supporterRewards: [{ chainId: 8453, contract: '0xe63ec9f8228720baac2fd528c0a6d06b3dc5439b', tokenId: '77', quantity: 1 }] };
+  const values = editor.pinnerEditorValues({ campaign: draft });
+  assert.equal(values.id, 'draft-1');
+  assert.equal(values.qualifyingDays, 1);
+  assert.equal(values.daysTouched, true);
+  assert.equal(editor.pinnerEditorValues({ source: { ...draft, qualifyingDays: 30 }, startsAt: '2030-01-01T05:00:00.000Z' }).qualifyingDays, 7);
+
+  const usdc = editor.pinnerCampaignPayload({ ...values, asset: 'usdc', rewardUnits: '5000000', qualifyingDays: 6 });
+  assert.equal(usdc.asset, 'usdc');
+  assert.equal(usdc.budgetUnits, '25000000');
+  assert.equal(usdc.fund, shared.PINNER_CAMPAIGN_FUND);
+  assert.match(usdc.terms, /first to complete 6 qualifying/);
+  assert.throws(() => editor.pinnerCampaignPayload({ ...values, qualifyingDays: 7 }), /Required days must be 1–6/);
+
+  const campaigns = [
+    { id: 'other', fund: shared.PINNER_CAMPAIGN_FUND, status: 'published', asset: 'eth', budgetUnits: '300', paidUnits: '100' },
+    { id: 'usdc', fund: shared.PINNER_CAMPAIGN_FUND, status: 'published', asset: 'usdc', budgetUnits: '999' },
+    { id: 'draft-1', fund: shared.PINNER_CAMPAIGN_FUND, status: 'draft', asset: 'eth', budgetUnits: '500' },
+  ];
+  assert.deepEqual(editor.pinnerFundAvailability({ balanceUnits: '450', campaigns, campaignId: 'draft-1', asset: 'eth', needUnits: 500n }),
+    { balance: 450n, others: 200n, free: 250n, shortfall: 250n });
+
+  const step = state => editor.pinnerNextStep({ money: units => `${units}u`, ...state });
+  assert.equal(step({ fund: { exists: false } }).step, 'create');
+  assert.equal(step({ fund: { exists: true, active: false } }).step, 'restore');
+  assert.deepEqual(step({ fund: { exists: true, active: true }, shortfallUnits: 250n }), { step: 'fund', label: '▶ Fund 250u & Activate' });
+  assert.deepEqual(step({ fund: { exists: true, active: true } }), { step: 'activate', label: '▶ Sign & Activate' });
+  assert.equal(step({ valid: false, fund: { exists: false } }).step, 'blocked');
+});
