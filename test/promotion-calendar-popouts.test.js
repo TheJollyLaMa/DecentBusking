@@ -199,6 +199,26 @@ test('calendar campaign popouts preserve preset terms and use the public unsigne
   assert.equal(musician.supporterRewards[0].tokenId, '75');
   assert.equal(musician.curatedReferrerNames['0x1234567890123456789012345678901234567890'], 'Tester');
   await close();
+  await page.evaluate(async () => {
+    window.mockState.features.ommm = { id: 'ommm', chainId: 8453, address: `0x${'56'.repeat(20)}`,
+      decimals: 18, symbol: 'Ommm', version: 'ommm-v1' };
+    const { openPromotionCalendarEditor } = await import('/js/promotions-ui.mjs?v=20261126-pinner-dashboard');
+    openPromotionCalendarEditor({ template: 'custom' });
+  });
+  await page.locator('dialog[open]').getByText('Campaigns loaded. Only protected changes require an admin signature.').waitFor();
+  await page.locator('dialog[open] [name=asset]').selectOption('ommm');
+  for (const [name, value] of Object.entries({ title: 'Ommm reward', criteria: 'Participate', terms: 'Reviewed terms',
+    reward: '0.100000000000000001', budget: '1.00000000000000001', participationGift: '0.000000000000000001' })) {
+    await page.locator(`dialog[open] [name=${name}]`).fill(value);
+  }
+  await page.locator('dialog[open] form button:not([type])').first().click();
+  await page.waitForFunction(() => window.commands.some(c => c.action === 'save' && c.campaign.asset === 'ommm'));
+  const ommm = await page.evaluate(() => window.commands.find(c => c.action === 'save' && c.campaign.asset === 'ommm').campaign);
+  assert.equal(ommm.rewardUnits, '100000000000000001');
+  assert.equal(ommm.budgetUnits, '1000000000000000010');
+  assert.deepEqual(ommm.gifts, [{ trigger: 'participation', amountUnits: '1', supporter: false }]);
+  assert.equal(ommm.ommm.address, `0x${'56'.repeat(20)}`);
+  await close();
   await page.setViewportSize({ width: 390, height: 844 });
   await drop('Pin Reward Campaign');
   const bounds = await page.locator('dialog[open]').boundingBox();

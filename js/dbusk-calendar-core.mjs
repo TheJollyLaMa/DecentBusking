@@ -86,7 +86,7 @@ export function publicCalendarData(schedule, promotions) {
     .map(rule => Object.fromEntries(['id', 'label', 'type', 'weekday', 'window', 'startMinuteLocal', 'endMinuteLocal',
       'startHourLocal', 'endHourLocal', 'startDateLocal'].map(key => [key, rule[key]])));
   const campaigns = (promotions?.campaigns || []).filter(c =>
-    ['published', 'paused', 'closed'].includes(c.status)).map(c => ({
+    !c.application && ['published', 'paused', 'closed'].includes(c.status)).map(c => ({
     id: `promotion:${c.id}`, title: c.title, startUtc: c.startsAt, endUtc: c.endsAt, type: 'referral_campaign',
     interval: true, status: c.status, audience: 'public', provenance: 'ipfs-record',
     portal: { kind: 'campaign', id: c.id }, details: [

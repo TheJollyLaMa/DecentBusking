@@ -29,7 +29,8 @@ async function fixture(options = {}) {
     voteOnRadio: async v => ({ playId: v.playId, vote: v.vote }), now: () => clock, ...options };
   const service = createPromotions(cfg);
   const body = async (command, who = owner, overrides = {}) => {
-    const b = { command, address: who.address, origin, issuedAt: new Date(clock).toISOString(), ...overrides };
+    const b = { command, address: who.address, origin, issuedAt: new Date(clock).toISOString(),
+      ...(options.application ? { application: options.application } : {}), ...overrides };
     b.signature = await who.signMessage(shared.promotionAuthorization(b));
     return b;
   };
@@ -50,6 +51,151 @@ async function fixture(options = {}) {
     stored: () => stored, setTime: t => { clock = t; }, setBalance: b => { balance = b; },
     setReceipt: r => { receipt = r ? { blockHash, ...r } : r; }, setTransaction: tx => { transaction = tx; } };
 }
+const firstProjectInput = () => input({ application: 'decentcanopy', template: 'first-project',
+  qualificationVersion: 'canopy-first-project-v1', fund: 'decentcanopy-promotionals', asset: 'usdc',
+  title: 'First Project', maxAwards: 12, rewardUnits: '5000000', budgetUnits: '60000000' });
+const verifiedProject = ({ wallet, projectKey = 'first-project', mintTxHash = txHash, listingId = '1' }) => ({
+  version: 'canopy-first-project-v1', wallet, projectKey,
+  projectId: `decent-project:${wallet}:${projectKey}`, projectHash: id(`decent-project:${wallet}:${projectKey}`),
+  mintTxHash, listingId, sourceRevision: 'a'.repeat(40),
+});
+test('First Project uses its signed Canopy domain, separate allocation and fixed twelve-by-five policy', async () => {
+  const f = await fixture({ application: 'decentcanopy', readFirstProject: async args => verifiedProject(args) });
+  const c = await f.create(firstProjectInput());
+  assert.equal(c.application, 'decentcanopy');
+  assert.equal(c.fund, 'decentcanopy-promotionals');
+  assert.equal(c.rewardUnits, '5000000');
+  await f.publish(c);
+  const { publicCalendarData } = await import('../js/dbusk-calendar-core.mjs');
+  assert.equal(publicCalendarData({}, await f.service.publicState()).campaigns.length, 0);
+  await assert.rejects(f.create({ ...firstProjectInput(), maxAwards: 13 }), /twelve|12 rewards/);
+  await assert.rejects(f.create({ ...firstProjectInput(), rewardUnits: '4999999' }), /12 rewards/);
+  const unconfigured = await fixture({ application: 'decentcanopy' });
+  const draft = await unconfigured.create(firstProjectInput());
+  await assert.rejects(unconfigured.publish(draft), /unavailable/);
+  const busking = await fixture();
+  await assert.rejects(busking.create(firstProjectInput()), /restricted/);
+  const body = await f.body({ action: 'join', campaignId: c.id, acceptTerms: true, termsVersion: 1 }, alice);
+  await assert.rejects(f.service.execute({ ...body, application: undefined }, origin), /authorization/);
+  const wrongDomain = await f.body({ action: 'status', campaignId: c.id, status: 'closed' }, owner, { application: undefined });
+  await assert.rejects(f.service.execute(wrongDomain, origin), /different application/);
+});
+test('First Project rechecks public mint/listing evidence on claim, steward review and payment preparation', async () => {
+  let available = true, verifications = 0;
+  const f = await fixture({ application: 'decentcanopy', readFirstProject: async args => {
+    verifications++;
+    if (!available) throw new Error('Published project or active listing is unavailable');
+    return verifiedProject(args);
+  } });
+  const c = await f.create(firstProjectInput());
+  await f.publish(c); await f.join(c);
+  const claim = await f.claim(c);
+  assert.equal(verifications, 1);
+  await assert.rejects(f.exec({ action: 'review', claimId: claim.id, decision: 'approved', reason: 'Reviewed' }), /Review the participant/);
+  available = false;
+  await assert.rejects(f.exec({ action: 'review', claimId: claim.id, decision: 'approved',
+    reason: 'Reviewed', confirmParticipantReview: true }), /unavailable/);
+  assert.equal((await f.view()).claims[0].status, 'submitted');
+  available = true;
+  await f.exec({ action: 'review', claimId: claim.id, decision: 'approved', reason: 'Reviewed', confirmParticipantReview: true });
+  available = false;
+  await assert.rejects(f.exec({ action: 'prepare-payment', claimId: claim.id }), /unavailable/);
+  assert.equal((await f.view()).claims[0].status, 'approved');
+  available = true;
+  await f.exec({ action: 'prepare-payment', claimId: claim.id });
+  assert.equal((await f.view()).claims[0].status, 'payment-pending');
+  const wrongDomain = await f.body({ action: 'reconcile', claimId: claim.id, txHash }, owner, { application: undefined });
+  await assert.rejects(f.service.execute(wrongDomain, origin), /different application/);
+  const { validatePromotionCheckpoint, createPromotions } = await import('../discord-bot/promotions.js');
+  assert.doesNotThrow(() => validatePromotionCheckpoint(f.stored()));
+  const restored = createPromotions({ ...f.cfg, restore: async () => f.stored() });
+  assert.equal((await restored.publicState()).claims[0].status, 'payment-pending');
+  assert.equal(f.shared.promotionWorkReference(claim), `decentcanopy:first-project:v1:8453:${alice.address.toLowerCase()}`);
+});
+test('First Project reserves exactly twelve rewards and cannot pay a wallet again in another Canopy campaign', async () => {
+  const f = await fixture({ application: 'decentcanopy', readFirstProject: async args => verifiedProject(args) });
+  f.setBalance(120000000n);
+  const c = await f.create(firstProjectInput()); await f.publish(c);
+  const wallets = Array.from({ length: 13 }, () => Wallet.createRandom());
+  const claims = [];
+  for (const who of wallets.slice(0, 12)) {
+    await f.join(c, who);
+    claims.push(await f.claim(c, who));
+  }
+  for (const claim of claims.slice(0, 12)) await f.exec({ action: 'review', claimId: claim.id,
+    decision: 'approved', reason: 'Steward reviewed participant and published project', confirmParticipantReview: true });
+  await assert.rejects(f.join(c, wallets[12]), /participant capacity|twelve registrations/i);
+  const snapshot = await f.view();
+  assert.equal(snapshot.campaigns[0].committedUnits, '60000000');
+  assert.equal(snapshot.campaigns[0].remainingAwards, 0);
+  const another = await f.create(firstProjectInput()); await f.publish(another);
+  await f.join(another, wallets[0]);
+  const repeat = await f.claim(another, wallets[0]);
+  await assert.rejects(f.exec({ action: 'review', claimId: repeat.id, decision: 'approved',
+    reason: 'Repeat wallet', confirmParticipantReview: true }), /already has another/);
+});
+test('shared Ommm custom campaigns reserve and settle rewards and gifts in their own token, never USDC', async () => {
+  const ommmAddress = '0x' + '56'.repeat(20);
+  const seenAssets = [];
+  let balance = 10n ** 20n;
+  const f = await fixture({ ommmAddress, readFunding: async (fund, asset) => {
+    seenAssets.push({ fund, asset }); return balance;
+  } });
+  const rewardUnits = '100000000000000000';
+  const giftUnits = '200000000000000000';
+  const c = await f.create(input({ template: 'custom', fund: 'dbusk-promotionals-ommm', asset: 'ommm', rewardUnits, budgetUnits: rewardUnits,
+    gifts: [{ trigger: 'participation', amountUnits: giftUnits, supporter: false }] }));
+  assert.equal(c.ommm.address, ommmAddress);
+  assert.equal(c.ommm.decimals, 18);
+  balance = BigInt(rewardUnits) + BigInt(giftUnits) - 1n;
+  await assert.rejects(f.publish(c), /Fund balance/);
+  balance++;
+  await f.publish(c); await f.join(c);
+  const claim = await f.claim(c);
+  await f.exec({ action: 'review', claimId: claim.id, decision: 'approved', reason: 'Original project delivery' });
+  await f.exec({ action: 'award-gifts', campaignId: c.id });
+  const award = (await f.view()).campaigns[0].giftAwards[0];
+  assert.equal(award.wallet, alice.address.toLowerCase());
+  assert.equal(award.amountUnits, giftUnits);
+  await f.exec({ action: 'prepare-gift', campaignId: c.id, giftId: award.id, wallet: award.wallet });
+  const events = new Interface(['event PayrollPaid(bytes32 indexed fundId,address indexed asset,address indexed recipient,uint256 amount,bytes32 workReference,bytes32 repositoryIdHash,bytes32 contributorIdHash,string metadataUri,bytes32 metadataHash)',
+    'event Transfer(address indexed from,address indexed to,uint256 value)']);
+  const payroll = events.encodeEventLog(events.getEvent('PayrollPaid'), [id(c.fund), ommmAddress, award.wallet,
+    BigInt(giftUnits), id(f.shared.promotionWorkReference({ campaignId: c.id, wallet: award.wallet }, award.id)),
+    id('TheJollyLaMa/DecentBusking'), id(award.wallet), '', ZeroHash]);
+  const transfer = events.encodeEventLog(events.getEvent('Transfer'), [routerAddress, award.wallet, BigInt(giftUnits)]);
+  f.setReceipt({ status: 1, blockNumber: 99, to: routerAddress,
+    logs: [{ address: routerAddress, ...payroll }, { address: f.shared.PROMOTIONS_USDC, ...transfer }] });
+  await assert.rejects(f.exec({ action: 'reconcile-gift', campaignId: c.id, giftId: award.id, wallet: award.wallet, txHash }), /Ommm transfer proofs/);
+  f.setReceipt({ status: 1, blockNumber: 99, to: routerAddress,
+    logs: [{ address: routerAddress, ...payroll }, { address: ommmAddress, ...transfer }] });
+  const settled = await f.exec({ action: 'reconcile-gift', campaignId: c.id, giftId: award.id, wallet: award.wallet, txHash });
+  assert.equal(settled.campaigns[0].giftAwards[0].status, 'paid');
+  assert.equal(settled.features.ommm.address, ommmAddress);
+  assert.ok(seenAssets.filter(row => row.fund === c.fund).every(row => row.asset === 'ommm'), 'Ommm budgets never query a USDC balance');
+  assert.equal(settled.funds.find(fund => fund.slug === c.fund).asset, 'ommm');
+  const { validatePromotionCheckpoint } = await import('../discord-bot/promotions.js');
+  assert.doesNotThrow(() => validatePromotionCheckpoint(f.stored()));
+});
+test('Ommm rejects unknown or old assets, keeps exact eighteen-decimal units and does not enter ETH/USD matching', async () => {
+  const f = await fixture();
+  assert.throws(() => f.shared.campaignAsset({ asset: 'banana' }), /Unsupported/);
+  assert.throws(() => f.shared.campaignAsset({ asset: 'ommm' }), /shared Ommm/);
+  for (const address of ['0xD5062a20A9eC942322fb63407DC5B327cF9AA8b6',
+    '0xFEEe3bEBa3e897f3db00D45CCF4Ed6927e0e301f', '0x8fff93A94eDe08c462C2e6D1A61FE64Fb2F3aDB1']) {
+    assert.throws(() => f.shared.configuredOmmmAsset(address), /old DLang prototype/);
+  }
+  const asset = f.shared.configuredOmmmAsset('0x' + '56'.repeat(20));
+  assert.equal(f.shared.promotionUnits('0.000000000000000001', asset), '1');
+  assert.equal(f.shared.promotionMoney('1', asset), '0.000000000000000001 Ommm');
+  assert.equal(f.shared.formatAssetUnits('1', asset), 'Ommm 0.000000000000000001');
+  assert.equal(f.shared.parseAssetAmount('Ommm 0.1', asset), '100000000000000000');
+  await assert.rejects(f.create(input({ template: 'custom', asset: 'ommm' })), /not configured/);
+  const configured = await fixture({ ommmAddress: asset.address });
+  await assert.rejects(configured.create(input({ template: 'album', asset: 'ommm' })), /custom promotional campaigns/);
+  await assert.rejects(configured.create(input({ template: 'musician-referral', asset: 'ommm',
+    rewardUnits: '25000000', budgetUnits: '150000000', maxAwards: 6 })), /currency must be USDC or ETH/);
+});
 test('pinner pilot persists only as a capped ETH draft with an unconfigured NFT and cannot be published', async () => {
   const f = await fixture();
   const draftQuote = { ethUsdMicros: '4000000000', quotedAt: new Date(epoch).toISOString() };

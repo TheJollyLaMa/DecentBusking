@@ -1,4 +1,5 @@
 import { newYorkDay, newYorkDayPeriod } from './payroll-week.mjs';
+export { isPromotionsFund } from './promotion-payout.mjs';
 
 export const PROMOTIONS_FUND = 'dbusk-promotionals';
 export const REFERRALS_FUND = 'dbusk-referrals';
@@ -8,8 +9,26 @@ export const CAMPAIGN_ASSETS = Object.freeze({
   usdc: Object.freeze({ id: 'usdc', address: PROMOTIONS_USDC, decimals: 6, symbol: 'USDC', icon: '💵' }),
   eth: Object.freeze({ id: 'eth', address: PROMOTIONS_ETH, decimals: 18, symbol: 'ETH', icon: 'Ξ' }),
 });
+export function configuredOmmmAsset(address) {
+  const legacy = ['0xd5062a20a9ec942322fb63407dc5b327cf9aa8b6',
+    '0xfeee3beba3e897f3db00d45ccf4ed6927e0e301f', '0x8fff93a94ede08c462c2e6d1a61fe64fb2f3adb1'];
+  if (!/^0x[0-9a-f]{40}$/i.test(address || '') || /^0x0{40}$/i.test(address) || legacy.includes(address.toLowerCase())) {
+    throw new Error('Configure the shared Ommm v1 address on Base, not an old DLang prototype');
+  }
+  return Object.freeze({ id: 'ommm', address: address.toLowerCase(), chainId: 8453, version: 'ommm-v1',
+    decimals: 18, symbol: 'Ommm', icon: 'Ommm' });
+}
 export function campaignAsset(campaign) {
-  return CAMPAIGN_ASSETS[campaign?.asset === 'eth' ? 'eth' : 'usdc'];
+  const asset = campaign?.asset ?? 'usdc';
+  if (asset === 'ommm') {
+    const descriptor = configuredOmmmAsset(campaign.ommm?.address);
+    if (campaign.ommm.chainId !== 8453 || campaign.ommm.version !== 'ommm-v1' || campaign.ommm.decimals !== 18) {
+      throw new Error('Shared Ommm campaign deployment identity is invalid');
+    }
+    return descriptor;
+  }
+  if (!Object.hasOwn(CAMPAIGN_ASSETS, asset)) throw new Error(`Unsupported campaign asset: ${asset}`);
+  return CAMPAIGN_ASSETS[asset];
 }
 // Compact display: $12.50 for USDC, Ξ0.0025 for ETH.
 export function formatAssetUnits(value, asset = CAMPAIGN_ASSETS.usdc) {
@@ -20,12 +39,12 @@ export function formatAssetUnits(value, asset = CAMPAIGN_ASSETS.usdc) {
     const cents = String((amount % scale) / 10000n).padStart(2, '0');
     return `$${whole.toLocaleString('en-US')}${cents === '00' ? '' : `.${cents}`}`;
   }
-  const fraction = String(amount % scale).padStart(asset.decimals, '0').slice(0, 6).replace(/0+$/, '');
-  return `Ξ${whole}${fraction ? `.${fraction}` : ''}`;
+  const fraction = String(amount % scale).padStart(asset.decimals, '0').slice(0, asset.id === 'ommm' ? 18 : 6).replace(/0+$/, '');
+  return `${asset.id === 'ommm' ? 'Ommm ' : 'Ξ'}${whole}${fraction ? `.${fraction}` : ''}`;
 }
 export function parseAssetAmount(value, asset = CAMPAIGN_ASSETS.usdc) {
-  const places = asset.id === 'eth' ? 6 : 2;
-  const match = new RegExp(`^[$Ξ]?\\s*(\\d{1,9})(?:\\.(\\d{1,${places}}))?$`).exec(String(value).trim());
+  const places = asset.id === 'ommm' ? 18 : asset.id === 'eth' ? 6 : 2;
+  const match = new RegExp(`^${asset.id === 'ommm' ? '(?:Ommm)?' : '[$Ξ]?'}\\s*(\\d{1,9})(?:\\.(\\d{1,${places}}))?$`).exec(String(value).trim());
   if (!match) return null;
   const scale = 10n ** BigInt(asset.decimals);
   return (BigInt(match[1]) * scale + BigInt((match[2] || '').padEnd(asset.decimals, '0'))).toString();
@@ -118,7 +137,7 @@ export function campaignGifts(value = []) {
 }
 // Most a campaign's gifts can ever pay, so Run can require it to be funded up front.
 export function campaignGiftReserveUnits(campaign) {
-  const referrers = (campaign?.curatedReferrers || []).length;
+  const referrers = campaign?.template === 'custom' ? campaign.maxAwards : (campaign?.curatedReferrers || []).length;
   return (campaignGifts(campaign?.gifts || []) || []).reduce((total, gift) =>
     total + BigInt(gift.amountUnits) * (gift.trigger === 'top' ? 1n : BigInt(referrers)), 0n);
 }
@@ -127,6 +146,11 @@ export function campaignGiftWinners(campaign, claims = [], members = []) {
   const gifts = campaignGifts(campaign?.gifts || []) || [];
   const referrers = campaign?.curatedReferrers || [];
   const held = claims.filter(c => c.campaignId === campaign.id && ['approved', 'payment-pending', 'paid'].includes(c.status));
+  if (campaign.template === 'custom') {
+    const winners = [...new Set(held.map(claim => claim.wallet))];
+    return gifts.flatMap(gift => gift.trigger === 'participation' || gift.trigger === 'completion' && held.length >= campaign.maxAwards
+      ? winners.map(wallet => ({ id: `gift-${gift.trigger}`, trigger: gift.trigger, wallet, amountUnits: gift.amountUnits, supporter: false })) : []);
+  }
   const stats = referrers.map(wallet => ({ wallet, conversions: held.filter(c => c.wallet === wallet).length,
     registered: members.filter(m => m.campaignId === campaign.id && m.referrer === wallet).length }));
   const converting = stats.filter(s => s.conversions > 0);
@@ -148,10 +172,6 @@ export function campaignGiftWinners(campaign, claims = [], members = []) {
     }
   }
   return awards;
-}
-export function isPromotionsFund(value) {
-  return typeof value === 'string' && value.length <= 64 &&
-    /^dbusk-(?:promotionals|referrals)(?:-[a-z0-9]+)*$/.test(value);
 }
 export function referralCampaignTitle(value) {
   const title = String(value || '').trim().replace(/\s+/g, ' ');
@@ -268,6 +288,7 @@ export function pinnerCampaignTerms(campaign) {
   return `${campaign.maxAwards} bonuses maximum, first to complete ${campaign.qualifyingDays} qualifying full New York calendar days after joining and inside the offer window; days need not be consecutive. Each day requires at least 20 independent node checks and 90% availability. Completion time, then registration time, then wallet address break ties; one bonus per Discord-linked identity per campaign. ${promotionMoney(campaign.rewardUnits, campaignAsset(campaign))} per approved participant, fixed at the reviewed publication quote of $${Number(campaign.draftQuote.ethUsdMicros) / 1e6} per ETH (${campaign.draftQuote.quotedAt}); no later repricing. ${nft.length ? `NFT gifts: ${nft.map(token => `${token.contract} #${token.tokenId}`).join(', ')}, one each per approved winner, separately delivered from admin inventory.` : 'No NFT gift is promised.'} These campaign bonuses come from ${campaign.fund}, separately from ordinary weekly USDC rewards in dbusk-pinners. Funds are earmarked, not escrowed; evidence, disputes and owner-signed Payroll are required. Wallet, daily stats, evidence and receipts are public on IPFS; no private data.`;
 }
 export const PROMOTION_TEMPLATES = [
+  { id: 'first-project', title: 'First Project', criteria: 'Publish a signed Canopy creator profile and project, receive steward approval, mint a Supporter series after joining, and offer it through an active Market listing. One 5-USDC reward per reviewed participant; twelve awards maximum.' },
   { id: 'album', title: 'Bring your album', criteria: 'Bring an album with the stated minimum number of original tracks and rights to publish. Supply approved radio catalog and qualifying delivery evidence for admin review.' },
   { id: 'referral', title: 'Referral rush', criteria: 'Bring the stated number of new promotion participants. Each must register your invite before casting a signed song vote in the selected activity window. Final identity and evidence review is required.' },
   { id: 'sponsor', title: 'Sponsor scout', criteria: 'Introduce a new advertiser. Supply the purchaser wallet, campaign ID and confirmed DVert purchase transaction. Admin checks eligibility and refund/dispute status.' },
@@ -278,18 +299,23 @@ export const PROMOTION_TEMPLATES = [
   { id: 'pinner', title: 'Pin Reward Campaign', criteria: 'Pin the community catalogue on your own admin-approved, independently checked IPFS node. Choose the campaign timebox and required qualifying days; promotional bonuses are separate from weekly pinning rewards.' },
   { id: 'custom', title: 'Custom', criteria: '' },
 ];
-export function promotionAuthorization({ address, origin, issuedAt, command }) {
-  return ['DecentBusking Promotions authorization v1', `Wallet: ${address.toLowerCase()}`,
+export function promotionAuthorization({ address, origin, issuedAt, command, application }) {
+  if (application !== undefined && application !== 'decentcanopy') throw new Error('Unsupported campaign application');
+  return [`${application === 'decentcanopy' ? 'DecentCanopy' : 'DecentBusking'} Promotions authorization v1`, `Wallet: ${address.toLowerCase()}`,
     `Origin: ${origin}`, `Issued: ${issuedAt}`, `Command: ${JSON.stringify(command)}`].join('\n');
 }
 export function promotionWorkReference(claim, legId = '') {
+  if (claim.application === 'decentcanopy') {
+    if (legId) throw new Error('First Project rewards do not have referral allocation legs');
+    return `decentcanopy:first-project:v1:8453:${claim.wallet.toLowerCase()}`;
+  }
   return `decentbusking:promotions:v1:8453:${claim.campaignId}:${claim.wallet.toLowerCase()}${legId ? `:${legId}` : ''}`;
 }
 export function promotionMoney(value, asset = CAMPAIGN_ASSETS.usdc) {
-  if (asset.id === 'eth') {
+  if (asset.id === 'eth' || asset.id === 'ommm') {
     const units = BigInt(value);
     const fraction = (units % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, '');
-    return `${units / 10n ** 18n}${fraction ? `.${fraction}` : ''} ETH`;
+    return `${units / 10n ** 18n}${fraction ? `.${fraction}` : ''} ${asset.symbol}`;
   }
   const amount = BigInt(value);
   const fraction = String(amount % 1000000n).padStart(6, '0').replace(/0+$/, '').padEnd(2, '0');
@@ -317,7 +343,12 @@ export function promotionAnnouncementDraft({ campaignId, version, posterUrl, sen
   }
   return { campaignId, version, posterUrl: poster.href, sentence: support, link: promotionLink(campaignId, '', base.href) };
 }
-export function promotionUnits(value) {
+export function promotionUnits(value, asset = CAMPAIGN_ASSETS.usdc) {
+  if (asset.id === 'ommm') {
+    const amount = parseAssetAmount(value, asset);
+    if (!amount || BigInt(amount) <= 0n) throw new Error('Enter a positive Ommm amount with up to eighteen decimals');
+    return amount;
+  }
   if (!/^(?:0|[1-9]\d{0,6})(?:\.\d{1,6})?$/.test(String(value))) throw new Error('Enter a USDC amount with up to six decimals');
   const [whole, fraction = ''] = String(value).split('.');
   const units = BigInt(whole) * 1000000n + BigInt(fraction.padEnd(6, '0'));

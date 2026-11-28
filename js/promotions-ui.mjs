@@ -7,6 +7,7 @@ import { radioListenerId } from './radio-client.mjs';
 import { getAudibleBroadcast } from './public-broadcast-client.mjs?v=20261125-song-tail';
 import { isAdminWallet } from './admin-access.mjs';
 import { escapeLive as escape } from './live-bookings.mjs';
+import { routerPayout as sharedRouterPayout } from './promotion-payout.mjs';
 
 const service = () => {
   const value = window.DecentConfig?.ipfsUploadServiceUrl;
@@ -163,42 +164,7 @@ export function publicPromotionRecords(state, campaignId) {
       <pre class="promotion-terms">${escape(JSON.stringify({ claims, members, votes }, null, 2))}</pre>
     </details></section>`;
 }
-async function routerPayout({ w, routerAddress, fund, asset, recipientWallet, amountUnits, reference, key, storage, status,
-  prepare, reconcile, isPaid, confirmationTimeout }) {
-  if (storage.getItem(key)) throw new Error('A payment is unresolved. Reconcile its wallet transaction before retrying; do not clear browser storage.');
-  const router = new w.ethers.Contract(routerAddress, PROMOTIONS_ROUTER_ABI, w.signer);
-  const ref = w.ethers.id(reference);
-  if (await router.completedWorkReferences(ref)) throw new Error('Reward is already paid on-chain; reconcile its transaction instead');
-  if (!await router.hasRole(await router.PAYROLL_ROLE(), w.address) || await router.paused()) throw new Error('Payment requires the unpaused router payroll role');
-  if (!await router.approvedAssets(asset.address)) throw new Error(`${asset.symbol} is not enabled on the router`);
-  const recipient = await router.contributors(recipientWallet);
-  if (!(recipient.approved ?? recipient[1])) throw new Error('Enable this reward recipient on the shared router before paying');
-  if (!isPromotionsFund(fund)) throw new Error('Reward has no valid dedicated promotional fund');
-  const fundId = w.ethers.id(fund);
-  const routerFund = await router.funds(fundId);
-  if (!routerFund.exists || !routerFund.active || await router.fundBalances(fundId, asset.address) < BigInt(amountUnits)) {
-    throw new Error(`${fund} is missing, inactive or underfunded in ${asset.symbol}`);
-  }
-  const args = [fundId, asset.address, recipientWallet, BigInt(amountUnits), ref,
-    w.ethers.id('TheJollyLaMa/DecentBusking'), w.ethers.id(recipientWallet), '', w.ethers.ZeroHash];
-  await router.payout.staticCall(...args);
-  await w.check();
-  await prepare();
-  await w.check();
-  storage.setItem(key, JSON.stringify({ status: 'awaiting-wallet', reference: ref }));
-  let tx;
-  try { tx = await router.payout(...args); } catch (error) {
-    if (error.code === 'ACTION_REJECTED' || error.code === 4001) storage.removeItem(key);
-    throw error;
-  }
-  try { storage.setItem(key, JSON.stringify({ hash: tx.hash, reference: ref })); }
-  catch (error) { throw new Error(`Payment was sent as ${tx.hash}, but its browser journal failed: ${error.message}. Reconcile this hash; do not send again.`); }
-  status.textContent = `Payment pending: ${tx.hash}. Do not send again; reconcile after two confirmations.`;
-  await reconcile(tx.hash);
-  await tx.wait(2, confirmationTimeout);
-  await w.check();
-  if (isPaid(await reconcile(tx.hash))) storage.removeItem(key);
-}
+const routerPayout = options => sharedRouterPayout({ ...options, routerAbi: PROMOTIONS_ROUTER_ABI });
 export async function payPromotion({ claim, snapshot, command, status, storage = localStorage, sponsorReviewConfirmed = false, leg = null }) {
   const w = await wallet();
   if (!isAdminWallet(w.address)) throw new Error('Connect the admin wallet');
@@ -425,14 +391,20 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     <div data-promo-workspace hidden>
       <details ${calendarOptions.calendarMode && !calendarOptions.campaignId ? 'open' : ''}><summary>Create or edit a draft</summary>
         <form data-promo-form>
-          <label>Offer template<select name="template">${PROMOTION_TEMPLATES.map(t => `<option value="${t.id}">${escape(t.title)}</option>`).join('')}</select></label>
+          <label>Offer template<select name="template">${PROMOTION_TEMPLATES.filter(t => t.id !== 'first-project').map(t => `<option value="${t.id}">${escape(t.title)}</option>`).join('')}</select></label>
           ${field('title', 'Title')}
           <label>Qualification / required evidence<textarea name="criteria" maxlength="2000" required></textarea></label>
           <label>Terms, limits, rights, privacy, disputes / refunds<textarea name="terms" maxlength="2000" required></textarea></label>
+          <label>Reward currency<select name="asset"><option value="usdc">Base USDC</option><option value="ommm" disabled>Shared Ommm v1 (requires configured deployment)</option><option value="eth" disabled>ETH (pinning campaign)</option></select></label>
           ${field('reward', 'Reward (Base USDC)', 'text', '10')}
           ${field('budget', 'Total campaign budget (Base USDC)', 'text', '50')}
           ${field('maxAwards', 'Maximum awards (one per participant)', 'number', '5')}
           ${field('fund', 'Dedicated promotional funding source', 'text', PROMOTIONS_FUND)}
+          <div data-promo-custom-gifts>
+            <p>Optional gifts use the same campaign currency. Their budget is additional to the reward budget and must be funded before publication.</p>
+            <label>Extra gift per approved participant<input name="participationGift" inputmode="decimal" placeholder="Optional"></label>
+            <label>Extra gift per approved participant when all award slots fill<input name="completionGift" inputmode="decimal" placeholder="Optional"></label>
+          </div>
           <div data-promo-pinner>
             ${field('qualifyingDays', 'Required qualifying days inside this timebox (1–365)', 'number', '30')}
             <p>Each full New York day after registration requires 20 independent checks and 90% availability. Days need not be consecutive. First finishers win; weekly pinning rewards are unchanged.</p>
@@ -506,11 +478,17 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
   }
   function templateFields() {
     const pinner = input('template').value === 'pinner';
+    const custom = input('template').value === 'custom';
+    input('asset').querySelector('[value="ommm"]').disabled = !state?.features?.ommm;
+    input('asset').disabled = !custom;
+    if (pinner) input('asset').value = 'eth';
+    else if (!custom || input('asset').value === 'eth') input('asset').value = 'usdc';
     const referralAsset = input('template').value === 'musician-referral' && editingCampaign?.template === 'musician-referral'
       ? campaignAsset(editingCampaign) : null;
+    const symbol = referralAsset ? `Base ${referralAsset.symbol}` : input('asset').value === 'ommm' ? 'Ommm' : 'Base USDC';
     input('budget').disabled = pinner;
-    input('reward').parentElement.firstChild.textContent = pinner ? 'Reward target (USD equivalent, paid in ETH)' : `Reward (Base ${referralAsset?.symbol || 'USDC'})`;
-    input('budget').parentElement.firstChild.textContent = pinner ? 'Total target cap (USD equivalent, paid in ETH)' : `Total campaign budget (Base ${referralAsset?.symbol || 'USDC'})`;
+    input('reward').parentElement.firstChild.textContent = pinner ? 'Reward target (USD equivalent, paid in ETH)' : `Reward (${symbol})`;
+    input('budget').parentElement.firstChild.textContent = pinner ? 'Total target cap (USD equivalent, paid in ETH)' : `Total campaign reward budget (${symbol})`;
     for (const [selector, active] of [
       ['[data-promo-album]', input('template').value === 'album'],
       ['[data-promo-referral]', input('template').value === 'referral'],
@@ -518,6 +496,7 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       ['[data-promo-sponsor-terms]', input('template').value === 'sponsor'],
       ['[data-promo-match-terms]', input('template').value === 'sponsor-match'],
       ['[data-promo-pinner]', pinner],
+      ['[data-promo-custom-gifts]', custom],
     ]) {
       const section = root.querySelector(selector);
       section.hidden = !active;
@@ -560,13 +539,18 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     if (calendarOptions.endsAt) input('claimDeadline').value = utcToNewYorkInput(calendarOptions.endsAt);
     const source = calendarOptions.sourceCampaign;
     if (source) {
-      for (const name of ['title', 'criteria', 'terms', 'template', 'maxAwards', 'fund',
+      for (const name of ['title', 'criteria', 'terms', 'template', 'maxAwards', 'fund', 'asset',
         'minOriginalTracks', 'requiredReferrals', 'activityWindow', 'matchTargetFund']) {
         if (source[name] !== undefined) input(name).value = source[name];
       }
       if (source.template !== 'pinner') {
-        input('reward').value = String(Number(source.rewardUnits) / 1e6);
-        input('budget').value = String(Number(source.budgetUnits) / 1e6);
+        const symbol = campaignAsset(source).symbol;
+        input('reward').value = money(source.rewardUnits, campaignAsset(source)).replace(` ${symbol}`, '');
+        input('budget').value = money(source.budgetUnits, campaignAsset(source)).replace(` ${symbol}`, '');
+        for (const [name, trigger] of [['participationGift', 'participation'], ['completionGift', 'completion']]) {
+          const gift = source.gifts?.find(g => g.trigger === trigger);
+          input(name).value = gift ? money(gift.amountUnits, campaignAsset(source)).replace(` ${symbol}`, '') : '';
+        }
       }
       if (source.template === 'pinner') {
         input('reward').value = String((source.rewardUsdCents || 500) / 100);
@@ -587,16 +571,18 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     refreshCompact();
   }
   function render() {
+    templateFields();
     root.querySelector('[data-promo-workspace]').hidden = false;
     root.querySelector('[data-promo-funding]').textContent = state.storageError ||
       (state.funds?.length
-        ? `${state.funds.map(f => `${f.slug}: ${f.error || money(f.balanceUnits)}`).join(' · ')}. ETH funding is checked at publication. Campaign reservations are service accounting, not on-chain escrow.`
+        ? `${state.funds.map(f => `${f.slug}: ${f.error || money(f.balanceUnits, campaignAsset(f))}`).join(' · ')}. ETH funding is checked at publication. Campaign reservations are service accounting, not on-chain escrow.`
         : calendarOptions.compact ? '🏦 Balance unavailable · checked before publishing. Not escrow.'
           : 'Fund balances are unavailable in the public view. Funding is checked when publishing; campaign reservations are not on-chain escrow.');
+    const eligibleCampaigns = state.campaigns.filter(c => !c.application);
     const campaigns = activeCampaignId
-      ? state.campaigns.filter(c => c.id === activeCampaignId)
+      ? eligibleCampaigns.filter(c => c.id === activeCampaignId)
       : calendarOptions.compact ? []
-      : state.campaigns;
+      : eligibleCampaigns;
     const heading = root.closest('dialog')?.querySelector('[data-promo-heading]');
     if (heading && activeCampaignId && campaigns[0]) heading.textContent = campaigns[0].title;
     root.querySelector('[data-promo-campaigns]').innerHTML = campaigns.map(c => `<article class="promotion-card" data-campaign="${c.id}">
@@ -707,6 +693,7 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       root.querySelector('[data-promo-discord-preview]')?.remove();
     }
   });
+  input('asset').addEventListener('change', templateFields);
   form.addEventListener('submit', event => {
     event.preventDefault();
     void guard(async () => {
@@ -733,10 +720,13 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
           ...pinnerPromotionAmounts(ethUsdMicros, { rewardUsdCents, maxAwards }),
           draftQuote: { ethUsdMicros, quotedAt: new Date().toISOString() } };
       }
+      const custom = input('template').value === 'custom';
+      const asset = custom && input('asset').value === 'ommm'
+        ? campaignAsset({ asset: 'ommm', ommm: state?.features?.ommm }) : campaignAsset();
       const referralSource = input('template').value === 'musician-referral' && editingCampaign?.template === 'musician-referral'
         ? editingCampaign : null;
       const amount = (name, original) => {
-        if (!referralSource || campaignAsset(referralSource).id !== 'eth') return promotionUnits(input(name).value);
+        if (!referralSource || campaignAsset(referralSource).id !== 'eth') return promotionUnits(input(name).value, asset);
         const text = input(name).value.trim();
         if (text === promotionMoney(original, campaignAsset(referralSource)).replace(/ ETH$/, '')) return String(original);
         const value = parseAssetAmount(text, campaignAsset(referralSource));
@@ -751,6 +741,10 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       const campaign = { template: input('template').value, title: input('title').value,
         criteria: input('criteria').value, terms: input('terms').value,
         rewardUnits: amount('reward', referralSource?.rewardUnits), budgetUnits: amount('budget', referralSource?.budgetUnits),
+        ...(custom ? { asset: asset.id, ...(asset.id === 'ommm' ? { ommm: state.features.ommm } : {}),
+          gifts: [['participationGift', 'participation'], ['completionGift', 'completion']]
+            .filter(([name]) => input(name).value.trim()).map(([name, trigger]) =>
+              ({ trigger, amountUnits: promotionUnits(input(name).value, asset), supporter: false })) } : {}),
         maxAwards: Number(input('maxAwards').value), fund: input('fund').value.trim(),
         curatedReferrers: await (async () => {
           if (!['referral', 'musician-referral'].includes(input('template').value)) return [];
@@ -1156,7 +1150,7 @@ export function mountPublicPromotion() {
     overlay.querySelector('form').reset();
     overlay.querySelector('[data-promo-accept]').checked = false;
     overlay.querySelector('[data-promo-activity]').textContent = '';
-    if (state) state = { campaigns: state.campaigns.filter(c => !['draft', 'archived'].includes(c.status)) };
+    if (state) state = { campaigns: state.campaigns.filter(c => !c.application && !['draft', 'archived'].includes(c.status)) };
     render();
     memberPanel.hidden = true;
     overlay.querySelector('[data-promo-my-claims]').replaceChildren();
