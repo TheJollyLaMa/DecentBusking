@@ -16,7 +16,7 @@ import { completeCreatorSplitProposal, fetchCreatorSplitProposal, rejectCreatorS
 import { isAdminWallet } from './admin-access.mjs';
 import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261025-community-reminder';
 import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261116-longform';
-import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?v=20261129-pinner-uniform';
+import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?v=20261130-pinner-gifts';
 import { renderAdminRadioAnnouncements, requestRadioAnnouncement } from './admin-radio-announcements.mjs';
 import { removeDevertCampaign } from './devert-campaigns.mjs';
 import { renderWallet } from './wallet-label.mjs';

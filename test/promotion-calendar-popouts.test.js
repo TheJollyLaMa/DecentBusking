@@ -56,7 +56,7 @@ test('calendar campaign popouts preserve preset terms and use the public unsigne
     window.commands = [];
     window.mockState = { revision: 1, campaigns: [source], members: [], claims: [],
       funds: [{ slug: 'dbusk-promotionals', balanceUnits: '1000000000' }],
-      features: { pinnerCampaign: 'pinner-eth-v2', pinnerCampaignAssets: ['eth', 'usdc'] } };
+      features: { pinnerCampaign: 'pinner-eth-v2', pinnerCampaignAssets: ['eth', 'usdc'], pinnerExtraRewards: ['eth', 'usdc', 'ommm'] } };
     window.DecentConfig = { ipfsUploadServiceUrl: 'http://worker.test' };
     window._wallet = { address: '0x807061DF657A7697c04045dA7d16D941861cAABc',
       signer: { signMessage: async () => 'signature', provider: { getNetwork: async () => ({ chainId: 8453 }) } } };
@@ -138,9 +138,18 @@ test('calendar campaign popouts preserve preset terms and use the public unsigne
   await pinner.getByRole('button', { name: 'Use the suggested 90% of full days' }).click();
   assert.equal(await pinner.getByLabel('Required qualifying days').inputValue(), '6');
   await pinner.getByRole('button', { name: 'The gift' }).click();
-  await pinner.getByRole('button', { name: 'Pay the bonus in USDC' }).click();
+  await pinner.getByRole('button', { name: 'Include a USDC bonus' }).click();
+  await pinner.getByRole('button', { name: 'Include a ETH bonus' }).click();
   await pinner.getByLabel('Bonus per finisher (USDC)').fill('4');
-  assert.match(await pinner.locator('.rc-advanced summary').textContent(), /claims close/);
+  assert.equal(await pinner.locator('.rc-advanced').count(), 0, 'no advanced section');
+  assert.deepEqual(await pinner.locator('.rc-summary').evaluateAll(rows => rows.slice(1, 4).map(r => r.getAttribute('aria-label'))),
+    ['Start', 'End', 'Claims close'], 'claims close sits right under the dates');
+  const box = await pinner.boundingBox();
+  const chips = await pinner.getByRole('group', { name: 'Supporter NFT gift' }).boundingBox();
+  assert.ok(chips.x >= box.x && chips.x + chips.width <= box.x + box.width + 1, 'Supporter picker stays inside the popout');
+  await pinner.getByRole('button', { name: 'Include a Ommm bonus' }).click();
+  await pinner.getByLabel('Bonus per finisher (Ommm)').fill('250');
+  await pinner.getByRole('button', { name: 'Include a Ommm bonus' }).click();
   await pinner.getByRole('button', { name: 'Save this draft without activating' }).click();
   await page.waitForFunction(() => window.commands.some(c => c.action === 'save' && c.campaign.template === 'pinner'));
   await pinner.getByLabel('Bonus per finisher (USDC)').fill('5');

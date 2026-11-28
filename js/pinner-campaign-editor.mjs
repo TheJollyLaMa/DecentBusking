@@ -1,6 +1,6 @@
-import { PINNER_CAMPAIGN_FUND, PINNER_CAMPAIGN_VERSION, PROMOTIONS_USDC, PROMOTION_TEMPLATES, CAMPAIGN_ASSETS, campaignAsset,
+import { PINNER_CAMPAIGN_FUND, PINNER_CAMPAIGN_VERSION, PROMOTIONS_USDC, PROMOTION_TEMPLATES, PINNER_BONUS_ASSETS, campaignAsset,
   formatAssetUnits, parseAssetAmount, pinnerCampaignAmounts, pinnerCampaignFullDays, pinnerDefaultQualifyingDays,
-  pinnerCampaignTerms, PINNER_DEFAULT_DAY_SHARE } from './promotions.mjs?v=20261129-pinner-uniform';
+  pinnerCampaignTerms, PINNER_DEFAULT_DAY_SHARE } from './promotions.mjs?v=20261130-pinner-gifts';
 import { cachedEthUsd, loadEthUsd, weiToUsdText } from './eth-usd-quote.mjs?v=20261126-eth-gifts';
 import { newYorkInputToUtc, utcToNewYorkInput } from './radio-calendar.mjs';
 import { isAdminWallet } from './admin-access.mjs';
@@ -8,8 +8,7 @@ import { getBaseReadProvider } from './base-chain.mjs';
 import { depositSettlementUsdc } from './settlement-funds.mjs';
 import { loadSupporterInventory } from './supporter-inventory.mjs?v=20261129-pinner-fund-load';
 import { fetchPromotionsState, signedPromotionCommand, promotionWallet, readCampaignFund,
-  prepareSettlementFund } from './promotions-ui.mjs?v=20261129-pinner-uniform';
-import { convertCampaignUnits } from './referral-campaign-editor.mjs?v=20261126-eth-gifts';
+  prepareSettlementFund } from './promotions-ui.mjs?v=20261130-pinner-gifts';
 
 const DAY = 86400000;
 const ROUTER = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';
@@ -18,6 +17,8 @@ const ROUTER_ABI = ['function fundNative(bytes32) payable', 'function fundToken(
 const TOKEN_ABI = ['function decimals() view returns(uint8)', 'function balanceOf(address) view returns(uint256)',
   'function allowance(address,address) view returns(uint256)', 'function approve(address,uint256) returns(bool)'];
 const RESERVING = ['published', 'paused', 'closed'];
+const GIFT_ORDER = ['eth', 'usdc', 'ommm'];
+const GIFT_DEFAULTS = { eth: '2000000000000000', usdc: '5000000', ommm: '1000000000000000000000' };
 const when = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 let openDialog = null;
 
@@ -44,6 +45,8 @@ export function pinnerEditorValues({ campaign = null, source = null, startsAt } 
     asset,
     rewardUnits: base.rewardUnits && base.qualificationVersion === PINNER_CAMPAIGN_VERSION ? String(base.rewardUnits)
       : asset === 'eth' ? '2000000000000000' : '5000000',
+    extras: base.qualificationVersion === PINNER_CAMPAIGN_VERSION
+      ? Object.fromEntries((base.extraRewards || []).map(x => [x.asset, String(x.rewardUnits)])) : {},
     supporter: base.supporterRewards?.[0] ? { ...base.supporterRewards[0] } : null,
   };
 }
@@ -60,20 +63,28 @@ export function pinnerCampaignPayload(values) {
   }
   if (Date.parse(values.claimDeadline) < Date.parse(values.endsAt)) throw new Error('Claims must close on or after the end');
   const amounts = pinnerCampaignAmounts(values.rewardUnits, values.maxAwards, values.asset);
+  const extraRewards = Object.entries(values.extras || {}).filter(([id]) => id !== values.asset)
+    .sort(([a], [b]) => GIFT_ORDER.indexOf(a) - GIFT_ORDER.indexOf(b))
+    .map(([asset, rewardUnits]) => ({ asset, ...pinnerCampaignAmounts(rewardUnits, values.maxAwards, asset) }));
   const template = PROMOTION_TEMPLATES.find(item => item.id === 'pinner');
   const campaign = { template: 'pinner', title: String(values.title || '').trim() || template.title, criteria: template.criteria,
     ...amounts, maxAwards: values.maxAwards, fund: PINNER_CAMPAIGN_FUND, asset: values.asset === 'usdc' ? 'usdc' : 'eth',
     qualificationVersion: PINNER_CAMPAIGN_VERSION, qualifyingDays: values.qualifyingDays,
+    ...(extraRewards.length ? { extraRewards } : {}),
     supporterRewards: values.supporter ? [{ chainId: 8453, contract: values.supporter.contract, tokenId: String(values.supporter.tokenId), quantity: 1 }] : [],
     curatedReferrers: [], startsAt: values.startsAt, endsAt: values.endsAt, claimDeadline: values.claimDeadline };
   return { ...campaign, terms: pinnerCampaignTerms(campaign) };
 }
 
-// Free balance in the pinner campaign fund for one asset after other live campaigns' unpaid budgets.
+// Free balance in the pinner campaign fund for one asset after other live campaigns' unpaid budgets and extra bonuses.
 export function pinnerFundAvailability({ balanceUnits, campaigns = [], campaignId = '', asset = 'eth', needUnits = 0n }) {
-  const others = campaigns.filter(c => c.fund === PINNER_CAMPAIGN_FUND && c.id !== campaignId &&
-      campaignAsset(c).id === asset && RESERVING.includes(c.status))
-    .reduce((sum, c) => sum + BigInt(c.budgetUnits || 0) - BigInt(c.paidUnits || 0), 0n);
+  const others = campaigns.filter(c => c.fund === PINNER_CAMPAIGN_FUND && c.id !== campaignId && RESERVING.includes(c.status))
+    .reduce((sum, c) => {
+      const primary = campaignAsset(c).id === asset ? BigInt(c.budgetUnits || 0) - BigInt(c.paidUnits || 0) : 0n;
+      const extra = (c.extraRewards || []).find(x => x.asset === asset);
+      const paid = (c.bonusAwards || []).filter(a => a.asset === asset && a.status === 'paid').reduce((n, a) => n + BigInt(a.amountUnits), 0n);
+      return sum + primary + (extra ? BigInt(extra.budgetUnits) - paid : 0n);
+    }, 0n);
   const balance = BigInt(balanceUnits || 0);
   const free = balance > others ? balance - others : 0n;
   const need = BigInt(needUnits);
@@ -81,13 +92,14 @@ export function pinnerFundAvailability({ balanceUnits, campaigns = [], campaignI
 }
 
 // The single progressive action: create the fund, then fund any shortfall and activate, or just sign and activate.
-export function pinnerNextStep({ valid = true, workerReady = true, fund = null, shortfallUnits = 0n, money = String }) {
+export function pinnerNextStep({ valid = true, workerReady = true, fund = null, shortfallUnits = 0n, money = String, shortfallText = '' }) {
   if (!valid) return { step: 'blocked', label: '▶ Activate' };
   if (!workerReady) return { step: 'blocked', label: '▶ Activate' };
   if (!fund) return { step: 'blocked', label: '⏳ Checking fund…' };
   if (fund.error) return { step: 'blocked', label: '▶ Activate' };
   if (!fund.exists) return { step: 'create', label: `⚸ Create ${PINNER_CAMPAIGN_FUND}` };
   if (!fund.active) return { step: 'restore', label: `⚸ Restore ${PINNER_CAMPAIGN_FUND}` };
+  if (shortfallText) return { step: 'fund', label: `▶ Fund ${shortfallText} & Activate` };
   if (shortfallUnits > 0n) return { step: 'fund', label: `▶ Fund ${money(shortfallUnits)} & Activate` };
   return { step: 'activate', label: '▶ Sign & Activate' };
 }
@@ -112,11 +124,25 @@ export function openPinnerCampaignEditor({ campaign = null, source = null, start
   let savedSnapshot = values.id ? JSON.stringify(safePayload()) : '';
   let rate = cachedEthUsd();
   let fund = null, fundRead = 0, features = null, campaigns = [], supporters = null, busy = false;
-  const asset = () => CAMPAIGN_ASSETS[values.asset];
-  const money = units => formatAssetUnits(units, asset());
-  const usd = units => values.asset === 'eth' ? weiToUsdText(units, rate) : '';
+  const asset = () => PINNER_BONUS_ASSETS[values.asset];
+  const moneyIn = (units, id) => formatAssetUnits(units, PINNER_BONUS_ASSETS[id]);
+  const money = units => moneyIn(units, values.asset);
+  const usdIn = (units, id) => id === 'eth' ? weiToUsdText(units, rate) : '';
+  const usd = units => usdIn(units, values.asset);
   const both = units => usd(units) ? `${money(units)} (${usd(units)})` : money(units);
-  const budgetUnits = () => { try { return BigInt(pinnerCampaignAmounts(values.rewardUnits, values.maxAwards, values.asset).budgetUnits); } catch { return 0n; } };
+  const gifts = () => GIFT_ORDER.filter(id => id === values.asset || values.extras[id] !== undefined)
+    .map(id => ({ id, rewardUnits: id === values.asset ? values.rewardUnits : values.extras[id] }));
+  const budgetIn = id => {
+    const gift = gifts().find(g => g.id === id);
+    try { return gift ? BigInt(pinnerCampaignAmounts(gift.rewardUnits, values.maxAwards, id).budgetUnits) : 0n; } catch { return 0n; }
+  };
+  const budgetUnits = () => budgetIn(values.asset);
+  const giftKey = () => gifts().map(g => g.id).join();
+  const fundReady = () => !!fund && fund.key === giftKey();
+  const availability = (id = values.asset) => fundReady() && !fund.error && fund.exists && fund.balances[id] !== undefined
+    ? pinnerFundAvailability({ balanceUnits: fund.balances[id], campaigns, campaignId: values.id, asset: id, needUnits: budgetIn(id) })
+    : null;
+  const shortfalls = () => gifts().map(g => ({ id: g.id, units: availability(g.id)?.shortfall ?? 0n })).filter(x => x.units > 0n);
   const full = () => pinnerFullDays(values.startsAt, values.endsAt);
   function safePayload() { try { return pinnerCampaignPayload(values); } catch { return null; } }
 
@@ -130,7 +156,7 @@ export function openPinnerCampaignEditor({ campaign = null, source = null, start
   info.append(
     el('span', 'rc-info-line', '1 · Pick the timebox. Pinners register, then keep the community catalogue pinned on their own checked IPFS node.'),
     el('span', 'rc-info-line', `2 · Each full New York day counts when the node passes 90% of at least 20 independent spot checks. The required days default to ${Math.round(PINNER_DEFAULT_DAY_SHARE * 100)}% of the campaign's full days; days need not be consecutive.`),
-    el('span', 'rc-info-line', '3 · The first finishers, up to the award cap, earn the fixed ETH or USDC bonus plus any Supporter NFT, paid through Payroll after review.'),
+    el('span', 'rc-info-line', '3 · The first finishers, up to the award cap, earn every fixed bonus you pick (ETH and/or USDC, optionally plus Ommm) and any Supporter NFT, paid through Payroll after review.'),
     el('span', 'rc-info-line', `4 · Bonuses come from ${PINNER_CAMPAIGN_FUND}, separate from the weekly dbusk-pinners USDC share every pinner already earns.`),
     el('span', 'rc-info-line', '5 · One button walks the setup: create the fund once → deposit any shortfall → sign to activate. The fund is earmarked and admin-recoverable, not escrow.'));
   header.append(el('span', 'rc-badge', '📌'), heading, pill('ⓘ', 'How it works', () => { info.hidden = !info.hidden; }),
@@ -225,36 +251,26 @@ export function openPinnerCampaignEditor({ campaign = null, source = null, start
     renderRequirements();
   });
   let renderGift = () => {};
+  const supporterKey = token => token ? `${String(token.contract).toLowerCase()}:${token.tokenId}` : '';
   const giftText = () => {
     const token = values.supporter;
-    const name = token ? supporters?.tokens?.find(t => `${t.contract}:${t.tokenId}` === `${token.contract.toLowerCase()}:${token.tokenId}`)?.name || `Supporter #${token.tokenId}` : '';
-    return `${both(values.rewardUnits)} each · ${money(budgetUnits())} total${token ? ` · 🎖 ${name}` : ''}`;
+    const name = token ? supporters?.tokens?.find(t => `${t.contract}:${t.tokenId}` === supporterKey(token))?.name || `Supporter #${token.tokenId}` : '';
+    const each = gifts().map(g => g.id === 'eth' ? both(g.rewardUnits) : moneyIn(g.rewardUnits, g.id)).join(' + ');
+    const total = gifts().map(g => moneyIn(budgetIn(g.id), g.id)).join(' + ');
+    return `${each} each · ${total} total${token ? ` · 🎖 ${name}` : ''}`;
   };
   const giftRow = row('🎁', 'The gift', giftText, (body, done) => {
-    const picks = Object.values(CAMPAIGN_ASSETS).map(a => {
-      const button = pill(`${a.icon} ${a.symbol}`, `Pay the bonus in ${a.symbol}`, () => chooseAsset(a.id));
-      button.dataset.asset = a.id;
+    const picks = GIFT_ORDER.map(id => {
+      const a = PINNER_BONUS_ASSETS[id];
+      const button = pill(`${a.icon} ${a.symbol}`, `Include a ${a.symbol} bonus`, () => toggleGift(id));
+      button.dataset.asset = id;
       return button;
     });
-    const money_ = el('label', 'rc-money');
-    const reward = el('input'), hint = el('small', 'rc-usd');
-    reward.inputMode = 'decimal'; reward.size = 9;
-    reward.addEventListener('input', () => {
-      const units = parseAssetAmount(reward.value, asset());
-      reward.classList.toggle('is-bad', !units || BigInt(units) <= 0n);
-      if (units && BigInt(units) > 0n) values.rewardUnits = units;
-      hint.textContent = usd(values.rewardUnits);
-      changed();
-    });
-    const symbol = el('span', 'rc-dollar');
-    money_.append(el('small', 'rc-field-name', 'Bonus per finisher'), symbol, reward, hint);
-    const select = el('select');
-    select.setAttribute('aria-label', 'Supporter NFT gift');
-    select.addEventListener('change', () => {
-      const [contract, tokenId] = select.value.split(':');
-      values.supporter = contract ? { chainId: 8453, contract, tokenId, quantity: 1 } : null;
-      renderGift(); changed();
-    });
+    const amounts = el('div', 'rc-gift-amounts');
+    const nftLabel = el('small', 'rc-field-name', '🎖 Supporter NFT');
+    const choices = el('div', 'rc-choices');
+    choices.setAttribute('role', 'group');
+    choices.setAttribute('aria-label', 'Supporter NFT gift');
     const stock = el('p', 'rc-help');
     const manual = el('details', 'promotion-manual-nft');
     const contract = el('input'), tokenId = el('input');
@@ -265,52 +281,93 @@ export function openPinnerCampaignEditor({ campaign = null, source = null, start
       renderGift(); changed();
     });
     manual.append(el('summary', '', 'Other ERC-1155 token'), contract, tokenId, useManual);
+    const choice = (text, key, label) => {
+      const button = pill(text, label, () => {
+        const [address, id] = key.split(':');
+        values.supporter = address ? { chainId: 8453, contract: address, tokenId: id, quantity: 1 } : null;
+        renderGift(); changed();
+      });
+      button.classList.add('rc-choice');
+      button.setAttribute('aria-pressed', String(key === supporterKey(values.supporter)));
+      button.classList.toggle('is-on', key === supporterKey(values.supporter));
+      return button;
+    };
+    let amountKey = '';
     renderGift = () => {
-      picks.forEach(button => button.classList.toggle('is-on', button.dataset.asset === values.asset));
-      symbol.textContent = values.asset === 'eth' ? 'Ξ' : '$';
-      reward.value = formatAssetUnits(values.rewardUnits, asset()).replace(/^[$Ξ]/, '').replace(/,/g, '').replace(/ (?:ETH|USDC)$/, '');
-      reward.setAttribute('aria-label', `Bonus per finisher (${asset().symbol})`);
-      hint.textContent = usd(values.rewardUnits);
-      const chosen = values.supporter ? `${values.supporter.contract.toLowerCase()}:${values.supporter.tokenId}` : '';
-      const options = [new Option('No NFT gift', '')];
-      for (const token of supporters?.tokens || []) options.push(new Option(`🎖 ${token.name} · #${token.tokenId} · ${token.balance} held`, `${token.contract}:${token.tokenId}`));
-      if (chosen && !options.some(option => option.value === chosen)) options.push(new Option(`🎖 #${values.supporter.tokenId} · ${values.supporter.contract.slice(0, 8)}…`, chosen));
-      select.replaceChildren(...options);
-      select.value = chosen;
+      picks.forEach(button => {
+        const on = gifts().some(g => g.id === button.dataset.asset);
+        button.classList.toggle('is-on', on);
+        button.setAttribute('aria-pressed', String(on));
+      });
+      const key = gifts().map(g => g.id).join();
+      if (key !== amountKey || !amounts.contains(document.activeElement)) {
+        amountKey = key;
+        amounts.replaceChildren(...gifts().map(g => {
+          const a = PINNER_BONUS_ASSETS[g.id];
+          const line = el('label', 'rc-money');
+          const input = el('input'), hint = el('small', 'rc-usd', usdIn(g.rewardUnits, g.id));
+          input.inputMode = 'decimal'; input.size = 9;
+          input.value = formatAssetUnits(g.rewardUnits, a).replace(/^[$Ξ]/, '').replace(/,/g, '').replace(/ (?:ETH|USDC|Ommm)$/, '');
+          input.setAttribute('aria-label', `Bonus per finisher (${a.symbol})`);
+          input.addEventListener('input', () => {
+            const units = parseAssetAmount(input.value, a);
+            const ok = units && BigInt(units) > 0n;
+            input.classList.toggle('is-bad', !ok);
+            if (ok) { if (g.id === values.asset) values.rewardUnits = units; else values.extras[g.id] = units; }
+            hint.textContent = usdIn(ok ? units : g.rewardUnits, g.id);
+            changed();
+          });
+          line.append(el('small', 'rc-field-name', g.id === values.asset ? 'Bonus per finisher' : 'Plus per finisher'),
+            el('span', 'rc-dollar', g.id === 'eth' ? 'Ξ' : g.id === 'usdc' ? '$' : a.icon), input, hint);
+          return line;
+        }));
+      }
+      const chosen = supporterKey(values.supporter);
+      const list = [choice('No NFT', '', 'No Supporter NFT gift')];
+      for (const token of supporters?.tokens || []) {
+        list.push(choice(`🎖 ${token.name} · #${token.tokenId} · ${token.balance} held`, `${token.contract}:${token.tokenId}`, `Gift ${token.name} #${token.tokenId}`));
+      }
+      if (chosen && !list.some(b => b.getAttribute('aria-pressed') === 'true')) {
+        list.push(choice(`🎖 #${values.supporter.tokenId} · ${values.supporter.contract.slice(0, 8)}…`, chosen, `Gift Supporter #${values.supporter.tokenId}`));
+      }
+      choices.replaceChildren(...list);
       const held = supporters?.tokens?.find(t => `${t.contract}:${t.tokenId}` === chosen);
       stock.dataset.tone = held && BigInt(held.balance) < BigInt(values.maxAwards || 0) ? 'error' : '';
       stock.textContent = !supporters ? '🎖 Reading Supporter NFTs in the admin wallet…'
         : supporters.error ? `🎖 Wallet inventory unavailable (${supporters.error}); use another ERC-1155 token below.`
         : held && BigInt(held.balance) < BigInt(values.maxAwards || 0) ? `⚠️ ${held.balance} held for ${values.maxAwards} awards. Activation needs one per award; lower the cap or top up.`
         : held ? `🎖 ${held.balance} held · one per finisher, sent from the admin wallet after approval (not escrowed).`
-        : values.supporter ? '🎖 Not found in the admin wallet inventory; activation checks it on Base.' : 'Optional NFT, one per finisher.';
+        : values.supporter ? '🎖 Not found in the admin wallet inventory; activation checks it on Base.'
+        : supporters.tokens.length ? 'Optional NFT, one per finisher.' : 'No Supporter NFTs found in the admin wallet; use another ERC-1155 token below.';
     };
     const assets = el('div', 'rc-inline');
     assets.append(...picks);
-    body.append(assets, money_, select, stock, manual, pill('✓', 'Done', done));
+    body.append(assets, amounts, nftLabel, choices, stock, manual, pill('✓', 'Done', done));
     renderGift();
   });
-  async function chooseAsset(to) {
-    if (to === values.asset) return;
-    rate = rate || await loadEthUsd();
-    const next = rate ? convertCampaignUnits(values.rewardUnits, values.asset, to, rate) : null;
-    values.rewardUnits = next && BigInt(next) > 0n ? next : to === 'eth' ? '2000000000000000' : '5000000';
-    values.asset = to;
+  function toggleGift(id) {
+    const on = gifts().some(g => g.id === id);
+    if (on && id === values.asset) {
+      const next = ['eth', 'usdc'].find(other => other !== id && values.extras[other] !== undefined);
+      if (!next) return say('Keep an ETH or USDC bonus; Ommm can only ride alongside one for now.', 'error');
+      values.asset = next;
+      values.rewardUnits = values.extras[next];
+      delete values.extras[next];
+    } else if (on) delete values.extras[id];
+    else values.extras[id] = GIFT_DEFAULTS[id];
+    say();
     fund = null;
     renderGift(); changed();
     void refreshFund();
   }
-  const fundRow = row('🏦', 'Fund', () => !fund ? `${PINNER_CAMPAIGN_FUND} · checking…`
+  const fundRow = row('🏦', 'Fund', () => !fundReady() ? `${PINNER_CAMPAIGN_FUND} · checking…`
     : fund.error ? `${PINNER_CAMPAIGN_FUND} · unavailable`
     : !fund.exists ? `${PINNER_CAMPAIGN_FUND} · not created yet`
-    : `${PINNER_CAMPAIGN_FUND} · ${money(availability()?.free ?? 0n)} free`);
+    : `${PINNER_CAMPAIGN_FUND} · ${gifts().map(g => moneyIn(availability(g.id)?.free ?? 0n, g.id)).join(' + ')} free`);
   const claimsRow = dateRow('⏳', 'Claims close', 'claimDeadline');
+  claimsRow.wrap.querySelector('.rc-edit')?.append(el('p', 'rc-help', 'Finishers have until this time to submit claims; it defaults to 7 days after the end.'));
   const allocation = el('p', 'rc-allocation');
-  rows.append(titleRow.wrap, startRow.wrap, endRow.wrap, requirementsRow.wrap, giftRow.wrap, fundRow.wrap, allocation);
-  const advanced = el('details', 'rc-advanced');
-  advanced.append(el('summary', 'rc-help', 'Advanced · claims close'), claimsRow.wrap,
-    el('p', 'rc-help', 'Finishers have until this time to submit claims; it defaults to 7 days after the end.'));
-  rows.append(advanced);
+  rows.append(titleRow.wrap, startRow.wrap, endRow.wrap, claimsRow.wrap, requirementsRow.wrap, giftRow.wrap, fundRow.wrap, allocation);
 
   const footer = el('footer', 'rc-foot');
   const saveButton = pill('💾 Save draft', 'Save this draft without activating');
@@ -319,31 +376,34 @@ export function openPinnerCampaignEditor({ campaign = null, source = null, start
   runButton.type = 'button';
   footer.append(discard, saveButton, runButton);
 
-  const availability = () => fund && !fund.error && fund.exists && fund.asset === values.asset
-    ? pinnerFundAvailability({ balanceUnits: fund.balanceUnits, campaigns, campaignId: values.id, asset: values.asset, needUnits: budgetUnits() })
-    : null;
   const dirty = () => !values.id || JSON.stringify(safePayload()) !== savedSnapshot;
   let step = { step: 'blocked' };
   function check() {
     const payload = (() => { try { return pinnerCampaignPayload(values); } catch (error) { return error; } })();
     const valid = !(payload instanceof Error);
+    const extras = gifts().filter(g => g.id !== values.asset);
     const workerReady = features?.pinnerCampaign === PINNER_CAMPAIGN_VERSION &&
-      (values.asset === 'eth' || features?.pinnerCampaignAssets?.includes(values.asset));
-    const need = budgetUnits();
-    const avail = availability();
-    step = pinnerNextStep({ valid, workerReady, fund: fund?.error || fund?.asset === values.asset ? fund : null,
-      shortfallUnits: avail?.shortfall ?? 0n, money });
+      (values.asset === 'eth' || features?.pinnerCampaignAssets?.includes(values.asset)) &&
+      extras.every(g => features?.pinnerExtraRewards?.includes(g.id));
+    const ommmBlocked = values.extras.ommm !== undefined && fundReady() && fund.ommmApproved === false;
+    const short = shortfalls();
+    step = pinnerNextStep({ valid: valid && !ommmBlocked, workerReady, fund: fundReady() ? fund : null,
+      shortfallText: short.map(x => moneyIn(x.units, x.id)).join(' + '), money });
     let message, tone = 'info';
     if (!valid) { message = `⚠️ ${payload.message}`; tone = 'error'; }
     else if (!features) message = '⏳ Loading campaign service…';
-    else if (!workerReady) { message = `The campaign service does not accept ${asset().symbol} pinning bonuses yet; try again after it redeploys.`; tone = 'error'; }
-    else if (fund?.error) { message = `⚠️ ${fund.error}`; tone = 'error'; }
+    else if (!workerReady) { message = `The campaign service does not accept ${gifts().map(g => PINNER_BONUS_ASSETS[g.id].symbol).join(' + ')} pinning bonuses yet; try again after it redeploys.`; tone = 'error'; }
+    else if (fundReady() && fund.error) { message = `⚠️ ${fund.error}`; tone = 'error'; }
+    else if (ommmBlocked) { message = '⚠️ Ommm is not yet an approved asset on the Settlements Router. An asset admin must approve it (setAssetApproved) before Ommm bonuses can be funded.'; tone = 'error'; }
     else if (step.step === 'blocked') message = '⏳ Checking fund on Base…';
     else if (step.step === 'create') message = `Step 1 · Create ${PINNER_CAMPAIGN_FUND} on Base (one signature for its public metadata, one transaction). Every pin reward campaign draws from it.`;
     else if (step.step === 'restore') { message = `${PINNER_CAMPAIGN_FUND} is archived; restore it in Fund Allocations.`; tone = 'error'; }
     else {
-      message = `Reserving ${both(need)} of ${money(avail.free)} free${avail.others ? ` (${money(avail.others)} held by other pinner campaigns)` : ''}` +
-        (step.step === 'fund' ? ` · ${money(avail.shortfall)} more will be deposited from your wallet.` : ' · fund covers it.');
+      message = gifts().map(g => {
+        const avail = availability(g.id);
+        const need = budgetIn(g.id);
+        return `Reserving ${g.id === 'eth' ? `${moneyIn(need, 'eth')}${usdIn(need, 'eth') ? ` (${usdIn(need, 'eth')})` : ''}` : moneyIn(need, g.id)} of ${moneyIn(avail?.free ?? 0n, g.id)} free${avail?.others ? ` (${moneyIn(avail.others, g.id)} held by other pinner campaigns)` : ''}`;
+      }).join(' · ') + (step.step === 'fund' ? ` · ${short.map(x => moneyIn(x.units, x.id)).join(' + ')} more will be deposited from your wallet.` : ' · fund covers it.');
       if (dirty()) message += values.id ? ' Your edits are saved first.' : ' The draft is saved first.';
     }
     allocation.textContent = message;
@@ -364,18 +424,23 @@ export function openPinnerCampaignEditor({ campaign = null, source = null, start
   }
   async function refreshFund() {
     const read = ++fundRead;
-    const want = values.asset;
-    const [onchain, state] = await Promise.allSettled([
-      readCampaignFund(PINNER_CAMPAIGN_FUND, { asset: CAMPAIGN_ASSETS[want] }), fetchPromotionsState()]);
+    const want = gifts().map(g => g.id);
+    const key = want.join();
+    const reader = getBaseReadProvider();
+    const [state, approval, ...onchain] = await Promise.allSettled([fetchPromotionsState(),
+      want.includes('ommm') && window.ethers && reader
+        ? new window.ethers.Contract(ROUTER, ROUTER_ABI, reader).approvedAssets(PINNER_BONUS_ASSETS.ommm.address) : Promise.resolve(null),
+      ...want.map(id => readCampaignFund(PINNER_CAMPAIGN_FUND, { asset: PINNER_BONUS_ASSETS[id] }))]);
     if (read !== fundRead || !dialog.isConnected) return fund;
     if (state.status === 'fulfilled') {
       features = state.value.features || {};
       campaigns = state.value.campaigns || [];
     }
-    const failure = onchain.status === 'rejected' ? onchain.reason : state.status === 'rejected' ? state.reason : null;
-    const next = failure ? { asset: want, error: failure.shortMessage || failure.message || 'Fund check unavailable' }
-      : { ...onchain.value, asset: want, revision: state.value.revision };
-    fund = next;
+    const failure = onchain.find(r => r.status === 'rejected')?.reason || (state.status === 'rejected' ? state.reason : null);
+    fund = failure ? { key, error: failure.shortMessage || failure.message || 'Fund check unavailable' }
+      : { key, exists: onchain[0].value.exists, active: onchain[0].value.active, revision: state.value.revision,
+        ommmApproved: approval.status === 'fulfilled' ? approval.value : null,
+        balances: Object.fromEntries(want.map((id, i) => [id, onchain[i].value.balanceUnits])) };
     check();
     return fund;
   }
@@ -394,18 +459,33 @@ export function openPinnerCampaignEditor({ campaign = null, source = null, start
     campaigns = result.campaigns || campaigns;
     return result;
   }
-  async function deposit(amount) {
+  async function deposit(id, amount) {
     const w = await promotionWallet();
     const router = new w.ethers.Contract(ROUTER, ROUTER_ABI, w.signer);
-    if (values.asset === 'eth') {
-      say(`🦊 Confirm the ${money(amount)} deposit`);
-      const tx = await router.fundNative(w.ethers.id(PINNER_CAMPAIGN_FUND), { value: amount });
+    const fundId = w.ethers.id(PINNER_CAMPAIGN_FUND);
+    const a = PINNER_BONUS_ASSETS[id];
+    if (id === 'eth') {
+      say(`🦊 Confirm the ${moneyIn(amount, id)} deposit`);
+      const tx = await router.fundNative(fundId, { value: amount });
       say('⏳ Depositing on Base…');
       if ((await tx.wait())?.status !== 1) throw new Error('ETH deposit did not confirm');
-    } else {
+    } else if (id === 'usdc') {
       await depositSettlementUsdc({ router, token: new w.ethers.Contract(PROMOTIONS_USDC, TOKEN_ABI, w.signer),
-        signer: w.signer, owner: w.address, fundId: w.ethers.id(PINNER_CAMPAIGN_FUND), amountUnits: amount,
+        signer: w.signer, owner: w.address, fundId, amountUnits: amount,
         onStep: text => say(`🦊 ${text}`) });
+    } else {
+      const token = new w.ethers.Contract(a.address, TOKEN_ABI, w.signer);
+      if (!await router.approvedAssets(a.address)) throw new Error(`${a.symbol} is not approved on the Settlements Router`);
+      if (Number(await token.decimals()) !== a.decimals) throw new Error(`Configured ${a.symbol} token has unexpected decimals`);
+      if (await token.balanceOf(w.address) < amount) throw new Error(`Admin wallet holds less than ${moneyIn(amount, id)}`);
+      if (await token.allowance(w.address, ROUTER) < amount) {
+        say(`🦊 Approve exactly ${moneyIn(amount, id)} for the router`);
+        if ((await (await token.approve(ROUTER, amount)).wait())?.status !== 1) throw new Error(`${a.symbol} approval did not confirm`);
+      }
+      say(`🦊 Confirm the ${moneyIn(amount, id)} deposit`);
+      const tx = await router.fundToken(fundId, a.address, amount);
+      say('⏳ Depositing on Base…');
+      if ((await tx.wait())?.status !== 1) throw new Error(`${a.symbol} deposit did not confirm`);
     }
     await w.check();
     document.dispatchEvent(new CustomEvent('settlement-fund-changed', { detail: { slug: PINNER_CAMPAIGN_FUND } }));
@@ -439,11 +519,10 @@ export function openPinnerCampaignEditor({ campaign = null, source = null, start
     if (dirty()) await save();
     const current = await refreshFund();
     if (!current || current.error || !current.exists || !current.active) throw new Error(current?.error || `${PINNER_CAMPAIGN_FUND} is not ready`);
-    const shortfall = availability()?.shortfall ?? 0n;
-    if (shortfall > 0n) {
-      await deposit(shortfall);
+    for (const { id, units } of shortfalls()) await deposit(id, units);
+    if (shortfalls().length || gifts().some(g => !availability(g.id))) {
       await refreshFund();
-      if ((availability()?.shortfall ?? 1n) > 0n) throw new Error('Deposit confirmed but the fund still reads short; refresh and retry');
+      if (gifts().some(g => (availability(g.id)?.shortfall ?? 1n) > 0n)) throw new Error('Deposit confirmed but the fund still reads short; refresh and retry');
     }
     if (values.supporter) {
       const held = supporters?.tokens?.find(t => `${t.contract}:${t.tokenId}` === `${values.supporter.contract.toLowerCase()}:${values.supporter.tokenId}`);

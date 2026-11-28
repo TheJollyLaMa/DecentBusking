@@ -9,6 +9,11 @@ export const CAMPAIGN_ASSETS = Object.freeze({
   usdc: Object.freeze({ id: 'usdc', address: PROMOTIONS_USDC, decimals: 6, symbol: 'USDC', icon: '💵' }),
   eth: Object.freeze({ id: 'eth', address: PROMOTIONS_ETH, decimals: 18, symbol: 'ETH', icon: 'Ξ' }),
 });
+// Shared Ommm v1 on Base (DLang public/dlang/ommm-deployment.json). Pinner campaigns may promise it as an extra bonus.
+export const OMMM_V1_BASE = '0xD3244Ac3552e983bdf2b9DD5c0FE51410447b778';
+export const PINNER_BONUS_ASSETS = Object.freeze({ ...CAMPAIGN_ASSETS,
+  ommm: Object.freeze({ id: 'ommm', address: OMMM_V1_BASE, decimals: 18, symbol: 'Ommm', icon: '🕉' }) });
+export const rewardAsset = id => PINNER_BONUS_ASSETS[id] || null;
 export function campaignAsset(campaign) {
   return CAMPAIGN_ASSETS[campaign?.asset === 'eth' ? 'eth' : 'usdc'];
 }
@@ -22,10 +27,11 @@ export function formatAssetUnits(value, asset = CAMPAIGN_ASSETS.usdc) {
     return `$${whole.toLocaleString('en-US')}${cents === '00' ? '' : `.${cents}`}`;
   }
   const fraction = String(amount % scale).padStart(asset.decimals, '0').slice(0, 6).replace(/0+$/, '');
+  if (asset.id === 'ommm') return `${whole.toLocaleString('en-US')}${fraction ? `.${fraction}` : ''} Ommm`;
   return `Ξ${whole}${fraction ? `.${fraction}` : ''}`;
 }
 export function parseAssetAmount(value, asset = CAMPAIGN_ASSETS.usdc) {
-  const places = asset.id === 'eth' ? 6 : 2;
+  const places = asset.id === 'usdc' ? 2 : 6;
   const match = new RegExp(`^[$Ξ]?\\s*(\\d{1,9})(?:\\.(\\d{1,${places}}))?$`).exec(String(value).trim());
   if (!match) return null;
   const scale = 10n ** BigInt(asset.decimals);
@@ -253,15 +259,31 @@ export const PINNER_PROMOTION_DRAFT = Object.freeze({
   qualifyingDays: 30, rewardUsdCents: 500, budgetUsdCents: 2500, maxAwards: 5, nftReward: null,
 });
 export const PINNER_CAMPAIGN_VERSION = 'pinner-eth-v2';
-const MAX_PINNER_REWARD = { eth: 100n * 10n ** 18n, usdc: 100000n * 10n ** 6n };
+const MAX_PINNER_REWARD = { eth: 100n * 10n ** 18n, usdc: 100000n * 10n ** 6n, ommm: 10000000n * 10n ** 18n };
+const PINNER_REWARD_LIMIT_TEXT = { eth: 'Set a positive ETH bonus of at most 100 ETH',
+  usdc: 'Set a positive USDC bonus of at most 100,000 USDC', ommm: 'Set a positive Ommm bonus of at most 10,000,000 Ommm' };
 // The asset amount is the fixed promise; any USD figure shown beside an ETH reward is a live, informational estimate.
 export function pinnerCampaignAmounts(rewardUnits, maxAwards, asset = 'eth') {
-  const id = asset === 'usdc' ? 'usdc' : 'eth';
+  const id = asset === 'usdc' || asset === 'ommm' ? asset : 'eth';
   if (!/^[1-9]\d{0,29}$/.test(String(rewardUnits ?? '')) || BigInt(rewardUnits) > MAX_PINNER_REWARD[id]) {
-    throw new Error(id === 'eth' ? 'Set a positive ETH bonus of at most 100 ETH' : 'Set a positive USDC bonus of at most 100,000 USDC');
+    throw new Error(PINNER_REWARD_LIMIT_TEXT[id]);
   }
   if (!Number.isSafeInteger(maxAwards) || maxAwards < 1 || maxAwards > 1000) throw new Error('Award cap must be 1–1000');
   return { rewardUnits: String(rewardUnits), budgetUnits: (BigInt(rewardUnits) * BigInt(maxAwards)).toString() };
+}
+// Optional extra fixed bonuses paid alongside the primary ETH or USDC bonus, one entry per other asset.
+export function pinnerExtraRewards(campaign) {
+  const list = campaign?.extraRewards ?? [];
+  if (!Array.isArray(list) || list.length > 2) throw new Error('Choose at most two extra bonus assets');
+  const seen = new Set([campaignAsset(campaign).id]);
+  return list.map(item => {
+    const asset = String(item?.asset || '');
+    if (!PINNER_BONUS_ASSETS[asset] || seen.has(asset)) throw new Error('Each bonus asset can be chosen once');
+    seen.add(asset);
+    const amounts = pinnerCampaignAmounts(item.rewardUnits, campaign.maxAwards, asset);
+    if (item.budgetUnits !== undefined && String(item.budgetUnits) !== amounts.budgetUnits) throw new Error('Extra bonus budget must equal bonus × award cap');
+    return { asset, ...amounts };
+  });
 }
 export const pinnerEthAmounts = (rewardUnits, maxAwards) => pinnerCampaignAmounts(rewardUnits, maxAwards, 'eth');
 export const PINNER_DEFAULT_DAY_SHARE = 0.9;
@@ -295,7 +317,8 @@ export function pinnerPromotionAmounts(ethUsdMicros, { rewardUsdCents = 500, max
 }
 export function pinnerCampaignTerms(campaign) {
   const nft = promotionSupporterRewards(campaign) || [];
-  return `${campaign.maxAwards} bonuses maximum, first to complete ${campaign.qualifyingDays} qualifying full New York calendar days after joining and inside the offer window; days need not be consecutive. Each day requires at least 20 independent node checks and 90% availability. Completion time, then registration time, then wallet address break ties; one bonus per Discord-linked identity per campaign. ${campaignAsset(campaign).id === 'usdc' ? `${promotionMoney(campaign.rewardUnits, CAMPAIGN_ASSETS.usdc)} per approved participant. The USDC amount is fixed.` : `${promotionMoney(campaign.rewardUnits, CAMPAIGN_ASSETS.eth)} per approved participant. The ETH amount is fixed; any USD value shown is a live estimate that moves with the market and is not promised.`} ${nft.length ? `NFT gifts: ${nft.map(token => `${token.contract} #${token.tokenId}`).join(', ')}, one each per approved winner, separately delivered from admin inventory.` : 'No NFT gift is promised.'} These campaign bonuses come from ${PINNER_CAMPAIGN_FUND}, separately from ordinary weekly USDC rewards in dbusk-pinners. Funds are earmarked, not escrowed; evidence, disputes and owner-signed Payroll are required. Wallet, daily stats, evidence and receipts are public on IPFS; no private data.`;
+  const extras = pinnerExtraRewards(campaign);
+  return `${campaign.maxAwards} bonuses maximum, first to complete ${campaign.qualifyingDays} qualifying full New York calendar days after joining and inside the offer window; days need not be consecutive. Each day requires at least 20 independent node checks and 90% availability. Completion time, then registration time, then wallet address break ties; one bonus per Discord-linked identity per campaign. ${campaignAsset(campaign).id === 'usdc' ? `${promotionMoney(campaign.rewardUnits, CAMPAIGN_ASSETS.usdc)} per approved participant. The USDC amount is fixed.` : `${promotionMoney(campaign.rewardUnits, CAMPAIGN_ASSETS.eth)} per approved participant. The ETH amount is fixed; any USD value shown is a live estimate that moves with the market and is not promised.`}${extras.length ? ` Plus ${extras.map(x => promotionMoney(x.rewardUnits, rewardAsset(x.asset))).join(' and ')} per approved participant; these amounts are also fixed.` : ''} ${nft.length ? `NFT gifts: ${nft.map(token => `${token.contract} #${token.tokenId}`).join(', ')}, one each per approved winner, separately delivered from admin inventory.` : 'No NFT gift is promised.'} These campaign bonuses come from ${PINNER_CAMPAIGN_FUND}, separately from ordinary weekly USDC rewards in dbusk-pinners. Funds are earmarked, not escrowed; evidence, disputes and owner-signed Payroll are required. Wallet, daily stats, evidence and receipts are public on IPFS; no private data.`;
 }
 export const PROMOTION_TEMPLATES = [
   { id: 'album', title: 'Bring your album', criteria: 'Bring an album with the stated minimum number of original tracks and rights to publish. Supply approved radio catalog and qualifying delivery evidence for admin review.' },
@@ -316,10 +339,10 @@ export function promotionWorkReference(claim, legId = '') {
   return `decentbusking:promotions:v1:8453:${claim.campaignId}:${claim.wallet.toLowerCase()}${legId ? `:${legId}` : ''}`;
 }
 export function promotionMoney(value, asset = CAMPAIGN_ASSETS.usdc) {
-  if (asset.id === 'eth') {
+  if (asset.id === 'eth' || asset.id === 'ommm') {
     const units = BigInt(value);
     const fraction = (units % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, '');
-    return `${units / 10n ** 18n}${fraction ? `.${fraction}` : ''} ETH`;
+    return `${units / 10n ** 18n}${fraction ? `.${fraction}` : ''} ${asset.symbol}`;
   }
   const amount = BigInt(value);
   const fraction = String(amount % 1000000n).padStart(6, '0').replace(/0+$/, '').padEnd(2, '0');
