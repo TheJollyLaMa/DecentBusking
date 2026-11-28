@@ -104,8 +104,8 @@
       "./js/fund-contribution.mjs?v=20261124-fund-bunny":"./js/fund-contribution.mjs?v=20261128-pinner-eth",
       "./js/fund-contribution.mjs?v=20261124-fund-bunny-keys":"./js/fund-contribution.mjs?v=20261128-pinner-eth",
       "./js/profile-inbox.mjs?v=20261127-for-you":"./js/profile-inbox.mjs?v=20261128-pinner-eth",
-      "./js/fund-admin.mjs?v=20261124-admin-funds":"./js/fund-admin.mjs?v=20261129-pinner-fund-load",
-      "./js/fund-admin.mjs":"./js/fund-admin.mjs?v=20261129-pinner-fund-load",
+      "./js/fund-admin.mjs?v=20261124-admin-funds":"./js/fund-admin.mjs?v=20261128-fund-create",
+      "./js/fund-admin.mjs":"./js/fund-admin.mjs?v=20261128-fund-create",
       "./js/eth-usd-quote.mjs":"./js/eth-usd-quote.mjs?v=20261128-pinner-eth"
     }}
   </script>
@@ -1249,13 +1249,13 @@
           <label id="router-custom-fund-label" hidden>New fund slug<input id="router-custom-fund-slug" type="text" minlength="3" maxlength="64" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="community-grants" autocomplete="off" /><span class="payroll-field-hint">Choose a short purpose ID: lowercase letters/numbers with single hyphens. Example: <code>community-grants</code>. This becomes the permanent on-chain fund ID.</span></label>
         </div>
         <form id="router-custom-fund-form" hidden>
-          <p class="payroll-fund-guide">1. Name &amp; purpose · 2. Save public metadata · 3. Create on Base. Then fund with ETH or USDC. Creation alone does not deposit money or publish a campaign.</p>
+          <p class="payroll-fund-guide">1. Name &amp; purpose · 2. Sign the public metadata upload · 3. Confirm the Create on Base transaction (the button runs both). Then fund with ETH or USDC. Creation alone does not deposit money or publish a campaign.</p>
           <div class="radio-payroll-controls">
             <label>Public fund name<input id="router-fund-name" type="text" maxlength="120" required placeholder="Suggested from your fund slug" /><span class="payroll-field-hint">Prefilled from the slug; edit it to make the purpose clear to contributors.</span></label>
             <label>Purpose and payout scope<textarea id="router-fund-purpose" rows="4" maxlength="2000" required placeholder="Suggested from your fund slug"></textarea><span class="payroll-field-hint">Explain what this allocation supports and who may be paid from it. This text is public metadata.</span></label>
             <label>Project or policy link (optional)<input id="router-fund-website" type="url" maxlength="2048" placeholder="https://..." /><span class="payroll-field-hint">Optional public reference for this fund.</span></label>
           </div>
-          <button id="router-save-metadata" class="payroll-btn payroll-btn-secondary" type="submit" disabled><img src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/cloud-upload.svg" width="18" height="18" alt="" /> Save Public Metadata to IPFS</button>
+          <button id="router-save-metadata" class="payroll-btn payroll-btn-secondary" type="submit" disabled><img src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/cloud-upload.svg" width="18" height="18" alt="" /> Save Metadata &amp; Create Fund on Base</button>
           <p id="router-metadata-status" class="payroll-status" role="status"></p>
         </form>
         <div class="radio-payroll-controls">
@@ -1434,7 +1434,7 @@
   <script type="module" src="js/content-review-ui.mjs?v=20261107-flags"></script>
 
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
-  <script type="module" src="js/payroll.js?v=20261126-pinner-dashboard"></script>
+  <script type="module" src="js/payroll.js?v=20261128-fund-create"></script>
   <link rel="stylesheet" href="css/playback-trends.css?v=20261127-weekly-story">
   <script type="module" src="js/radio-history.js?v=20261127-history-repair"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261127-dcal"></script>
@@ -1453,7 +1453,7 @@
   <script type="module" src="js/panel-equalizers.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/top-ten-live-meter.mjs?v=20261025-seamless-handoff"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261126-pinner-dashboard';
+    import { initPayroll } from './js/payroll.js?v=20261128-fund-create';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
   <script type="module">

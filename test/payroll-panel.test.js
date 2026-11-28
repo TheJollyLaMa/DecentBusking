@@ -153,7 +153,8 @@ test('fund purpose saves JSON to IPFS, fills its URI, and rejects failed or stal
     context.uploadResult = async () => 'ipfs://bafy-fund-purpose';
     vm.runInContext(`${source}\n_ownerAddress = owner; _payrollAssetConfig = { routerAddress };
       _getSigner = async () => signer; _refreshSettlementFund = async () => {};
-      globalThis.saveMetadata = _saveFundMetadata; globalThis.invalidateMetadata = _invalidateFundMetadata;`, context);
+      globalThis.saveMetadata = _saveFundMetadata; globalThis.invalidateMetadata = _invalidateFundMetadata;
+      globalThis.created = 0; _createSettlementFund = async () => { globalThis.created++; }; globalThis.saveAndCreate = _saveAndCreateFund;`, context);
     return { context, node, uploaded, router, signer, window };
   };
   const success = fixture();
@@ -174,6 +175,12 @@ test('fund purpose saves JSON to IPFS, fills its URI, and rejects failed or stal
   assert.equal(success.node('router-fund-metadata').value, 'ipfs://bafy-fund-purpose');
   success.context.invalidateMetadata();
   assert.equal(success.node('router-fund-metadata').value, '');
+  await success.context.saveAndCreate();
+  assert.equal(success.context.created, 1, 'a saved metadata upload continues straight into the creation transaction');
+  const unsigned = fixture();
+  unsigned.context.uploadResult = async () => { throw new Error('User rejected the upload signature'); };
+  await unsigned.context.saveAndCreate();
+  assert.equal(unsigned.context.created, 0, 'no creation transaction without saved metadata');
 
   for (const scenario of ['upload-failure', 'changed-details', 'changed-wallet', 'wrong-chain', 'missing-role', 'existing-fund', 'invalid-purpose', 'invalid-uri']) {
     const probe = fixture();
