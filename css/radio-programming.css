@@ -205,6 +205,27 @@
 .rc-status:empty { display: none; }
 .rc-status[data-tone=error] { color: #ffb5ae; }
 .rc-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 10px 14px 14px; }
+.promotion-blob [hidden] { display: none !important; }
+.promotion-blob .rc-rows { display: block; min-height: 0; overflow-y: auto; }
+.promotion-blob .rc-rows > button { margin: 4px 8px; }
+.promotion-blob .rc-rows p { color: var(--rc-soft); font-size: .8rem; line-height: 1.45; }
+.promotion-blob .promotion-blob-row > summary, .promotion-blob-review > summary,
+.promotion-blob-form > summary, .promotion-blob .promotion-card summary { list-style: none; cursor: pointer; }
+.promotion-blob summary::-webkit-details-marker { display: none; }
+.promotion-blob .rc-edit { display: grid; padding: 4px 12px 12px 44px; }
+.promotion-blob .rc-edit label { display: grid; gap: 5px; font-size: .78rem; color: var(--rc-soft); }
+.promotion-blob .rc-edit input:not([type=checkbox]), .promotion-blob .rc-edit select,
+.promotion-blob .rc-edit textarea { box-sizing: border-box; width: 100%; max-width: 100%; padding: 8px 10px; border: 1px solid #ffffff33; border-radius: 12px; background: #0b1220; color: var(--rc-ink); color-scheme: dark; font: inherit; }
+.promotion-blob .rc-edit textarea { min-height: 90px; resize: vertical; }
+.promotion-blob .promotion-blob-review, .promotion-blob .promotion-blob-form,
+.promotion-blob .promotion-card { margin: 6px 0; padding: 10px; border: 1px solid #ffffff20; border-radius: 18px; background: #ffffff09; overflow-wrap: anywhere; }
+.promotion-blob .promotion-card h3 { font-size: .95rem; }
+.promotion-blob .promotion-card button, .promotion-blob form > button {
+  margin: 4px 4px 0 0; padding: 8px 12px; border: 1px solid #ffffff2a; border-radius: 999px;
+  background: #ffffff12; color: inherit; font: inherit; cursor: pointer;
+}
+.promotion-blob .promotion-card a { color: #a8d4ff; }
+.promotion-blob [data-promo-funding] { margin: 8px; color: #a8d4ff; font-size: .78rem; overflow-wrap: anywhere; }
 .rc-match-notice { width: 100%; margin: 0; font-size: .76rem; line-height: 1.4; color: var(--rc-soft); }
 .referral-match-row { border-radius: 18px; }
 .referral-match-row a { color: #c8b5f4; text-decoration: none; }

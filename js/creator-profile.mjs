@@ -52,7 +52,7 @@ export function renderPromotionProfileSummary(container, state, wallet, ensName 
     return;
   }
   const walletLink = address => `<a href="https://basescan.org/address/${address}" target="_blank" rel="noopener">${address.slice(0, 6)}…${address.slice(-4)}</a>`;
-  target.innerHTML = profiles.map(item => item.template === 'pinner' ? pinnerCampaignStatsCard(item) : `<strong>${ensName || walletLink(wallet)} · Referral pilot</strong><br>` +
+  target.innerHTML = profiles.map(item => item.template === 'pinner' ? pinnerCampaignStatsCard(item) : `<strong>${ensName || walletLink(wallet)} · Referral Campaign</strong><br>` +
     `${item.qualifiedCount} qualified · pending ${promotionMoney(item.pendingUnits || '0', campaignAsset(item))} · approved ${promotionMoney(item.approvedUnits || '0', campaignAsset(item))} · paid ${promotionMoney(item.paidUnits || '0', campaignAsset(item))} · ` +
     `maximum ${promotionMoney(item.maxEarningsUnits || '0', campaignAsset(item))}<br>${item.referred.map(ref => `${walletLink(ref.wallet)}: ${ref.voteProgress}/10 votes, ${ref.trackState}`).join('<br>')}` +
     `<br>Supporter token: ${item.supporterToken.eligible ? (item.supporterToken.delivery === 'delivered' ? '🎖 delivered' : '🎖 earned, queued for delivery') : 'not yet earned'}.`).join('<hr>');
