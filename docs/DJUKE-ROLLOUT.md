@@ -864,8 +864,9 @@ Incomplete metadata or unavailable content must block automatic import.
 
 ## DJuke contract and policy gates
 
-Published JollyJukeBox mappings distinguish Polygon v1.2 from Optimism
-v1.2.4-v1.2.6. The v1.2.5 and v1.2.6 ABIs accept multiple album owners;
+Published JollyJukeBox mappings distinguish the retired Polygon v1.2 and
+Optimism v1.2.4-v1.2.6 deployments (legacy history only; Base is the current
+home for DJuke). The v1.2.5 and v1.2.6 ABIs accept multiple album owners;
 they do not expose retroactive artist editing or weighted share parameters.
 ABI evidence alone does not establish actual distribution or refund behavior.
 Verify the relevant Solidity sources before reusing those mechanisms.
