@@ -18,6 +18,7 @@ export function defaultSettlementFundMetadata(slug) {
   const fundSlug = validateSettlementFundSlug(slug);
   const name = fundSlug.split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
   const purposes = {
+    'dbusk-pinner-campaigns': 'Funds fixed-ETH bonuses for published Pin Reward Campaigns: pin the stated number of qualifying days inside the campaign timebox and receive the stated ETH bonus. Separate from the weekly dbusk-pinners USDC pot. Owner-managed and recoverable, not contributor-withdrawable escrow.',
     'dbusk-referrals': 'Funds published musician-referral campaigns and their approved rewards. ETH and USDC remain separate; campaign budgets are reserved only when a campaign is published. Owner-managed and recoverable, not contributor-withdrawable escrow.',
     'dbusk-live-performers': 'Live performer fees: earmarked, NOT escrowed. The admin can recoverFund. Booking terms and decisions are published per dated occurrence.',
     'dbusk-promotionals': 'Owner-reviewed promotional rewards for approved participation and referral campaigns. Earmarked, not escrowed; separate from artist and development payroll.',
@@ -27,7 +28,7 @@ export function defaultSettlementFundMetadata(slug) {
     'dbusk-pinners': 'Weekly Base USDC rewards for admin-approved community IPFS nodes with qualifying independent availability checks. Closed-week awards use owner-signed payroll; a pin alone is not a payment.',
   };
   return {
-    name: fundSlug === 'dbusk-referrals' ? 'Musician referrals' : name,
+    name: { 'dbusk-referrals': 'Musician referrals', 'dbusk-pinner-campaigns': 'Pinner campaigns' }[fundSlug] || name,
     description: purposes[fundSlug] || `Dedicated Base settlement allocation for ${name}. Deposits and payouts use the DecentBusking owner-reviewed settlement workflow.`,
   };
 }

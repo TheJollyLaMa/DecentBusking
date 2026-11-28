@@ -3,6 +3,7 @@ import { createCalendarStore } from './dbusk-calendar-store.mjs';
 import { googleRadioCalendarUrl, buildRadioCalendar } from './radio-calendar.mjs?v=20261024-programming-calendar';
 import { renderWallet } from './wallet-label.mjs';
 import { lookupEnsName } from './ens-client.mjs';
+import { cachedEthUsd, loadEthUsd } from './eth-usd-quote.mjs?v=20261128-pinner-eth';
 
 const civilFormat = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' });
 const layers = { schedule: ['♫', 'Public shows'], invitations: ['✉', 'Your invitations & performances'],
@@ -355,8 +356,13 @@ export function mountDBuskCalendar(root, { dialog, status, serviceUrl, fetchImpl
     detailBody.append(actions);
     if (restoreFocus) (detailBody.querySelector('button, a[href]') || detail.querySelector('button')).focus();
   }
+  let ethRateRequested = false;
   function render() {
     if (destroyed) return;
+    if (!ethRateRequested && !cachedEthUsd()) {
+      ethRateRequested = true;
+      void loadEthUsd().then(rate => { if (rate) render(); }).catch(() => {});
+    }
     const range = calendarRange(anchor, mode, timeZone);
     const events = calendarEvents(view.publicData, view.personal, wallet, range, { now: now() })
       .filter(event => visibleLayers.has(calendarLayer(event)));

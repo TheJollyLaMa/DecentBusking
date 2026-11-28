@@ -2,6 +2,7 @@ import { newYorkDay, newYorkDayPeriod } from './payroll-week.mjs';
 
 export const PROMOTIONS_FUND = 'dbusk-promotionals';
 export const REFERRALS_FUND = 'dbusk-referrals';
+export const PINNER_CAMPAIGN_FUND = 'dbusk-pinner-campaigns';
 export const PROMOTIONS_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 export const PROMOTIONS_ETH = '0x0000000000000000000000000000000000000000';
 export const CAMPAIGN_ASSETS = Object.freeze({
@@ -151,7 +152,18 @@ export function campaignGiftWinners(campaign, claims = [], members = []) {
 }
 export function isPromotionsFund(value) {
   return typeof value === 'string' && value.length <= 64 &&
-    /^dbusk-(?:promotionals|referrals)(?:-[a-z0-9]+)*$/.test(value);
+    (/^dbusk-(?:promotionals|referrals)(?:-[a-z0-9]+)*$/.test(value) || value === PINNER_CAMPAIGN_FUND);
+}
+// Pinner and musician-referral campaigns each draw from their own standing allocation;
+// dbusk-promotionals (or a dbusk-promotionals-* slug) is for every other one-off offer.
+export function campaignFundFor(template, requested) {
+  if (template === MUSICIAN_REFERRAL_PILOT.template) return REFERRALS_FUND;
+  if (template === 'pinner') return PINNER_CAMPAIGN_FUND;
+  const fund = requested || PROMOTIONS_FUND;
+  if (!isPromotionsFund(fund) || fund === PINNER_CAMPAIGN_FUND) {
+    throw new Error(`Use a dedicated ${PROMOTIONS_FUND} fund; pinner, artist and repo funds are reserved`);
+  }
+  return fund;
 }
 export function referralCampaignTitle(value) {
   const title = String(value || '').trim().replace(/\s+/g, ' ');
@@ -240,7 +252,16 @@ export function isMusicianReferralCampaign(campaign) {
 export const PINNER_PROMOTION_DRAFT = Object.freeze({
   qualifyingDays: 30, rewardUsdCents: 500, budgetUsdCents: 2500, maxAwards: 5, nftReward: null,
 });
-export const PINNER_CAMPAIGN_VERSION = 'pinner-days-v1';
+export const PINNER_CAMPAIGN_VERSION = 'pinner-eth-v2';
+const MAX_PINNER_REWARD_WEI = 100n * 10n ** 18n;
+// The ETH reward is the fixed promise; any USD figure shown beside it is a live, informational estimate.
+export function pinnerEthAmounts(rewardUnits, maxAwards) {
+  if (!/^[1-9]\d{0,29}$/.test(String(rewardUnits ?? '')) || BigInt(rewardUnits) > MAX_PINNER_REWARD_WEI) {
+    throw new Error('Set a positive ETH bonus of at most 100 ETH');
+  }
+  if (!Number.isSafeInteger(maxAwards) || maxAwards < 1 || maxAwards > 1000) throw new Error('Award cap must be 1–1000');
+  return { rewardUnits: String(rewardUnits), budgetUnits: (BigInt(rewardUnits) * BigInt(maxAwards)).toString() };
+}
 export function pinnerCampaignFullDays(startsAt, endsAt) {
   let period = newYorkDayPeriod(newYorkDay(Date.parse(startsAt)));
   let days = 0;
@@ -265,7 +286,7 @@ export function pinnerPromotionAmounts(ethUsdMicros, { rewardUsdCents = 500, max
 }
 export function pinnerCampaignTerms(campaign) {
   const nft = promotionSupporterRewards(campaign) || [];
-  return `${campaign.maxAwards} bonuses maximum, first to complete ${campaign.qualifyingDays} qualifying full New York calendar days after joining and inside the offer window; days need not be consecutive. Each day requires at least 20 independent node checks and 90% availability. Completion time, then registration time, then wallet address break ties; one bonus per Discord-linked identity per campaign. ${promotionMoney(campaign.rewardUnits, campaignAsset(campaign))} per approved participant, fixed at the reviewed publication quote of $${Number(campaign.draftQuote.ethUsdMicros) / 1e6} per ETH (${campaign.draftQuote.quotedAt}); no later repricing. ${nft.length ? `NFT gifts: ${nft.map(token => `${token.contract} #${token.tokenId}`).join(', ')}, one each per approved winner, separately delivered from admin inventory.` : 'No NFT gift is promised.'} These campaign bonuses come from ${campaign.fund}, separately from ordinary weekly USDC rewards in dbusk-pinners. Funds are earmarked, not escrowed; evidence, disputes and owner-signed Payroll are required. Wallet, daily stats, evidence and receipts are public on IPFS; no private data.`;
+  return `${campaign.maxAwards} bonuses maximum, first to complete ${campaign.qualifyingDays} qualifying full New York calendar days after joining and inside the offer window; days need not be consecutive. Each day requires at least 20 independent node checks and 90% availability. Completion time, then registration time, then wallet address break ties; one bonus per Discord-linked identity per campaign. ${promotionMoney(campaign.rewardUnits, CAMPAIGN_ASSETS.eth)} per approved participant. The ETH amount is fixed; any USD value shown is a live estimate that moves with the market and is not promised. ${nft.length ? `NFT gifts: ${nft.map(token => `${token.contract} #${token.tokenId}`).join(', ')}, one each per approved winner, separately delivered from admin inventory.` : 'No NFT gift is promised.'} These campaign bonuses come from ${PINNER_CAMPAIGN_FUND}, separately from ordinary weekly USDC rewards in dbusk-pinners. Funds are earmarked, not escrowed; evidence, disputes and owner-signed Payroll are required. Wallet, daily stats, evidence and receipts are public on IPFS; no private data.`;
 }
 export const PROMOTION_TEMPLATES = [
   { id: 'album', title: 'Bring your album', criteria: 'Bring an album with the stated minimum number of original tracks and rights to publish. Supply approved radio catalog and qualifying delivery evidence for admin review.' },
@@ -275,7 +296,7 @@ export const PROMOTION_TEMPLATES = [
   { id: 'sponsor-match', title: 'First sponsor match', criteria: 'A capped match to the selected artist fund after a sponsor’s first qualifying contribution. Fund contributions are not refundable ad purchases. Draft only until a fund-to-fund settlement path is verified.' },
   { id: 'session', title: 'Village listening session', criteria: 'Organize a listening session and supply event and participation evidence. Never condition rewards on positive votes or claim anonymous activity proves unique humans.' },
   { id: 'musician-referral', title: MUSICIAN_REFERRAL_PILOT.title, criteria: 'For each new musician with a verified minted playlist track and 10 distinct campaign-scoped signed song votes. One conversion creates four auditable $25 allocation legs, capped at six conversions.' },
-  { id: 'pinner', title: 'Pin Reward Campaign', criteria: 'Pin the community catalogue on your own admin-approved, independently checked IPFS node. Choose the campaign timebox and required qualifying days; promotional bonuses are separate from weekly pinning rewards.' },
+  { id: 'pinner', title: 'Pin Reward Campaign', criteria: 'Pin the community catalogue on your own admin-approved, independently checked IPFS node. Choose the campaign timebox, required qualifying days and a fixed ETH bonus; campaign bonuses are paid from dbusk-pinner-campaigns, separately from weekly pinning rewards.' },
   { id: 'custom', title: 'Custom', criteria: '' },
 ];
 export function promotionAuthorization({ address, origin, issuedAt, command }) {

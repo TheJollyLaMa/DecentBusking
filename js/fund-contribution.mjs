@@ -2,7 +2,7 @@ import { ensureBaseNetwork, getBaseReadProvider } from './base-chain.mjs?v=20261
 import { BASE_USDC_ADDRESS, configuredSettlementFunds, depositSettlementUsdc, isSettlementFundSlug } from './settlement-funds.mjs?v=20261124-fund-bunny';
 import { escapeHtml } from './fund-display.mjs?v=20261124-lazy-funds';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
-import { REFERRALS_FUND, CAMPAIGN_ASSETS } from './promotions.mjs?v=20261126-eth-gifts';
+import { REFERRALS_FUND, PINNER_CAMPAIGN_FUND, CAMPAIGN_ASSETS } from './promotions.mjs?v=20261126-eth-gifts';
 import { renderFundBalanceChart } from './fund-visual.mjs?v=20261124-fund-bunny';
 import { discoverAdditionalFunds } from './fund-discovery.mjs?v=20261124-admin-funds';
 import { initFundGuide } from './fund-guide.mjs?v=20261124-fund-bunny-keys';
@@ -13,7 +13,7 @@ const DEFAULT_FUNDS = { radioFunds: { playback: 'dbusk-playback', topTen: 'dbusk
 export function contributionFunds(config = globalThis.window?.DecentConfig || DEFAULT_FUNDS) {
   return [...configuredSettlementFunds({ ...DEFAULT_FUNDS, ...config,
     radioFunds: { ...DEFAULT_FUNDS.radioFunds, ...config.radioFunds } }),
-  { slug: REFERRALS_FUND, label: 'Referrals' }];
+  { slug: REFERRALS_FUND, label: 'Referrals' }, { slug: PINNER_CAMPAIGN_FUND, label: 'Pinner campaigns' }];
 }
 export const SETTLEMENT_ROUTER_ADDRESS = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';
 const ROUTER_ABI = [

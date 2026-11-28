@@ -92,11 +92,22 @@ test('custom campaign drafts reuse the promotion checkpoint and are publicly bro
 });
 test('pinning campaigns publish funded fixed bonuses with editable timeboxes, no implicit NFT and immutable terms', async () => {
   const f = await fixture({ readPinnerProgress: () => ({ status: 'not-enrolled', days: [], completedDays: 0 }) });
-  const draftQuote = { ethUsdMicros: '4000000000', quotedAt: new Date(epoch).toISOString() };
   const campaignInput = input({ template: 'pinner', qualificationVersion: f.shared.PINNER_CAMPAIGN_VERSION,
-    asset: 'eth', maxAwards: 5, qualifyingDays: 3, rewardUsdCents: 500, supporterRewards: [],
-    draftQuote, ...f.shared.pinnerPromotionAmounts(draftQuote.ethUsdMicros) });
+    asset: 'eth', maxAwards: 5, qualifyingDays: 3, supporterRewards: [], fund: 'dbusk-promotionals',
+    rewardUsdCents: 500, draftQuote: { ethUsdMicros: '4000000000', quotedAt: new Date(epoch).toISOString() },
+    ...f.shared.pinnerEthAmounts('2000000000000000', 5) });
   const c = await f.create(campaignInput);
+  assert.equal(c.fund, f.shared.PINNER_CAMPAIGN_FUND, 'pinner bonuses always draw from their own allocation');
+  assert.equal(c.rewardUnits, '2000000000000000');
+  assert.equal(c.budgetUnits, '10000000000000000');
+  assert.equal(c.draftQuote, undefined);
+  assert.equal(c.rewardUsdCents, undefined);
+  assert.match(c.terms, /0\.002 ETH per approved participant\. The ETH amount is fixed/);
+  assert.match(c.terms, /from dbusk-pinner-campaigns/);
+  await assert.rejects(f.create({ ...campaignInput, budgetUnits: '20000000000000000' }), /Invalid fixed ETH bonus/);
+  const huge = f.shared.pinnerEthAmounts('100000000000000000000', 1);
+  await assert.rejects(f.create({ ...campaignInput, maxAwards: 1, rewardUnits: `${huge.rewardUnits}1`, budgetUnits: `${huge.budgetUnits}1` }), /at most 100 ETH/);
+  await assert.rejects(f.create(input({ fund: f.shared.PINNER_CAMPAIGN_FUND })), /dedicated/);
   assert.match(c.terms, /3 qualifying full New York calendar days/);
   assert.match(c.terms, /No NFT gift is promised/);
   assert.match(c.terms, /separately from ordinary weekly USDC/);
@@ -109,9 +120,11 @@ test('pinning campaigns publish funded fixed bonuses with editable timeboxes, no
   assert.equal(publicCalendarData({}, publicState).campaigns[0].portal.id, c.id);
   assert.deepEqual(f.shared.supporterRewardQueue(publicState.campaigns), []);
   await assert.rejects(f.exec({ action: 'save', campaignId: c.id, campaign: campaignInput }), /immutable/);
-  const stale = await f.create(campaignInput);
-  f.setTime(epoch + 300001);
-  await assert.rejects(f.publish(stale), /Refresh the ETH quote/);
+  const later = await f.create(campaignInput);
+  f.setTime(epoch + 3600000);
+  f.setBalance(BigInt(c.budgetUnits) * 2n);
+  await f.publish(later);
+  assert.equal((await f.view()).campaigns.find(x => x.id === later.id).status, 'published', 'fixed ETH bonuses need no quote refresh');
   f.setTime(epoch);
   await assert.rejects(f.create({ ...campaignInput, qualifyingDays: 30 }), /fit inside/);
   const unconfigured = await fixture();
@@ -134,10 +147,9 @@ test('pinning bonuses use first-finisher order, deduplicate identities, expose p
     return row ? { ...row, participantKey: id(`${request.campaignId}:${row.identity}`) } :
       { status: 'not-enrolled', completedDays: 0, days: [], completedAt: null };
   } });
-  const draftQuote = { ethUsdMicros: '4000000000', quotedAt: new Date(epoch).toISOString() };
   const c = await f.create(input({ template: 'pinner', qualificationVersion: f.shared.PINNER_CAMPAIGN_VERSION,
-    asset: 'eth', maxAwards: 5, qualifyingDays: 1, rewardUsdCents: 500, supporterRewards: [],
-    draftQuote, ...f.shared.pinnerPromotionAmounts(draftQuote.ethUsdMicros) }));
+    asset: 'eth', maxAwards: 5, qualifyingDays: 1, supporterRewards: [],
+    ...f.shared.pinnerEthAmounts('1250000000000000', 5) }));
   f.setBalance(1000000000000000000n);
   await f.publish(c);
   for (const who of wallets) await f.join(c, who);
@@ -157,7 +169,7 @@ test('pinning bonuses use first-finisher order, deduplicate identities, expose p
   await assert.rejects(f.claim(c, last), /first campaign bonus slots/);
   const claim = await f.claim(c, winner);
   const approved = await f.exec({ action: 'review', claimId: claim.id, decision: 'approved', reason: 'Verified daily probe journal' });
-  assert.equal(approved.claims[0].fund, 'dbusk-promotionals');
+  assert.equal(approved.claims[0].fund, 'dbusk-pinner-campaigns');
   assert.equal((await f.view(winner)).participantStats.find(p => p.campaignId === c.id).approvedUnits, claim.amountUnits);
   assert.deepEqual(f.shared.supporterRewardQueue(approved.campaigns), []);
   unavailable = true;
@@ -173,9 +185,8 @@ test('pinning bonuses use first-finisher order, deduplicate identities, expose p
   const restored = createPromotions({ ...f.cfg, restore: async () => f.stored() });
   assert.equal((await restored.publicState()).participantProfiles.find(p => p.wallet === winner.address.toLowerCase()).approvedUnits, claim.amountUnits);
   // A second campaign is a new offer, not another draw from weekly pinning USDC.
-  const quote = { ...draftQuote, quotedAt: '2026-11-06T05:00:00Z' };
-  const next = await f.create({ ...c, id: undefined, draftQuote: quote, title: 'Second pinning campaign',
-    startsAt: quote.quotedAt, endsAt: '2026-11-09T05:00:00Z', claimDeadline: '2026-11-16T05:00:00Z' });
+  const next = await f.create({ ...c, id: undefined, title: 'Second pinning campaign',
+    startsAt: '2026-11-06T05:00:00Z', endsAt: '2026-11-09T05:00:00Z', claimDeadline: '2026-11-16T05:00:00Z' });
   await f.publish(next); await f.join(next, winner);
   const day = { ...newYorkDayPeriod('2026-11-07'), successfulChecks: 20, failedChecks: 0, qualified: true };
   progress.set(winner.address.toLowerCase(), { status: 'active', identity: winner.address.toLowerCase(),
@@ -193,10 +204,9 @@ test('optional pinning NFTs require sufficient inventory and enter the existing 
   const f = await fixture({ readSupporterInventory: async () => ({ erc1155: true, balanceUnits: stock }),
     readPinnerProgress: ({ wallet }) => ({ status: 'active', participantKey: id(wallet),
       completedDays: 1, completedAt: day.endAt, days: [day] }) });
-  const draftQuote = { ethUsdMicros: '4000000000', quotedAt: new Date(epoch).toISOString() };
   const c = await f.create(input({ template: 'pinner', qualificationVersion: f.shared.PINNER_CAMPAIGN_VERSION,
-    asset: 'eth', maxAwards: 5, qualifyingDays: 1, rewardUsdCents: 500,
-    supporterRewards: [f.shared.SUPPORTER_REWARD], draftQuote, ...f.shared.pinnerPromotionAmounts(draftQuote.ethUsdMicros) }));
+    asset: 'eth', maxAwards: 5, qualifyingDays: 1,
+    supporterRewards: [f.shared.SUPPORTER_REWARD], ...f.shared.pinnerEthAmounts('1250000000000000', 5) }));
   f.setBalance(BigInt(c.budgetUnits));
   await assert.rejects(f.publish(c), /inventory cannot cover 5/);
   stock = 5n;

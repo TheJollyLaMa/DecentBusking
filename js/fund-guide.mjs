@@ -23,6 +23,10 @@ const EXPLANATIONS = {
     purpose: 'A pot for approved promotional offers and participation rewards.',
     earning: 'Join a published, funded offer, accept its terms and supply the required evidence before its deadline. An admin reviews the claim. A fund balance alone is not an open campaign or a weekly payout promise.',
   },
+  'dbusk-pinner-campaigns': {
+    purpose: 'Pays the fixed ETH bonuses promised by published Pin Reward Campaigns. It is separate from the weekly dbusk-pinners USDC pot.',
+    earning: 'Join a published pin reward campaign, keep your approved IPFS node pinning DecentBusking for the stated number of qualifying days inside its timebox, then claim. The first finishers up to the award cap are reviewed and paid the stated ETH amount; USD figures are only live estimates.',
+  },
   'dbusk-referrals': {
     purpose: 'Funds published musician-referral campaigns and their stated rewards.',
     earning: 'Join an active campaign and follow its attribution, music-upload, vote and deadline requirements. Only verified conversions and approved claims qualify. Read that campaign’s exact terms; these are campaign rewards, not automatic weekly income.',

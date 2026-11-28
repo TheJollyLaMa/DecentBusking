@@ -1,7 +1,9 @@
 import { PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS, MUSICIAN_REFERRAL_PILOT, MUSICIAN_REFERRAL_TERMS, PROMOTIONS_FUND, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, isPromotionsFund,
   promotionAuthorization, promotionWorkReference, promotionMoney, promotionUnits, promotionLink, campaignAsset, musicianReferralConfig, parseAssetAmount,
-  pinnerPromotionAmounts, PINNER_CAMPAIGN_VERSION, promotionSupporterRewards, pinnerCampaignFullDays } from './promotions.mjs?v=20261126-pinner-dashboard';
-import { loadEthUsd } from './eth-usd-quote.mjs?v=20261126-eth-gifts';
+  pinnerEthAmounts, PINNER_CAMPAIGN_VERSION, promotionSupporterRewards, pinnerCampaignFullDays,
+  PINNER_CAMPAIGN_FUND, REFERRALS_FUND, CAMPAIGN_ASSETS } from './promotions.mjs?v=20261126-pinner-dashboard';
+import { cachedEthUsd, ethWithUsd, loadEthUsd } from './eth-usd-quote.mjs?v=20261126-eth-gifts';
+import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 import { newYorkInputToUtc, utcToNewYorkInput } from './radio-calendar.mjs';
 import { radioListenerId } from './radio-client.mjs';
 import { getAudibleBroadcast } from './public-broadcast-client.mjs?v=20261125-song-tail';
@@ -81,6 +83,22 @@ export async function activeMusicianReferralCampaign() {
     Date.parse(campaign.startsAt) <= Date.now() && Date.now() < Date.parse(campaign.endsAt));
 }
 const money = (value, asset) => promotionMoney(value || '0', asset);
+// ETH campaign amounts are the fixed promise; the live USD estimate rides alongside in parentheses.
+const reward = (value, asset) => asset?.id === 'eth' ? ethWithUsd(value || '0') : money(value, asset);
+const ethInput = units => promotionMoney(units || '0', CAMPAIGN_ASSETS.eth).replace(/ ETH$/, '');
+const SETTLEMENT_ROUTER = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';
+
+export async function readCampaignFund(slug, { asset = CAMPAIGN_ASSETS.eth, routerAddress = SETTLEMENT_ROUTER,
+  provider = getBaseReadProvider(), ethers = globalThis.window?.ethers } = {}) {
+  if (!ethers || !provider) throw new Error('Base reader unavailable');
+  const router = new ethers.Contract(routerAddress, PROMOTIONS_ROUTER_ABI, provider);
+  const fundId = ethers.id(slug);
+  const [fund, balance] = await Promise.all([router.funds(fundId), router.fundBalances(fundId, asset.address)]);
+  return { exists: !!(fund.exists ?? fund[2]), active: !!(fund.active ?? fund[1]), balanceUnits: BigInt(balance) };
+}
+export function prepareSettlementFund(slug) {
+  document.dispatchEvent(new CustomEvent('prepare-settlement-fund', { detail: { slug } }));
+}
 const date = value => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) + ' New York';
 async function resolvedWallet(value, provider) {
   const input = String(value || '').trim();
@@ -102,9 +120,9 @@ const field = (name, label, type = 'text', value = '') =>
   `<label>${label}<input name="${name}" type="${type}" value="${escape(value)}" required></label>`;
 const termsNotice = 'All promotion records are public, including drafts, wallet/referrer links, submitted evidence, activity, review notes and payment receipts. Records are stored on public IPFS; do not submit secrets or personal information about others. Public copies may persist permanently. Rewards require evidence and admin approval. Promotionals is earmarked, not escrowed. Wallets/browsers are not proof of unique humans. Song activity means a signed vote in the stated window, not a positive vote or verified listening time. Pinning campaigns use independent node checks instead.';
 function campaignCard(c) {
-  return `<h3>${escape(c.title)}</h3><p><strong>${money(c.rewardUnits, campaignAsset(c))}</strong> per approved award · ${escape(c.status)} · ${c.remainingAwards} awards available</p>
+  return `<h3>${escape(c.title)}</h3><p><strong>${reward(c.rewardUnits, campaignAsset(c))}</strong> per approved award · ${escape(c.status)} · ${c.remainingAwards} awards available</p>
     ${c.template === 'pinner' ? c.qualificationVersion === PINNER_CAMPAIGN_VERSION
-      ? `<p>📌 ${c.qualifyingDays} qualifying days · first ${c.maxAwards} finishers · bonus budget ${money(c.budgetUnits, campaignAsset(c))}. Ordinary weekly USDC pinning rewards remain separate.</p>`
+      ? `<p>📌 Pin ${c.qualifyingDays} qualifying days → <strong>${reward(c.rewardUnits, campaignAsset(c))}</strong> · first ${c.maxAwards} finishers · bonus budget ${reward(c.budgetUnits, campaignAsset(c))} from ${escape(c.fund)}. Ordinary weekly USDC pinning rewards remain separate.</p>`
       : '<p>Legacy draft · edit and save the timebox and bonus terms before publication.</p>' : ''}
     <p>${c.template === 'sponsor-match' ? `Match destination: ${escape(c.matchTargetFund || '')}; draft only.` : 'Reward recipient: claimant wallet.'}
     Funding: ${escape(c.fund)}; one award per wallet.</p>
@@ -130,9 +148,9 @@ export function pinnerCampaignStatsCard(stats) {
       <p>${stats.eligible ? '🏁 Qualified for bonus review' : stats.rank ? `Completion rank ${stats.rank} · first ${stats.maxAwards} bonus slots` : 'Keep pinning to qualify'} · ${escape(stats.claimStatus)}</p>`;
   return `<article class="promotion-card pinner-campaign-card"><h3>📌 ${escape(stats.title)}</h3>
     <p>${date(stats.startsAt)} – ${date(stats.endsAt)}</p>${progress}
-    <div class="pinner-campaign-amounts"><span>⏳ Pending<br>${money(stats.pendingUnits, asset)}</span>
-      <span>✓ Approved<br>${money(stats.approvedUnits, asset)}</span><span>💸 Paid<br>${money(stats.paidUnits, asset)}</span></div>
-    <p>Campaign bonus: ${money(stats.rewardUnits, asset)}. Weekly USDC pinning rewards are separate.</p>
+    <div class="pinner-campaign-amounts"><span>⏳ Pending<br>${reward(stats.pendingUnits, asset)}</span>
+      <span>✓ Approved<br>${reward(stats.approvedUnits, asset)}</span><span>💸 Paid<br>${reward(stats.paidUnits, asset)}</span></div>
+    <p>Pin ${stats.qualifyingDays} days → campaign bonus <strong>${reward(stats.rewardUnits, asset)}</strong>. Weekly USDC pinning rewards are separate.</p>
     ${(stats.nftGifts || []).map(token => `<p>🎖 NFT #${escape(token.tokenId)} · ${escape(token.status)}</p>`).join('')}
     ${stats.txHash ? `<a href="https://basescan.org/tx/${escape(stats.txHash)}" target="_blank" rel="noopener">Payment proof</a>` : ''}
     <a href="?promotion=${encodeURIComponent(stats.campaignId)}">Open campaign · join / claim</a>
@@ -419,9 +437,10 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
   let activeCampaignId = calendarOptions.campaignId || '';
   root.innerHTML = `${calendarOptions.calendarMode ? '' : '<summary>Invites &amp; Promotions</summary>'}
     <p>${termsNotice}</p>
-    <p>Create/deposit into <strong>Promotionals (${PROMOTIONS_FUND})</strong> in Payroll → Settlements Router. No funds are created or moved here automatically.</p>
+    <p>Funding sources: 📌 Pin Reward Campaigns → <strong>${PINNER_CAMPAIGN_FUND}</strong> (ETH) · 🤝 Referral Campaigns → <strong>${REFERRALS_FUND}</strong> · other one-off offers → <strong>${PROMOTIONS_FUND}</strong>. Create and deposit in ⚸ Fund Allocations; nothing is moved here automatically.</p>
     <button type="button" data-promo-unlock>Refresh campaigns · no signature</button>
     <p role="status" data-promo-status></p><div data-promo-funding></div>
+    <div class="promotion-fund-check" data-promo-pinner-fund hidden></div>
     <div data-promo-workspace hidden>
       <details ${calendarOptions.calendarMode && !calendarOptions.campaignId ? 'open' : ''}><summary>Create or edit a draft</summary>
         <form data-promo-form>
@@ -434,10 +453,11 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
           ${field('maxAwards', 'Maximum awards (one per participant)', 'number', '5')}
           ${field('fund', 'Dedicated promotional funding source', 'text', PROMOTIONS_FUND)}
           <div data-promo-pinner>
+            <p class="promotion-usd" data-promo-pinner-usd aria-live="polite"></p>
             ${field('qualifyingDays', 'Required qualifying days inside this timebox (1–365)', 'number', '30')}
             <p>Each full New York day after registration requires 20 independent checks and 90% availability. Days need not be consecutive. First finishers win; weekly pinning rewards are unchanged.</p>
             <label>Optional Base ERC-1155 NFT gift contract<input name="pinnerNftContract" placeholder="0x…"></label>
-            <label>Optional NFT token ID<input name="pinnerNftTokenId" placeholder="75"></label>
+            <label>Optional NFT token ID<input name="pinnerNftTokenId" placeholder="77"></label>
             <p>Blank means no NFT promise. One configured token per winner, delivered from admin inventory through Payroll.</p>
           </div>
           <div data-promo-album>${field('minOriginalTracks', 'Minimum original tracks', 'number', '3')}</div>
@@ -509,8 +529,13 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     const referralAsset = input('template').value === 'musician-referral' && editingCampaign?.template === 'musician-referral'
       ? campaignAsset(editingCampaign) : null;
     input('budget').disabled = pinner;
-    input('reward').parentElement.firstChild.textContent = pinner ? 'Reward target (USD equivalent, paid in ETH)' : `Reward (Base ${referralAsset?.symbol || 'USDC'})`;
-    input('budget').parentElement.firstChild.textContent = pinner ? 'Total target cap (USD equivalent, paid in ETH)' : `Total campaign budget (Base ${referralAsset?.symbol || 'USDC'})`;
+    input('reward').parentElement.firstChild.textContent = pinner ? 'Fixed bonus per finisher (Base ETH)' : `Reward (Base ${referralAsset?.symbol || 'USDC'})`;
+    input('budget').parentElement.firstChild.textContent = pinner ? 'Total bonus budget (ETH · bonus × awards)' : `Total campaign budget (Base ${referralAsset?.symbol || 'USDC'})`;
+    const fixedFund = pinner ? PINNER_CAMPAIGN_FUND : input('template').value === 'musician-referral' ? REFERRALS_FUND : '';
+    if (fixedFund) input('fund').value = fixedFund;
+    else if ([PINNER_CAMPAIGN_FUND, REFERRALS_FUND].includes(input('fund').value)) input('fund').value = PROMOTIONS_FUND;
+    input('fund').readOnly = !!fixedFund;
+    input('fund').parentElement.firstChild.textContent = fixedFund ? 'Campaign fund (fixed for this template)' : 'Dedicated promotional funding source';
     for (const [selector, active] of [
       ['[data-promo-album]', input('template').value === 'album'],
       ['[data-promo-referral]', input('template').value === 'referral'],
@@ -523,7 +548,83 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       section.hidden = !active;
       section.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = !active; });
     }
+    pinnerAmounts();
+    void refreshPinnerFund();
     refreshCompact();
+  }
+  function formPinnerUnits() {
+    const units = parseAssetAmount(input('reward').value, CAMPAIGN_ASSETS.eth);
+    const awards = Number(input('maxAwards').value);
+    if (!units || BigInt(units) <= 0n || !Number.isSafeInteger(awards) || awards < 1) return null;
+    return { rewardUnits: units, budgetUnits: (BigInt(units) * BigInt(awards)).toString() };
+  }
+  function pinnerAmounts() {
+    const hint = root.querySelector('[data-promo-pinner-usd]');
+    if (input('template').value !== 'pinner') { hint.textContent = ''; return; }
+    const units = formPinnerUnits();
+    if (units) input('budget').value = ethInput(units.budgetUnits);
+    hint.textContent = !units ? 'Enter the ETH bonus, e.g. 0.002 (up to six decimals).'
+      : `Pin ${input('qualifyingDays').value || '…'} days → ${ethWithUsd(units.rewardUnits)} each · total ${ethWithUsd(units.budgetUnits)}${cachedEthUsd() ? ' · USD is a live estimate; the ETH amount is what is promised.' : ' · live USD estimate loading…'}`;
+    if (!cachedEthUsd()) void loadEthUsd().then(rate => { if (rate && root.isConnected) pinnerAmounts(); });
+    paintPinnerFund();
+  }
+  let pinnerFund = null, pinnerFundRead = 0;
+  function pinnerContext() {
+    const campaign = activeCampaignId ? state?.campaigns.find(c => c.id === activeCampaignId) : null;
+    return campaign ? { pinner: campaign.template === 'pinner', campaign } : { pinner: input('template').value === 'pinner' };
+  }
+  function paintPinnerFund() {
+    const holder = root.querySelector('[data-promo-pinner-fund]');
+    const { pinner, campaign } = pinnerContext();
+    holder.hidden = !pinner;
+    if (!pinner) return;
+    holder.replaceChildren();
+    const line = document.createElement('p');
+    const action = (label, title) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'rc-pill';
+      button.textContent = label;
+      button.title = title;
+      button.addEventListener('click', () => {
+        root.closest('dialog')?.close();
+        prepareSettlementFund(PINNER_CAMPAIGN_FUND);
+      });
+      holder.append(line, button);
+    };
+    holder.append(line);
+    if (!pinnerFund) { line.textContent = `🏦 Checking ${PINNER_CAMPAIGN_FUND} on Base…`; return; }
+    if (pinnerFund.error) { line.textContent = `🏦 ${PINNER_CAMPAIGN_FUND} check unavailable (${pinnerFund.error}). Funding is checked again before publishing.`; return; }
+    if (!pinnerFund.exists) {
+      line.textContent = `🏦 ${PINNER_CAMPAIGN_FUND} does not exist yet. Create it once, then deposit ETH; every pin reward campaign draws from it.`;
+      action('⚸ Create pinner campaign fund', 'Opens Fund Allocations to save metadata and create the allocation on Base');
+      return;
+    }
+    if (!pinnerFund.active) {
+      line.textContent = `🏦 ${PINNER_CAMPAIGN_FUND} is archived. Restore it before publishing.`;
+      action('⚸ Restore fund', 'Opens Fund Allocations to restore this fund');
+      return;
+    }
+    const others = (state?.campaigns || []).filter(c => c.fund === PINNER_CAMPAIGN_FUND && c.id !== campaign?.id &&
+      ['published', 'paused', 'closed'].includes(c.status))
+      .reduce((sum, c) => sum + BigInt(c.budgetUnits || 0) - BigInt(c.paidUnits || 0), 0n);
+    const free = pinnerFund.balanceUnits > others ? pinnerFund.balanceUnits - others : 0n;
+    const need = BigInt(campaign?.budgetUnits || formPinnerUnits()?.budgetUnits || 0);
+    line.textContent = `🏦 ${PINNER_CAMPAIGN_FUND} · ${ethWithUsd(free)} free${others ? ` (after ${ethWithUsd(others)} reserved by other pinner campaigns)` : ''}` +
+      (need > free ? ` · needs ${ethWithUsd(need - free)} more before publishing.` : need ? ' · covers this budget ✓' : '');
+    if (need > free) action('⚸ Deposit ETH', 'Opens Fund Allocations with this fund selected');
+  }
+  async function refreshPinnerFund() {
+    if (!pinnerContext().pinner) { paintPinnerFund(); return; }
+    const read = ++pinnerFundRead;
+    pinnerFund = null;
+    paintPinnerFund();
+    let next;
+    try { next = await readCampaignFund(PINNER_CAMPAIGN_FUND, { routerAddress: state?.routerAddress || SETTLEMENT_ROUTER }); }
+    catch (error) { next = { error: error.shortMessage || error.message || 'Base read failed' }; }
+    if (read !== pinnerFundRead || !root.isConnected) return;
+    pinnerFund = next;
+    paintPinnerFund();
   }
   function template() {
     const t = PROMOTION_TEMPLATES.find(t => t.id === input('template').value);
@@ -537,8 +638,8 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       input('terms').value = MUSICIAN_REFERRAL_TERMS;
     }
     if (t.id === 'pinner') {
-      input('reward').value = '5'; input('budget').value = '25'; input('maxAwards').value = '5';
-      input('terms').value = 'Fixed campaign terms are generated from the selected timebox, required days, bonus, award cap, publication quote and optional NFT. Bonuses are separate from weekly USDC rewards.';
+      input('reward').value = '0.002'; input('budget').value = '0.01'; input('maxAwards').value = '5';
+      input('terms').value = 'Fixed campaign terms are generated from the selected timebox, required days, fixed ETH bonus, award cap and optional NFT. Bonuses are separate from weekly USDC rewards.';
     }
     if (t.id === 'custom') {
       for (const name of ['title', 'criteria', 'terms', 'reward', 'budget']) input(name).value = '';
@@ -569,8 +670,8 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
         input('budget').value = String(Number(source.budgetUnits) / 1e6);
       }
       if (source.template === 'pinner') {
-        input('reward').value = String((source.rewardUsdCents || 500) / 100);
-        input('budget').value = String((source.rewardUsdCents || 500) * source.maxAwards / 100);
+        input('reward').value = ethInput(source.rewardUnits);
+        input('budget').value = ethInput(source.budgetUnits);
         input('qualifyingDays').value = source.qualifyingDays || 30;
         input('pinnerNftContract').value = source.supporterRewards?.[0]?.contract || '';
         input('pinnerNftTokenId').value = source.supporterRewards?.[0]?.tokenId || '';
@@ -697,7 +798,7 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
   form.addEventListener('change', event => { if (event.target.name === 'template') template(); });
   form.addEventListener('input', () => {
     if (input('template').value === 'pinner') {
-      input('budget').value = String(Number(input('reward').value) * Number(input('maxAwards').value));
+      pinnerAmounts();
       refreshCompact();
     }
   });
@@ -712,13 +813,9 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     void guard(async () => {
       let pinner = {};
       if (input('template').value === 'pinner') {
-        if (state?.features?.pinnerCampaign !== PINNER_CAMPAIGN_VERSION) throw new Error('The campaign worker needs the pinning-campaign upgrade before saving or publishing this offer');
-        const rate = await loadEthUsd({ force: true });
-        if (!rate) throw new Error('ETH/USD quote unavailable. Draft was not saved; try again shortly.');
-        const ethUsdMicros = String(Math.round(rate * 1e6));
-        const usdUnits = BigInt(promotionUnits(input('reward').value));
-        if (usdUnits % 10000n) throw new Error('Set the USD bonus target to whole cents');
-        const rewardUsdCents = Number(usdUnits / 10000n);
+        if (state?.features?.pinnerCampaign !== PINNER_CAMPAIGN_VERSION) throw new Error('The campaign worker needs the fixed-ETH pinning upgrade before saving or publishing this offer');
+        const units = formPinnerUnits();
+        if (!units) throw new Error('Enter a positive ETH bonus with up to six decimals');
         const maxAwards = Number(input('maxAwards').value);
         if (Number(input('qualifyingDays').value) > pinnerCampaignFullDays(
           promotionInputToUtc(input('startsAt').value), promotionInputToUtc(input('endsAt').value))) {
@@ -727,15 +824,15 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
         const contract = input('pinnerNftContract').value.trim();
         const tokenId = input('pinnerNftTokenId').value.trim();
         if (!!contract !== !!tokenId) throw new Error('Configure both the NFT contract and token ID, or leave both blank');
-        pinner = { asset: 'eth', qualificationVersion: PINNER_CAMPAIGN_VERSION, rewardUsdCents,
+        pinner = { asset: 'eth', qualificationVersion: PINNER_CAMPAIGN_VERSION, fund: PINNER_CAMPAIGN_FUND,
           qualifyingDays: Number(input('qualifyingDays').value),
           supporterRewards: contract ? [{ chainId: 8453, contract, tokenId, quantity: 1 }] : [],
-          ...pinnerPromotionAmounts(ethUsdMicros, { rewardUsdCents, maxAwards }),
-          draftQuote: { ethUsdMicros, quotedAt: new Date().toISOString() } };
+          ...pinnerEthAmounts(units.rewardUnits, maxAwards) };
       }
       const referralSource = input('template').value === 'musician-referral' && editingCampaign?.template === 'musician-referral'
         ? editingCampaign : null;
       const amount = (name, original) => {
+        if (input('template').value === 'pinner') return '0';
         if (!referralSource || campaignAsset(referralSource).id !== 'eth') return promotionUnits(input(name).value);
         const text = input(name).value.trim();
         if (text === promotionMoney(original, campaignAsset(referralSource)).replace(/ ETH$/, '')) return String(original);
@@ -837,8 +934,8 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
           input('reward').value = money(campaign.rewardUnits, asset).replace(/ (?:ETH|USDC)$/, '');
           input('budget').value = money(campaign.budgetUnits, asset).replace(/ (?:ETH|USDC)$/, '');
           if (campaign.template === 'pinner') {
-            input('reward').value = String((campaign.rewardUsdCents || 500) / 100);
-            input('budget').value = String((campaign.rewardUsdCents || 500) * campaign.maxAwards / 100);
+            input('reward').value = ethInput(campaign.rewardUnits);
+            input('budget').value = ethInput(campaign.budgetUnits);
             input('qualifyingDays').value = campaign.qualifyingDays || 30;
             input('pinnerNftContract').value = campaign.supporterRewards?.[0]?.contract || '';
             input('pinnerNftTokenId').value = campaign.supporterRewards?.[0]?.tokenId || '';
@@ -862,13 +959,9 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
         }
         if (target.dataset.promoState) {
           if (target.dataset.promoState === 'published' && campaign.template === 'pinner' && campaign.status === 'draft') {
-            if (campaign.qualificationVersion !== PINNER_CAMPAIGN_VERSION) throw new Error('Edit and save this legacy draft with the campaign timebox first');
-            const rate = await loadEthUsd({ force: true });
-            if (!rate) throw new Error('Publication ETH/USD quote is unavailable; campaign was not published');
-            const draftQuote = { ethUsdMicros: String(Math.round(rate * 1e6)), quotedAt: new Date().toISOString() };
-            const amounts = pinnerPromotionAmounts(draftQuote.ethUsdMicros, campaign);
-            if (!confirm(`Publish ${campaign.title}?\n${date(campaign.startsAt)} – ${date(campaign.endsAt)}\n${campaign.qualifyingDays} qualifying full NY days; first ${campaign.maxAwards} finishers.\nFixed bonus ${money(amounts.rewardUnits, campaignAsset(campaign))}; total ${money(amounts.budgetUnits, campaignAsset(campaign))}.\n${promotionSupporterRewards(campaign).length ? 'Configured NFT gifts are also promised.' : 'No NFT gift.'}\nWeekly pinning rewards remain separate. Funding is required.`)) return;
-            await command({ action: 'save', campaignId: campaign.id, campaign: { ...campaign, draftQuote, ...amounts } });
+            if (campaign.qualificationVersion !== PINNER_CAMPAIGN_VERSION) throw new Error('Edit and save this draft with a fixed ETH bonus first');
+            await loadEthUsd();
+            if (!confirm(`Publish ${campaign.title}?\n${date(campaign.startsAt)} – ${date(campaign.endsAt)}\nPin ${campaign.qualifyingDays} qualifying full NY days; first ${campaign.maxAwards} finishers.\nFixed bonus ${ethWithUsd(campaign.rewardUnits)} each; total ${ethWithUsd(campaign.budgetUnits)} from ${campaign.fund}.\nUSD is a live estimate; the ETH amount is fixed.\n${promotionSupporterRewards(campaign).length ? 'Configured NFT gifts are also promised.' : 'No NFT gift.'}\nWeekly pinning rewards remain separate. Funding is required.`)) return;
           }
           return command({ action: 'status', campaignId: campaign.id, status: target.dataset.promoState });
         }

@@ -551,7 +551,17 @@ test('earned Supporter notifications remain after campaign closure until deliver
   assert.match(walk(deliveredCard).find(n => n.className?.includes('inbox-gift')).textContent, /✅$/);
 });
 
-test('For You pinner cards show verified day progress until owed rewards settle', async () => {
+test('fixed ETH amounts show a live USD estimate only when a quote is available', async () => {
+  const { ethWithUsd } = await import('../js/eth-usd-quote.mjs');
+  assert.equal(ethWithUsd('2000000000000000', 3350), '0.002 ETH ($6.70)');
+  assert.equal(ethWithUsd('1500000000000000000', null), '1.5 ETH');
+});
+
+test('For You pinner cards show verified day progress until owed rewards settle', async t => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
+  t.after(() => previous ? Object.defineProperty(globalThis, 'sessionStorage', previous) : delete globalThis.sessionStorage);
+  const quote = JSON.stringify({ rate: 3000, savedAt: Date.now() });
+  Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: { getItem: () => quote, setItem() {} } });
   const { activePinnerCampaigns, renderPinnerCampaignCard } = await import('../js/profile-inbox.mjs');
   const wallet = '0x' + '34'.repeat(20);
   const now = Date.parse('2026-12-10T00:00:00Z');
@@ -573,6 +583,7 @@ test('For You pinner cards show verified day progress until owed rewards settle'
   assert.ok(nodes.some(n => n.textContent === '2/3'));
   assert.equal(nodes.filter(n => n.className === 'is-done').length, 2);
   assert.ok(nodes.some(n => n.textContent === 'Keep pinning · 1 days to go'));
+  assert.ok(nodes.some(n => n.textContent === '🎁 Pin 3 days → get 0.001 ETH ($3.00)'));
   const ended = Date.parse('2027-01-10T00:00:00Z');
   assert.deepEqual(activePinnerCampaigns({ participantProfiles: [stats] }, wallet, ended), []);
   const owed = { ...stats, approvedUnits: '1000000000000000' };

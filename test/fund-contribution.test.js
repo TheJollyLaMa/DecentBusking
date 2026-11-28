@@ -62,7 +62,7 @@ test('public contribution parses suggested and precise amounts without floating 
 
 test('custom percentages allocate every micro-USDC and reject invalid or dust splits', async () => {
   const { contributionPlan, contributionAmount, contributionFunds } = await fixture();
-  assert.equal(contributionFunds().length, 7);
+  assert.equal(contributionFunds().length, 8);
   const plan = contributionPlan('1.000001', [
     { slug: 'dbusk-playback', percent: '33.33' },
     { slug: 'dbusk-top10', percent: '33.33' },
