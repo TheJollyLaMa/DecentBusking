@@ -18,8 +18,8 @@ bonus budget and optional NFT gifts. See [Admin DCal](ADMIN-DCAL.md).
    Referral Campaign, not the verbose custom form, and nothing is saved until
    you press a button. Clicking a pinner **draft** bar reopens that same draft
    in the popout; published pinner campaigns open their management view.
-   Rows: ✏️ Title · 🟢 Start · 🏁 End · 📌 Pinning requirements · 🎁 The gift ·
-   🏦 Fund, with ⏳ Claims close (default end + 7 days) under **Advanced**.
+   Rows: ✏️ Title · 🟢 Start · 🏁 End · ⏳ Claims close (default end + 7 days,
+   directly under the dates) · 📌 Pinning requirements · 🎁 The gift · 🏦 Fund.
 2. **📌 Pinning requirements** is separate from the gift. Required days
    default to 90% of the timebox's full America/New_York days, rounded up
    (`pinnerDefaultQualifyingDays`; e.g. 6 of 6, 27 of 30). The value is
@@ -27,14 +27,19 @@ bonus budget and optional NFT gifts. See [Admin DCal](ADMIN-DCAL.md).
    suggestion. Moving the dates refills the suggestion unless you have edited
    the days. A day counts when the node passes 90% of at least 20 independent
    spot checks. The award cap (first finishers win) is also set here.
-3. **🎁 The gift** pays a **fixed bonus in ETH or USDC** (pill toggle; switching
-   converts at the live rate), default 0.002 ETH or $5 each, five winners;
-   total budget = bonus × winners. ETH shows the live USD estimate, e.g.
+3. **🎁 The gift** pays fixed bonuses in **ETH and/or USDC and/or Ommm**
+   (toggle chips, each with its own per-finisher amount; defaults 0.002 ETH,
+   $5, 1,000 Ommm), five winners; each asset's budget = bonus × winners. One
+   of ETH/USDC is the primary bonus; Ommm (Base `0xD324…b778`) can only be
+   added alongside it, and stays blocked until the ArtFi Settlements Router
+   approves Ommm (`setAssetApproved`) and the fund holds it. Extras are stored
+   as `extraRewards` and paid through a separate `bonusAwards` ledger. ETH shows the live USD estimate, e.g.
    `0.002 ETH ($6.70)`; the ETH amount is the promise. **🎖 Supporter gift**
    lists the Supporter DNFTs the connected admin wallet holds on the Base
    Supporter contract (read on-chain via `nextTokenId`, `balanceOfBatch` and
    one Multicall3 read of caps/metadata), with balances, and warns when the
-   wallet holds fewer copies than the award cap. **Other ERC-1155 token**
+   wallet holds fewer copies than the award cap, as a contained chip picker
+   inside the popout. **Other ERC-1155 token**
    keeps manual contract/token-ID entry. One token per winner is owed
    separately from the bonus. Tokens are not escrowed or minted: they stay in
    the admin wallet until approved delivery through Payroll, and activation
@@ -45,14 +50,15 @@ bonus budget and optional NFT gifts. See [Admin DCal](ADMIN-DCAL.md).
    **⚸ Create dbusk-pinner-campaigns** (opens Fund Allocations and runs the
    metadata signature and Create Fund transaction; the popout updates when it
    lands) → **▶ Fund <shortfall> & Activate** (saves edits, deposits exactly the
-   shortfall after other pinner campaigns' reservations, `fundNative` for ETH
-   or approve + deposit for USDC, then signs activation) → **▶ Sign & Activate**
+   shortfall per selected asset after other pinner campaigns' reservations,
+   sequentially: `fundNative` for ETH, approve + deposit for USDC/Ommm, then
+   signs activation) → **▶ Sign & Activate**
    when the fund already covers it. **💾 Save draft / Save changes** saves
    without activating, and later saves update the same draft rather than
    creating another. **🗑 Discard draft** archives a draft so it leaves the
    calendar. The fund is earmarked and admin-recoverable, not escrow.
-   Activation requires a signed review plus enough of that asset for every
-   outstanding campaign budget in that fund. No quote is needed: published
+   Activation requires a signed review plus enough of each selected asset for
+   every outstanding campaign budget (primary and extras) in that fund. No quote is needed: published
    terms and amounts are immutable, with no payout-time repricing.
 5. The published offer appears on **right ankh → DCal**. Opening it leads to
    registration and the existing node setup/enrollment dialog. A listener or
@@ -76,7 +82,7 @@ bonus budget and optional NFT gifts. See [Admin DCal](ADMIN-DCAL.md).
    and payment proof. Registration does not promise payment. Claim submission
    and approval recheck server-side evidence and ordering; unavailable
    verification is shown explicitly, not as zero progress or success.
-9. Approved ETH bonuses use the existing protected promotion Payroll flow:
+9. Approved bonuses (primary and each extra asset) use the existing protected promotion Payroll flow:
    recipient approval, fixed fund/reference, pre-broadcast journal, two
    canonical Base confirmations and exact payment reconciliation. Optional
    NFTs enter the existing dev Payroll delivery queue. Pending/delivered NFTs
@@ -93,7 +99,8 @@ claims, receipts or earned NFT state.
 
 Deploy the matching worker before the UI. `/api/promotions` advertises
 `features.pinnerCampaign: "pinner-eth-v2"` (fixed bonus, dedicated fund) and
-`features.pinnerCampaignAssets: ["eth","usdc"]` (USDC pinner bonuses);
+`features.pinnerCampaignAssets: ["eth","usdc"]` (USDC pinner bonuses) and
+`features.pinnerExtraRewards: ["eth","usdc","ommm"]` (multi-asset gifts);
 the editor refuses a pinning save against an older worker. Existing legacy pinner drafts restore as draft-only:
 edit/save them to explicitly choose the new timebox and terms. Daily summaries
 are durably stored in the existing pinner checkpoint before weekly hot-check

@@ -1,5 +1,5 @@
 import { PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS, MUSICIAN_REFERRAL_PILOT, MUSICIAN_REFERRAL_TERMS, PROMOTIONS_FUND, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, isPromotionsFund,
-  promotionAuthorization, promotionWorkReference, promotionMoney, promotionUnits, promotionLink, campaignAsset, musicianReferralConfig, parseAssetAmount,
+  promotionAuthorization, promotionWorkReference, promotionMoney, promotionUnits, promotionLink, campaignAsset, rewardAsset, musicianReferralConfig, parseAssetAmount,
   pinnerEthAmounts, PINNER_CAMPAIGN_VERSION, promotionSupporterRewards, pinnerCampaignFullDays,
   PINNER_CAMPAIGN_FUND, REFERRALS_FUND, CAMPAIGN_ASSETS } from './promotions.mjs?v=20261126-pinner-dashboard';
 import { cachedEthUsd, ethWithUsd, loadEthUsd } from './eth-usd-quote.mjs?v=20261126-eth-gifts';
@@ -152,6 +152,7 @@ export function pinnerCampaignStatsCard(stats) {
     <div class="pinner-campaign-amounts"><span>⏳ Pending<br>${reward(stats.pendingUnits, asset)}</span>
       <span>✓ Approved<br>${reward(stats.approvedUnits, asset)}</span><span>💸 Paid<br>${reward(stats.paidUnits, asset)}</span></div>
     <p>Pin ${stats.qualifyingDays} days → campaign bonus <strong>${reward(stats.rewardUnits, asset)}</strong>. Weekly USDC pinning rewards are separate.</p>
+    ${(stats.extraRewards || []).filter(x => rewardAsset(x.asset)).map(x => `<p>${escape(rewardAsset(x.asset).icon)} Plus ${escape(promotionMoney(x.rewardUnits, rewardAsset(x.asset)))} · ${escape(x.status)}${x.txHash ? ` · <a href="https://basescan.org/tx/${escape(x.txHash)}" target="_blank" rel="noopener">receipt</a>` : ''}</p>`).join('')}
     ${(stats.nftGifts || []).map(token => `<p>🎖 NFT #${escape(token.tokenId)} · ${escape(token.status)}</p>`).join('')}
     ${stats.txHash ? `<a href="https://basescan.org/tx/${escape(stats.txHash)}" target="_blank" rel="noopener">Payment proof</a>` : ''}
     <a href="?promotion=${encodeURIComponent(stats.campaignId)}">Open campaign · join / claim</a>
@@ -238,7 +239,8 @@ export async function payReferralFundMatchSource({ claim, leg, snapshot, command
   if (!isAdminWallet(w.address) || leg.match?.source.recipient !== w.address.toLowerCase()) throw new Error('Connect the configured settlement admin wallet');
   const campaign = snapshot.campaigns.find(item => item.id === claim.campaignId);
   await enablePromotionRecipient({ claim: { wallet: w.address, status: 'approved' }, snapshot, status });
-  await routerPayout({ w, routerAddress: snapshot.routerAddress, fund: campaign.fund, asset: campaignAsset(campaign),
+  await routerPayout({ w, routerAddress: snapshot.routerAddress, fund: campaign.fund,
+    asset: award.asset ? rewardAsset(award.asset) : campaignAsset(campaign),
     confirmationTimeout: 120000,
     recipientWallet: leg.match.source.recipient, amountUnits: leg.amountUnits,
     reference: promotionWorkReference(claim, leg.id), storage, status,
@@ -247,7 +249,8 @@ export async function payReferralFundMatchSource({ claim, leg, snapshot, command
     reconcile: txHash => command({ action: 'reconcile-fund-match-source', claimId: claim.id, legId: leg.id, txHash }),
     isPaid: next => next.claims.find(item => item.id === claim.id)?.legs.find(item => item.id === leg.id)?.match?.source.status === 'paid' });
 }
-// Sends one frozen gift award (campaign.giftAwards entry) from the campaign's fund in its currency.
+const campaignAwards = campaign => [...(campaign?.giftAwards || []), ...(campaign?.bonusAwards || [])];
+// Sends one frozen gift award (campaign.giftAwards entry, or a pinner extra in campaign.bonusAwards) from the campaign's fund in its currency.
 export async function sendCampaignGift({ campaign, award, snapshot, command, status, storage = localStorage }) {
   const w = await wallet();
   if (!isAdminWallet(w.address)) throw new Error('Connect the admin wallet');
@@ -260,8 +263,8 @@ export async function sendCampaignGift({ campaign, award, snapshot, command, sta
     key: `decentbusking:promotion-gift:${campaign.id}:${award.id}:${award.wallet}`,
     prepare: () => command({ action: 'prepare-gift', ...target }),
     reconcile: txHash => command({ action: 'reconcile-gift', ...target, txHash }),
-    isPaid: next => next.campaigns.find(c => c.id === campaign.id)?.giftAwards
-      ?.find(item => item.id === award.id && item.wallet === award.wallet)?.status === 'paid' });
+    isPaid: next => campaignAwards(next.campaigns.find(c => c.id === campaign.id))
+      .find(item => item.id === award.id && item.wallet === award.wallet)?.status === 'paid' });
 }
 export async function reconcileCampaignGift({ campaign, award, command, storage = localStorage, txHash = '' }) {
   const key = `decentbusking:promotion-gift:${campaign.id}:${award.id}:${award.wallet}`;
@@ -275,8 +278,8 @@ export async function reconcileCampaignGift({ campaign, award, command, storage 
   if (!hash) throw new Error('Enter the transaction hash or confirm no payment was broadcast');
   const result = await command({ action: 'reconcile-gift', campaignId: campaign.id, giftId: award.id,
     wallet: award.wallet, txHash: hash });
-  const updated = result.campaigns?.find(item => item.id === campaign.id)?.giftAwards
-    ?.find(item => item.id === award.id && item.wallet === award.wallet);
+  const updated = campaignAwards(result.campaigns?.find(item => item.id === campaign.id))
+    .find(item => item.id === award.id && item.wallet === award.wallet);
   if (updated?.status === 'paid' || updated?.lastRevertedHash === hash.toLowerCase()) storage.removeItem(key);
   return result;
 }
@@ -872,6 +875,9 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
         ${leg.kind === 'wallet' && leg.status === 'payment-pending' ? `<label>Leg transaction hash<input data-promo-leg-hash="${escape(leg.id)}" value="${escape(leg.txHash || '')}"></label><button type="button" data-promo-leg-reconcile="${escape(leg.id)}">Reconcile this leg</button><button type="button" data-promo-leg-release="${escape(leg.id)}">Review unbroadcast leg preparation</button>` : ''}
         ${leg.match ? `<span> · ${money(leg.match.usdcUnits)} USDC match · source ${escape(leg.match.source.status)} · deposit ${escape(leg.match.deposit.status)}. Settle in Payroll after campaign completion.</span>` :
           leg.kind === 'funding-needed' && leg.status !== 'paid' ? `<span> · Funding needed; transfer this exact ${money(leg.amountUnits, campaignAsset(state.campaigns.find(p => p.id === c.campaignId)))} allocation separately.</span><label>Fund deposit transaction hash<input data-promo-leg-hash="${escape(leg.id)}" value="${escape(leg.txHash || '')}"></label><button type="button" data-promo-leg-funding="${escape(leg.id)}">Verify fund deposit</button>` : ''}</li>`).join('')}</ul>` : ''}
+      ${(state.campaigns.find(p => p.id === c.campaignId)?.bonusAwards || []).filter(a => a.claimId === c.id).map(a => `<p data-promo-bonus="${escape(a.id)}">Extra bonus · ${money(a.amountUnits, rewardAsset(a.asset))} · <strong>${escape(a.status)}</strong>${a.txHash ? ` · <a href="https://basescan.org/tx/${escape(a.txHash)}" target="_blank" rel="noopener">receipt</a>` : ''}
+        ${a.status === 'approved' ? `<button type="button" data-promo-bonus-pay="${escape(a.id)}">Pay ${escape(rewardAsset(a.asset)?.symbol || a.asset)} bonus</button>` : ''}
+        ${a.status === 'payment-pending' ? `<label>Bonus transaction hash<input data-promo-bonus-hash="${escape(a.id)}" value="${escape(a.txHash || '')}"></label><button type="button" data-promo-bonus-reconcile="${escape(a.id)}">Reconcile bonus</button>${a.txHash ? '' : `<button type="button" data-promo-bonus-release="${escape(a.id)}">Review unbroadcast bonus preparation</button>`}` : ''}</p>`).join('')}
       ${c.qualification?.activity ? `<p>Referral evidence · ${escape(c.qualification.window)} · assessment week ${escape(c.qualification.week)}</p><ul>
         ${c.qualification.activity.map(v => `<li>${escape(v.wallet)} · play ${escape(v.playId)} · ${escape(v.at)} · ${escape(v.week)}</li>`).join('')}</ul>`
       : c.qualification ? `<p>${escape(JSON.stringify(c.qualification))}</p>` : ''}
@@ -1107,6 +1113,19 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       if (leg && target.dataset.promoLegFunding) {
         const hash = card.querySelector(`[data-promo-leg-hash="${leg.id}"]`).value;
         return command({ action: 'reconcile-funding-leg', claimId: claim.id, legId: leg.id, txHash: hash });
+      }
+      const bonusId = target.dataset.promoBonusPay || target.dataset.promoBonusReconcile || target.dataset.promoBonusRelease;
+      if (bonusId) {
+        const campaign = state.campaigns.find(c => c.id === claim.campaignId);
+        const award = campaign?.bonusAwards?.find(a => a.id === bonusId);
+        if (!award) throw new Error('Extra bonus not found; refresh the admin view');
+        if (target.dataset.promoBonusPay) return sendCampaignGift({ campaign, award, snapshot: state, command, status });
+        if (target.dataset.promoBonusReconcile) return reconcileCampaignGift({ campaign, award, command,
+          txHash: card.querySelector(`[data-promo-bonus-hash="${bonusId}"]`)?.value });
+        if (!confirm('Inspect the owner wallet history. Confirm only if no bonus payment was broadcast.')) return;
+        const reason = prompt('Record why this bonus was not broadcast:');
+        if (!reason?.trim()) return;
+        return releaseCampaignGiftPreparation({ campaign, award, command, reason });
       }
       if (target.dataset.promoReview) return command({ action: 'review', claimId: claim.id,
         decision: target.dataset.promoReview, reason: card.querySelector('[data-promo-reason]').value,

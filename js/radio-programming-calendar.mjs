@@ -3,7 +3,7 @@ import { RADIO_PLAYLISTS } from './radio-playlists.mjs?v=20261116-longform';
 import { upsertLivePerformanceEvent, cancelLivePerformanceEvent, validateWeeklyScheduleOverrides, validateRadioProgrammingConflicts } from './radio-schedule.mjs?v=20261116-longform';
 import { openReferralCampaignEditor, referralTemplateFrom } from './referral-campaign-editor.mjs?v=20261126-eth-gifts';
 import { openPromotionCalendarEditor } from './promotions-ui.mjs?v=20261126-pinner-dashboard';
-import { openPinnerCampaignEditor } from './pinner-campaign-editor.mjs?v=20261129-pinner-uniform';
+import { openPinnerCampaignEditor } from './pinner-campaign-editor.mjs?v=20261130-pinner-gifts';
 import { PROMOTION_TEMPLATES } from './promotions.mjs?v=20261126-pinner-dashboard';
 import { openLivePerformanceCalendar, liveCalendarCancellationImpact, getLiveCalendarLedger, liveCalendarEventLifecycle } from './live-performance-admin.mjs?v=20261121-typed-review';
 

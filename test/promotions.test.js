@@ -252,6 +252,45 @@ test('optional pinning NFTs require sufficient inventory and enter the existing 
     tokenKey: f.shared.supporterRewardKey() });
   await assert.rejects(f.exec({ action: 'review', claimId: claim.id, decision: 'rejected', reason: 'Cannot reverse pending NFT' }), /NFT transfer/);
 });
+test('pinning campaigns can add fixed USDC and Ommm extras with per-asset funding and their own payout ledger', async () => {
+  const { newYorkDayPeriod } = await import('../js/payroll-week.mjs');
+  const balances = { eth: 0n, usdc: 0n, ommm: 0n };
+  const day = { ...newYorkDayPeriod('2026-10-31'), successfulChecks: 20, failedChecks: 0, qualified: true };
+  const f = await fixture({ readFunding: async (_, asset) => balances[asset],
+    readPinnerProgress: ({ wallet }) => ({ status: 'active', participantKey: id(wallet), completedDays: 1, completedAt: day.endAt, days: [day] }) });
+  assert.deepEqual((await f.view()).features.pinnerExtraRewards, ['eth', 'usdc', 'ommm']);
+  const base = input({ template: 'pinner', qualificationVersion: f.shared.PINNER_CAMPAIGN_VERSION, asset: 'eth', maxAwards: 2,
+    qualifyingDays: 1, supporterRewards: [], ...f.shared.pinnerEthAmounts('1000000000000000', 2) });
+  const ommm = '500000000000000000000';
+  const extraRewards = [{ asset: 'usdc', rewardUnits: '3000000' }, { asset: 'ommm', rewardUnits: ommm }];
+  await assert.rejects(f.create({ ...base, extraRewards: [{ asset: 'eth', rewardUnits: '1' }] }), /once/);
+  const c = await f.create({ ...base, extraRewards });
+  assert.deepEqual(c.extraRewards.map(x => x.budgetUnits), ['6000000', '1000000000000000000000']);
+  assert.match(c.terms, /Plus 3\.00 USDC and 500 Ommm per approved participant; these amounts are also fixed\./);
+  assert.doesNotMatch((await f.create(base)).terms, /Plus/, 'terms without extras stay unchanged');
+  Object.assign(balances, { eth: 2000000000000000n, usdc: 6000000n, ommm: 999n });
+  await assert.rejects(f.publish(c), /Ommm fund balance/);
+  balances.ommm = 1000000000000000000000n;
+  await f.publish(c); await f.join(c);
+  f.setTime(Date.parse(day.endAt));
+  const claim = await f.claim(c);
+  const approved = await f.exec({ action: 'review', claimId: claim.id, decision: 'approved', reason: 'Verified node campaign' });
+  const awards = approved.campaigns.find(x => x.id === c.id).bonusAwards;
+  assert.deepEqual(awards.map(a => [a.id, a.asset, a.amountUnits, a.status]),
+    [[`usdc-${claim.id}`, 'usdc', '3000000', 'approved'], [`ommm-${claim.id}`, 'ommm', ommm, 'approved']]);
+  const stats = (await f.view(alice)).participantStats.find(p => p.campaignId === c.id);
+  assert.deepEqual(stats.extraRewards.map(x => [x.asset, x.status]), [['usdc', 'approved'], ['ommm', 'approved']]);
+  const { validatePromotionCheckpoint } = await import('../discord-bot/promotions.js');
+  assert.doesNotThrow(() => validatePromotionCheckpoint(f.stored()));
+  const tampered = structuredClone(f.stored());
+  tampered.campaigns.find(x => x.id === c.id).bonusAwards[1].amountUnits = '1';
+  assert.throws(() => validatePromotionCheckpoint(tampered), /Invalid promotions checkpoint/);
+  balances.ommm = 1n;
+  await assert.rejects(f.exec({ action: 'prepare-gift', campaignId: c.id, giftId: `ommm-${claim.id}`, wallet: alice.address }), /cover/);
+  balances.ommm = 1000000000000000000000n;
+  await f.exec({ action: 'prepare-gift', campaignId: c.id, giftId: `ommm-${claim.id}`, wallet: alice.address });
+  await assert.rejects(f.exec({ action: 'review', claimId: claim.id, decision: 'rejected', reason: 'Too late' }), /extra bonus payment/);
+});
 async function matchFixture({ slots = 1, gifts = [], rewards, stock = 11n } = {}) {
   const musician = Wallet.createRandom();
   const f = await fixture({ readPlaylist: () => [{ trackId: 'match-track', title: 'Trial song', mintStatus: 'minted', tokenId: '7',

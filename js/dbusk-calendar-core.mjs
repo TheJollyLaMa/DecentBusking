@@ -1,7 +1,7 @@
 import { utcToZonedInput, zonedInputToUtc, radioCalendarOccurrences } from './radio-calendar.mjs?v=20261024-programming-calendar';
 import { performerRoomUrl } from './performer-room.mjs?v=20261116-curtain';
 import { formatLiveAsset } from './live-bookings.mjs?v=20261108-live-audio-pilot';
-import { campaignAsset, promotionMoney } from './promotions.mjs';
+import { campaignAsset, promotionMoney, rewardAsset } from './promotions.mjs';
 import { ethWithUsd } from './eth-usd-quote.mjs?v=20261128-pinner-eth';
 
 export const DCAL_ZONE = 'America/New_York';
@@ -57,8 +57,10 @@ export function receiptProof(tx) {
 export const PINNER_GUIDE_URL = 'https://github.com/TheJollyLaMa/DecentBusking/wiki/Earn-by-Pinning';
 function pinnerCampaignDetails(c) {
   const amount = units => campaignAsset(c).id === 'eth' ? ethWithUsd(units) : promotionMoney(units, campaignAsset(c));
-  return [`📌 Pin ${c.qualifyingDays} qualifying full New York days → get ${amount(c.rewardUnits)} · first ${c.maxAwards} finishers.`,
-    `🎁 Budget: ${amount(c.budgetUnits)}${c.fund ? ` from ${c.fund}` : ''}. USD is a live estimate; the ETH bonus is fixed.`,
+  const extras = (c.extraRewards || []).filter(x => rewardAsset(x.asset));
+  const plus = key => extras.map(x => ` + ${promotionMoney(x[key], rewardAsset(x.asset))}`).join('');
+  return [`📌 Pin ${c.qualifyingDays} qualifying full New York days → get ${amount(c.rewardUnits)}${plus('rewardUnits')} · first ${c.maxAwards} finishers.`,
+    `🎁 Budget: ${amount(c.budgetUnits)}${plus('budgetUnits')}${c.fund ? ` from ${c.fund}` : ''}. Bonus amounts are fixed; any USD shown is a live estimate.`,
     '① Run an IPFS node and enroll it (Earn by Pinning guide) · ② the admin approves it · ③ Open campaign → Join · ④ pin every day: 20+ independent checks and 90%+ passing makes a qualifying day.',
     '💸 Weekly USDC pinning rewards are paid separately; this bonus is extra.'];
 }

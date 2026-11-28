@@ -619,6 +619,12 @@ test('pinner campaign popout keeps a draft in place, separates requirements and 
   assert.equal(usdc.fund, shared.PINNER_CAMPAIGN_FUND);
   assert.match(usdc.terms, /first to complete 6 qualifying/);
   assert.throws(() => editor.pinnerCampaignPayload({ ...values, qualifyingDays: 7 }), /Required days must be 1–6/);
+  const multi = editor.pinnerCampaignPayload({ ...values, qualifyingDays: 6, extras: { ommm: '1000000000000000000', usdc: '2000000' } });
+  assert.deepEqual(multi.extraRewards.map(x => [x.asset, x.budgetUnits]), [['usdc', '10000000'], ['ommm', '5000000000000000000']]);
+  assert.match(multi.terms, /Plus 2\.00 USDC and 1 Ommm per approved participant/);
+  assert.equal(editor.pinnerCampaignPayload({ ...values, qualifyingDays: 6 }).extraRewards, undefined);
+  assert.deepEqual(editor.pinnerEditorValues({ campaign: { ...draft, extraRewards: multi.extraRewards } }).extras,
+    { usdc: '2000000', ommm: '1000000000000000000' });
 
   const campaigns = [
     { id: 'other', fund: shared.PINNER_CAMPAIGN_FUND, status: 'published', asset: 'eth', budgetUnits: '300', paidUnits: '100' },
@@ -633,5 +639,9 @@ test('pinner campaign popout keeps a draft in place, separates requirements and 
   assert.equal(step({ fund: { exists: true, active: false } }).step, 'restore');
   assert.deepEqual(step({ fund: { exists: true, active: true }, shortfallUnits: 250n }), { step: 'fund', label: '▶ Fund 250u & Activate' });
   assert.deepEqual(step({ fund: { exists: true, active: true } }), { step: 'activate', label: '▶ Sign & Activate' });
+  assert.equal(step({ fund: { exists: true, active: true }, shortfallText: 'Ξ0.01 + $5.00' }).label, '▶ Fund Ξ0.01 + $5.00 & Activate');
+  assert.equal(editor.pinnerFundAvailability({ balanceUnits: '100', asset: 'usdc', needUnits: 50n, campaigns: [{ id: 'x',
+    fund: shared.PINNER_CAMPAIGN_FUND, status: 'published', asset: 'eth', budgetUnits: '1', extraRewards: [{ asset: 'usdc', budgetUnits: '80' }],
+    bonusAwards: [{ asset: 'usdc', status: 'paid', amountUnits: '20' }] }] }).others, 60n);
   assert.equal(step({ valid: false, fund: { exists: false } }).step, 'blocked');
 });
