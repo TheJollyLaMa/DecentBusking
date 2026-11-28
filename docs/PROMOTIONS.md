@@ -20,21 +20,34 @@ budget and optional NFT gifts. See [Admin DCal](ADMIN-DCAL.md).
    winners; total budget = bonus × winners). The live USD value is shown in
    parentheses, e.g. `0.002 ETH ($6.70)`, everywhere the bonus appears: the
    admin form, the public calendar and the profile campaign card. It is an
-   estimate from the Coinbase spot price; the ETH amount is the promise. The default
+   estimate from the Coinbase spot price; the ETH amount is the promise. While
+   typing, `≈ $…` appears directly under the bonus and budget inputs and in
+   their collapsed summaries. The default
    31-day window permits 30 full New York days when opening partway through a
    day. Shorter/longer campaigns are editable; required days must fit the
    timebox. Late joiners need enough remaining full days.
-3. Leave both NFT fields blank to offer no NFT. Optionally select a Base
-   ERC-1155 contract and token ID; one token per winner is owed separately from
+3. **🎖 Supporter gift** lists the Supporter DNFTs the connected admin wallet
+   holds on the Base Supporter contract (read on-chain via `nextTokenId`,
+   `balanceOfBatch` and one Multicall3 read of caps/metadata; capped tokens
+   whose metadata names a Supporter DNFT), with balances. It warns when the
+   wallet holds fewer copies than the award cap. **Other ERC-1155 token
+   (manual)** keeps the contract/token-ID fields for anything else. Choose
+   **No NFT gift** to offer none. One token per winner is owed separately from
    the ETH bonus. Publishing checks admin inventory against outstanding
-   pinning-campaign promises. Tokens are not escrowed or minted.
+   pinning-campaign promises. Tokens are not escrowed or minted: they stay in
+   the admin wallet until approved delivery through Payroll.
 4. Every pin reward campaign draws from the standing **`dbusk-pinner-campaigns`**
    allocation; the fund field is locked to it. The popout reads Base and shows
    whether the fund exists, is active and has enough free ETH after other
    pinner campaigns' reservations. **⚸ Create pinner campaign fund**,
    **Restore fund** or **Deposit ETH** opens Admin DCal → Fund Allocations with
    the slug selected or prefilled (also available there as **📌 Prepare pinner
-   campaign fund**). Save the draft, deposit ETH, then **Publish offer**.
+   campaign fund**). Fund Allocations also lists the pinner campaign and
+   referral funds as **not created yet · ⚸ Create on Base** until they exist.
+   **💾 Save draft · then fund if short** saves the draft, then offers either to
+   open fund creation (if the fund is missing/archived) or to deposit exactly
+   the ETH shortfall from the admin wallet (`fundNative`, separate wallet
+   confirmation; earmarked and admin-recoverable, not escrow). Then **Publish offer**.
    Publication requires signed review plus enough ETH for every outstanding
    campaign budget in that fund. No quote is needed: published terms and ETH
    amounts are immutable, with no payout-time repricing.

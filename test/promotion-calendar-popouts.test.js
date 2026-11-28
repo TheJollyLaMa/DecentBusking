@@ -126,6 +126,11 @@ test('calendar campaign popouts preserve preset terms and use the public unsigne
       assert.match(await dialog.locator('summary').filter({ hasText: 'Total bonus budget' }).textContent(), /0\.015/);
       await page.waitForFunction(() => /0\.003 ETH \(\$9\.00\) each · total 0\.015 ETH \(\$45\.00\)/.test(document.querySelector('dialog[open] [data-promo-pinner-usd]')?.textContent));
       await page.waitForFunction(() => /dbusk-pinner-campaigns/.test(document.querySelector('dialog[open] [data-promo-pinner-fund]')?.textContent));
+      assert.equal(await dialog.locator('[data-inline-usd=reward]').textContent(), '≈ $9.00');
+      assert.match(await dialog.locator('summary').filter({ hasText: 'Total bonus budget' }).textContent(), /0\.015 · ≈ \$45\.00/);
+      assert.match(await dialog.locator('[data-promo-save]').textContent(), /then fund if short/);
+      await page.waitForFunction(() => /manual fields/.test(document.querySelector('dialog[open] [data-promo-supporter-status]')?.textContent));
+      assert.equal(await dialog.locator('[data-promo-supporter-pick] option').first().textContent(), 'No NFT gift');
     }
     await dialog.locator('form button:not([type])').first().click();
     await page.waitForFunction(value => window.commands.some(c => c.action === 'save' && c.campaign.template === value), template);

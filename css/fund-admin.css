@@ -34,3 +34,6 @@
 #router-action-dialog h3 { color: #ffe3a9; margin-bottom: 20px; overflow-wrap: anywhere; }
 #router-action-dialog p { line-height: 1.7; margin: 16px 0 24px; overflow-wrap: anywhere; }
 #router-action-dialog > div { display: flex; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+
+.admin-fund-missing { margin-top: .75rem; border-top: 1px dashed currentColor; padding-top: .5rem; opacity: .9; }
+.admin-fund-missing p { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .3rem 0; }

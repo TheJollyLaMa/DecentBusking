@@ -289,3 +289,7 @@
 .radio-calendar-event.is-short-live .radio-calendar-live-blurb small:not(:nth-child(3)):not(:last-child)::before { content: attr(data-icon); font-size: .6rem; }
 .radio-programming-calendar .radio-calendar-event.is-cancelled,
 .radio-programming-calendar .radio-calendar-event.is-live[data-live-state="cancelled"] { border-color: #ef6262; border-style: solid; }
+
+.promotion-inline-usd { display: block; margin-top: .2rem; font-size: .82rem; opacity: .8; }
+.promotion-manual-nft { margin: .35rem 0; }
+.promotion-manual-nft > summary { cursor: pointer; font-size: .85rem; opacity: .8; }

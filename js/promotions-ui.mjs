@@ -4,6 +4,7 @@ import { PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS, MUSICIAN_REFERRAL_PILO
   PINNER_CAMPAIGN_FUND, REFERRALS_FUND, CAMPAIGN_ASSETS } from './promotions.mjs?v=20261126-pinner-dashboard';
 import { cachedEthUsd, ethWithUsd, loadEthUsd } from './eth-usd-quote.mjs?v=20261126-eth-gifts';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
+import { loadSupporterInventory } from './supporter-inventory.mjs?v=20261129-pinner-fund-load';
 import { newYorkInputToUtc, utcToNewYorkInput } from './radio-calendar.mjs';
 import { radioListenerId } from './radio-client.mjs';
 import { getAudibleBroadcast } from './public-broadcast-client.mjs?v=20261125-song-tail';
@@ -379,6 +380,7 @@ function compactPromotionForm(form) {
         .filter(Boolean);
       const currentLabel = controls.length === 1 && controls[0].tagName === 'LABEL'
         ? controls[0].firstChild.textContent.trim() : label;
+      parts.push(...[...body.querySelectorAll('[data-inline-usd]:not([hidden])')].map(note => note.textContent));
       const text = ['criteria', 'terms'].includes(inputs[0]?.name) ? '' : parts.join(' · ');
       value.textContent = `${currentLabel}${text ? ` · ${text.length > 100 ? `${text.slice(0, 100)}…` : text}` : ''}`;
     };
@@ -456,9 +458,13 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
             <p class="promotion-usd" data-promo-pinner-usd aria-live="polite"></p>
             ${field('qualifyingDays', 'Required qualifying days inside this timebox (1–365)', 'number', '30')}
             <p>Each full New York day after registration requires 20 independent checks and 90% availability. Days need not be consecutive. First finishers win; weekly pinning rewards are unchanged.</p>
-            <label>Optional Base ERC-1155 NFT gift contract<input name="pinnerNftContract" placeholder="0x…"></label>
-            <label>Optional NFT token ID<input name="pinnerNftTokenId" placeholder="77"></label>
-            <p>Blank means no NFT promise. One configured token per winner, delivered from admin inventory through Payroll.</p>
+            <label>🎖 Supporter gift from the admin wallet<select data-promo-supporter-pick><option value="">No NFT gift</option></select></label>
+            <p class="promotion-usd" data-promo-supporter-status aria-live="polite"></p>
+            <details class="promotion-manual-nft"><summary>Other ERC-1155 token (manual)</summary>
+              <label>Base ERC-1155 NFT gift contract<input name="pinnerNftContract" placeholder="0x…"></label>
+              <label>NFT token ID<input name="pinnerNftTokenId" placeholder="77"></label>
+            </details>
+            <p>Blank means no NFT promise. One token per winner stays in the admin wallet (not escrowed) and is sent through Payroll after approval.</p>
           </div>
           <div data-promo-album>${field('minOriginalTracks', 'Minimum original tracks', 'number', '3')}</div>
           <div data-promo-referral>
@@ -477,7 +483,7 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
           ${field('startsAt', 'Opens (New York time)', 'datetime-local')}
           ${field('endsAt', 'Closes (New York time)', 'datetime-local')}
           ${field('claimDeadline', 'Claim deadline (New York time)', 'datetime-local')}
-          <button>Save draft only</button><button type="button" data-promo-new>New draft</button>
+          <button data-promo-save>Save draft only</button><button type="button" data-promo-new>New draft</button>
         </form>
       </details><div data-promo-campaigns></div><h3>Attribution review</h3><div data-promo-members></div>
       <h3>Claims &amp; payments</h3><div data-promo-claims></div>
@@ -548,6 +554,8 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       section.hidden = !active;
       section.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = !active; });
     }
+    root.querySelector('[data-promo-save]').textContent = pinner ? '💾 Save draft · then fund if short' : 'Save draft only';
+    if (pinner && !supporters && window._wallet?.address) void loadSupporters();
     pinnerAmounts();
     void refreshPinnerFund();
     refreshCompact();
@@ -558,11 +566,28 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     if (!units || BigInt(units) <= 0n || !Number.isSafeInteger(awards) || awards < 1) return null;
     return { rewardUnits: units, budgetUnits: (BigInt(units) * BigInt(awards)).toString() };
   }
+  function inlineUsd(name, units) {
+    let note = input(name).parentElement.querySelector(`[data-inline-usd="${name}"]`);
+    if (!note) {
+      note = document.createElement('small');
+      note.className = 'promotion-inline-usd';
+      note.dataset.inlineUsd = name;
+      note.setAttribute('aria-live', 'polite');
+      input(name).after(note);
+    }
+    const usd = units ? ethWithUsd(units).match(/\(([^)]+)\)/)?.[1] : '';
+    note.hidden = !units;
+    note.textContent = units ? (usd ? `≈ ${usd}` : '≈ $… loading') : '';
+  }
   function pinnerAmounts() {
     const hint = root.querySelector('[data-promo-pinner-usd]');
-    if (input('template').value !== 'pinner') { hint.textContent = ''; return; }
-    const units = formPinnerUnits();
+    const pinner = input('template').value === 'pinner';
+    const units = pinner ? formPinnerUnits() : null;
+    inlineUsd('reward', units?.rewardUnits);
+    inlineUsd('budget', units?.budgetUnits);
+    if (!pinner) { hint.textContent = ''; return; }
     if (units) input('budget').value = ethInput(units.budgetUnits);
+    paintSupporterPick();
     hint.textContent = !units ? 'Enter the ETH bonus, e.g. 0.002 (up to six decimals).'
       : `Pin ${input('qualifyingDays').value || '…'} days → ${ethWithUsd(units.rewardUnits)} each · total ${ethWithUsd(units.budgetUnits)}${cachedEthUsd() ? ' · USD is a live estimate; the ETH amount is what is promised.' : ' · live USD estimate loading…'}`;
     if (!cachedEthUsd()) void loadEthUsd().then(rate => { if (rate && root.isConnected) pinnerAmounts(); });
@@ -615,16 +640,89 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     if (need > free) action('⚸ Deposit ETH', 'Opens Fund Allocations with this fund selected');
   }
   async function refreshPinnerFund() {
-    if (!pinnerContext().pinner) { paintPinnerFund(); return; }
+    if (!pinnerContext().pinner) { paintPinnerFund(); return pinnerFund; }
     const read = ++pinnerFundRead;
     pinnerFund = null;
     paintPinnerFund();
     let next;
     try { next = await readCampaignFund(PINNER_CAMPAIGN_FUND, { routerAddress: state?.routerAddress || SETTLEMENT_ROUTER }); }
     catch (error) { next = { error: error.shortMessage || error.message || 'Base read failed' }; }
-    if (read !== pinnerFundRead || !root.isConnected) return;
+    if (read !== pinnerFundRead || !root.isConnected) return next;
     pinnerFund = next;
     paintPinnerFund();
+    return next;
+  }
+  let supporters = null, supporterLoad = 0;
+  const pick = () => root.querySelector('[data-promo-supporter-pick]');
+  function paintSupporterPick() {
+    const select = pick(), note = root.querySelector('[data-promo-supporter-status]');
+    if (!select) return;
+    const contract = input('pinnerNftContract').value.trim().toLowerCase();
+    const tokenId = input('pinnerNftTokenId').value.trim();
+    const chosen = contract && tokenId ? `${contract}:${tokenId}` : '';
+    const options = [new Option('No NFT gift', '')];
+    for (const token of supporters?.tokens || []) {
+      options.push(new Option(`${token.name} · #${token.tokenId} · ${token.balance} in wallet`, `${token.contract}:${token.tokenId}`));
+    }
+    if (chosen && !options.some(option => option.value === chosen)) options.push(new Option(`Manual · #${tokenId} · ${contract.slice(0, 8)}…`, chosen));
+    select.replaceChildren(...options);
+    select.value = chosen;
+    const token = supporters?.tokens?.find(item => `${item.contract}:${item.tokenId}` === chosen);
+    const awards = Number(input('maxAwards').value) || 0;
+    note.textContent = !supporters ? '🎖 Reading Supporter DNFTs in the admin wallet…'
+      : supporters.error ? `🎖 Wallet inventory unavailable (${supporters.error}); use the manual fields.`
+      : !supporters.tokens.length ? '🎖 No Supporter DNFTs found in the admin wallet; use the manual fields.'
+      : token && BigInt(token.balance) < BigInt(awards) ? `⚠️ Only ${token.balance} in the wallet for ${awards} awards; top up before publishing.`
+      : token ? `🎖 ${token.balance} held · one per finisher, sent from this wallet after approval.` : '';
+  }
+  async function loadSupporters(refresh = false) {
+    const read = ++supporterLoad;
+    supporters = null;
+    paintSupporterPick();
+    let next;
+    try {
+      const owner = window._wallet?.address;
+      next = { tokens: await loadSupporterInventory({ owner, ethers: window.ethers, provider: getBaseReadProvider(), refresh }) };
+    } catch (error) { next = { tokens: [], error: error.shortMessage || error.message || 'Base read failed' }; }
+    if (read !== supporterLoad || !root.isConnected) return;
+    supporters = next;
+    paintSupporterPick();
+    refreshCompact();
+  }
+  function applySupporterPick(value) {
+    const [contract = '', tokenId = ''] = value.split(':');
+    input('pinnerNftContract').value = contract;
+    input('pinnerNftTokenId').value = tokenId;
+  }
+  // After a pinner draft saves, offer to create the fund or deposit the shortfall with a separate wallet confirmation.
+  async function fundPinnerAfterSave(budgetUnits) {
+    const fund = await refreshPinnerFund();
+    if (!fund || fund.error) return `Draft saved. ${PINNER_CAMPAIGN_FUND} could not be read; check funding before publishing.`;
+    if (!fund.exists || !fund.active) {
+      if (confirm(`Draft saved.\n${PINNER_CAMPAIGN_FUND} ${fund.exists ? 'is archived' : 'does not exist yet'}. Open Fund Allocations to ${fund.exists ? 'restore' : 'create'} it now?`)) {
+        root.closest('dialog')?.close();
+        prepareSettlementFund(PINNER_CAMPAIGN_FUND);
+      }
+      return `Draft saved. ${fund.exists ? 'Restore' : 'Create'} ${PINNER_CAMPAIGN_FUND}, then deposit ETH before publishing.`;
+    }
+    const reserved = (state?.campaigns || []).filter(c => c.fund === PINNER_CAMPAIGN_FUND && ['published', 'paused', 'closed'].includes(c.status))
+      .reduce((sum, c) => sum + BigInt(c.budgetUnits || 0) - BigInt(c.paidUnits || 0), 0n);
+    const free = fund.balanceUnits > reserved ? fund.balanceUnits - reserved : 0n;
+    const shortfall = BigInt(budgetUnits) > free ? BigInt(budgetUnits) - free : 0n;
+    if (!shortfall) return 'Draft saved · the pinner campaign fund already covers this budget.';
+    if (!confirm(`Draft saved.\nDeposit ${ethWithUsd(shortfall)} from your wallet into ${PINNER_CAMPAIGN_FUND} now?\nThis is earmarked and admin-recoverable, not escrow. It does not publish the campaign.`)) {
+      return `Draft saved · ${PINNER_CAMPAIGN_FUND} still needs ${ethWithUsd(shortfall)} before publishing.`;
+    }
+    const w = await wallet();
+    const router = new w.ethers.Contract(state?.routerAddress || SETTLEMENT_ROUTER, ['function fundNative(bytes32) payable'], w.signer);
+    status.textContent = `🦊 Confirm the ${ethWithUsd(shortfall)} deposit in your wallet…`;
+    const tx = await router.fundNative(w.ethers.id(PINNER_CAMPAIGN_FUND), { value: shortfall });
+    status.textContent = '⏳ Depositing on Base…';
+    if ((await tx.wait())?.status !== 1) throw new Error('ETH deposit did not confirm');
+    await w.check();
+    await refreshPinnerFund();
+    document.dispatchEvent(new CustomEvent('settlement-fund-changed', { detail: { slug: PINNER_CAMPAIGN_FUND } }));
+    return `Draft saved and ${ethWithUsd(shortfall)} deposited into ${PINNER_CAMPAIGN_FUND}. Review and publish when ready.`;
   }
   function template() {
     const t = PROMOTION_TEMPLATES.find(t => t.id === input('template').value);
@@ -796,7 +894,8 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     } finally { busy = false; }
   }
   form.addEventListener('change', event => { if (event.target.name === 'template') template(); });
-  form.addEventListener('input', () => {
+  form.addEventListener('input', event => {
+    if (event.target.matches?.('[data-promo-supporter-pick]')) applySupporterPick(event.target.value);
     if (input('template').value === 'pinner') {
       pinnerAmounts();
       refreshCompact();
@@ -875,8 +974,10 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
         form.closest('details').open = false;
         render();
       }
+      const funded = pinner.budgetUnits ? await fundPinnerAfterSave(pinner.budgetUnits) : '';
       reset();
       if (calendarOptions.customOnly) return 'Draft saved. Select its calendar bar to review and publish it.';
+      if (funded) return funded;
     });
   });
   root.addEventListener('click', event => {
