@@ -533,7 +533,8 @@ export function openReferralCampaignEditor({ startsAt, template = null, campaign
     if (campaign.gifts?.length) rows.append(giftAwardsView());
     footer.append(pill('⚙ Manage', 'Review claims and payments', () => {
       dialog.close();
-      openPromotionCalendarEditor({ startsAt: campaign.startsAt, endsAt: campaign.endsAt, campaignId: campaign.id });
+      openPromotionCalendarEditor({ startsAt: campaign.startsAt, endsAt: campaign.endsAt,
+        campaignId: campaign.id, template: campaign.template, compact: true });
     }));
   } else footer.append(matchNotice, runButton);
 

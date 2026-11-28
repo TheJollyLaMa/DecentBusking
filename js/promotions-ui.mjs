@@ -1,5 +1,5 @@
 import { PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS, MUSICIAN_REFERRAL_PILOT, MUSICIAN_REFERRAL_TERMS, PROMOTIONS_FUND, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, isPromotionsFund,
-  promotionAuthorization, promotionWorkReference, promotionMoney, promotionUnits, promotionLink, campaignAsset, musicianReferralConfig,
+  promotionAuthorization, promotionWorkReference, promotionMoney, promotionUnits, promotionLink, campaignAsset, musicianReferralConfig, parseAssetAmount,
   pinnerPromotionAmounts, PINNER_CAMPAIGN_VERSION, promotionSupporterRewards, pinnerCampaignFullDays } from './promotions.mjs?v=20261126-pinner-dashboard';
 import { loadEthUsd } from './eth-usd-quote.mjs?v=20261126-eth-gifts';
 import { newYorkInputToUtc, utcToNewYorkInput } from './radio-calendar.mjs';
@@ -260,25 +260,118 @@ export async function enablePromotionRecipient({ claim, snapshot, status, confir
 
 let promotionEditorDialog = null;
 
-export function openPromotionCalendarEditor({ startsAt, endsAt, campaignId, template, sourceCampaign } = {}) {
+export function openPromotionCalendarEditor({ startsAt, endsAt, campaignId, template, sourceCampaign, compact = false } = {}) {
   if (promotionEditorDialog?.open) return;
-  promotionEditorDialog = document.createElement('dialog');
-  promotionEditorDialog.className = 'promotion-calendar-editor-dialog promotion-dialog';
-  promotionEditorDialog.setAttribute('aria-label', campaignId ? 'Promotion details' : 'Promotions workspace');
+  const dialog = document.createElement('dialog');
+  promotionEditorDialog = dialog;
+  dialog.className = compact ? 'referral-blob promotion-blob' : 'promotion-calendar-editor-dialog promotion-dialog';
+  dialog.setAttribute('aria-label', campaignId ? 'Promotion details' : 'Promotions workspace');
   const close = document.createElement('button');
   close.type = 'button';
-  close.textContent = 'Close';
-  close.className = 'promotion-calendar-editor-close';
+  close.textContent = compact ? '✕' : 'Close';
+  close.className = compact ? 'rc-pill' : 'promotion-calendar-editor-close';
+  close.setAttribute('aria-label', 'Close');
   const body = document.createElement('div');
-  promotionEditorDialog.append(close, body);
-  document.body.append(promotionEditorDialog);
-  close.addEventListener('click', () => promotionEditorDialog.close());
-  promotionEditorDialog.addEventListener('close', () => {
-    promotionEditorDialog.remove();
-    promotionEditorDialog = null;
+  if (compact) {
+    const header = document.createElement('header');
+    header.className = 'rc-head';
+    const badge = document.createElement('span');
+    badge.className = 'rc-badge';
+    badge.textContent = template === 'pinner' ? '📌' : '🎪';
+    const title = document.createElement('h3');
+    title.className = 'rc-title';
+    title.textContent = sourceCampaign?.title || PROMOTION_TEMPLATES.find(item => item.id === template)?.title || 'Campaign';
+    title.dataset.promoHeading = '';
+    header.append(badge, title, close);
+    body.className = 'rc-rows';
+    dialog.append(header, body);
+  } else dialog.append(close, body);
+  document.body.append(dialog);
+  close.addEventListener('click', () => dialog.close());
+  const cleanup = mountAdminPromotions(body, { startsAt, endsAt, campaignId, template, sourceCampaign, calendarMode: true, compact,
+    customOnly: !compact && template === 'custom' && !campaignId && !sourceCampaign });
+  dialog.addEventListener('close', () => {
+    cleanup();
+    dialog.remove();
+    if (promotionEditorDialog === dialog) promotionEditorDialog = null;
   }, { once: true });
-  mountAdminPromotions(body, { startsAt, endsAt, campaignId, template, sourceCampaign, calendarMode: true });
-  promotionEditorDialog.showModal();
+  dialog.showModal();
+  dialog.addEventListener('click', event => {
+    if (event.target === dialog) dialog.close();
+  });
+}
+
+function compactPromotionForm(form) {
+  const rows = [];
+  const sections = new Map();
+  function disclosure(container, label, icon, controls) {
+    const details = document.createElement('details');
+    details.className = 'rc-row promotion-blob-row';
+    const summary = document.createElement('summary');
+    summary.className = 'rc-summary';
+    const mark = document.createElement('span');
+    mark.className = 'rc-icon';
+    mark.textContent = icon;
+    const value = document.createElement('span');
+    value.className = 'rc-value';
+    summary.append(mark, value);
+    const body = document.createElement('div');
+    body.className = 'rc-edit';
+    controls.forEach(control => body.append(control));
+    details.append(summary, body);
+    container.append(details);
+    const refresh = () => {
+      const inputs = body.querySelectorAll('input, select, textarea');
+      const parts = [...inputs].filter(input => input.type !== 'hidden')
+        .map(input => input.tagName === 'SELECT' ? input.selectedOptions[0]?.textContent : input.value)
+        .filter(Boolean);
+      const currentLabel = controls.length === 1 && controls[0].tagName === 'LABEL'
+        ? controls[0].firstChild.textContent.trim() : label;
+      const text = ['criteria', 'terms'].includes(inputs[0]?.name) ? '' : parts.join(' · ');
+      value.textContent = `${currentLabel}${text ? ` · ${text.length > 100 ? `${text.slice(0, 100)}…` : text}` : ''}`;
+    };
+    details.addEventListener('input', refresh);
+    details.addEventListener('change', refresh);
+    rows.push(refresh);
+  }
+  form.querySelector('[name="template"]').parentElement.hidden = true;
+  for (const [name, icon] of [
+    ['title', '✏️'], ['criteria', '📋'], ['terms', 'ⓘ'], ['reward', '💵'],
+    ['budget', '💰'], ['maxAwards', '🎯'], ['fund', '🏦'],
+    ['startsAt', '🟢'], ['endsAt', '🏁'], ['claimDeadline', '⏳'],
+  ]) {
+    const control = form.elements.namedItem(name).parentElement;
+    const label = control.firstChild.textContent.trim();
+    const holder = document.createElement('div');
+    control.replaceWith(holder);
+    disclosure(holder, label, icon, [control]);
+    sections.set(name, holder);
+  }
+  for (const [selector, label, icon] of [
+    ['[data-promo-pinner]', 'Pinning requirements & gift', '📌'],
+    ['[data-promo-album]', 'Album requirements', '🎵'],
+    ['[data-promo-referral]', 'Referral requirements', '🤝'],
+    ['[data-promo-curated]', 'Curated referrers', '👥'],
+    ['[data-promo-sponsor-terms]', 'Sponsor requirements', '📣'],
+    ['[data-promo-match-terms]', 'Match requirements · draft only', '🏦'],
+  ]) {
+    const section = form.querySelector(selector);
+    const controls = [...section.children];
+    disclosure(section, label, icon, controls);
+    sections.set(selector, section);
+  }
+  for (const key of ['title', 'startsAt', 'endsAt', 'claimDeadline', '[data-promo-pinner]',
+    '[data-promo-album]', '[data-promo-referral]', '[data-promo-curated]', '[data-promo-sponsor-terms]',
+    '[data-promo-match-terms]', 'reward', 'budget', 'maxAwards', 'fund', 'criteria', 'terms']) {
+    form.append(sections.get(key));
+  }
+  form.append(...form.querySelectorAll(':scope > button'));
+  form.addEventListener('invalid', event => {
+    for (let parent = event.target.parentElement; parent && parent !== form; parent = parent.parentElement) {
+      if (parent.tagName === 'DETAILS') parent.open = true;
+    }
+  }, true);
+  return () => rows.forEach(refresh => refresh());
 }
 
 export function mountAdminPromotions(root, calendarOptions = {}) {
@@ -288,6 +381,8 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
   let generation = 0;
   let browseId = 0;
   let editId = '';
+  let editingCampaign = null;
+  let activeCampaignId = calendarOptions.campaignId || '';
   root.innerHTML = `${calendarOptions.calendarMode ? '' : '<summary>Invites &amp; Promotions</summary>'}
     <p>${termsNotice}</p>
     <p>Create/deposit into <strong>Promotionals (${PROMOTIONS_FUND})</strong> in Payroll → Settlements Router. No funds are created or moved here automatically.</p>
@@ -342,6 +437,45 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
   const status = root.querySelector('[data-promo-status]');
   const form = root.querySelector('form');
   const input = name => form.elements.namedItem(name);
+  if (calendarOptions.customOnly) {
+    input('template').parentElement.hidden = true;
+    root.querySelector('[data-promo-campaigns]').hidden = true;
+    for (const selector of ['[data-promo-members]', '[data-promo-claims]']) {
+      const section = root.querySelector(selector);
+      section.previousElementSibling.hidden = true;
+      section.hidden = true;
+    }
+    const note = document.createElement('p');
+    note.textContent = 'Save a draft here, then select its calendar bar to review and publish it.';
+    form.after(note);
+  }
+  const refreshCompact = calendarOptions.compact ? compactPromotionForm(form) : () => {};
+  if (calendarOptions.compact) {
+    const notice = document.createElement('details');
+    notice.className = 'promotion-blob-review';
+    const info = document.createElement('summary');
+    info.textContent = 'ⓘ Campaign information';
+    const paragraphs = [...root.querySelectorAll(':scope > p')].filter(p => !p.hasAttribute('data-promo-status'));
+    paragraphs[0].before(notice);
+    notice.append(info, ...paragraphs);
+    const refresh = root.querySelector('[data-promo-unlock]');
+    refresh.classList.add('rc-pill');
+    refresh.textContent = '↻';
+    refresh.setAttribute('aria-label', 'Refresh campaigns without signing');
+    status.classList.add('rc-status');
+    const workspace = root.querySelector('[data-promo-workspace]');
+    for (const selector of ['[data-promo-members]', '[data-promo-claims]']) {
+      const contents = root.querySelector(selector);
+      const heading = contents.previousElementSibling;
+      const details = document.createElement('details');
+      details.className = 'promotion-blob-review';
+      const summary = document.createElement('summary');
+      summary.textContent = heading.textContent;
+      heading.replaceWith(details);
+      details.append(summary, contents);
+    }
+    workspace.querySelector('form').closest('details').classList.add('promotion-blob-form');
+  }
   function templateFields() {
     const pinner = input('template').value === 'pinner';
     const custom = input('template').value === 'custom';
@@ -349,7 +483,9 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     input('asset').disabled = !custom;
     if (pinner) input('asset').value = 'eth';
     else if (!custom || input('asset').value === 'eth') input('asset').value = 'usdc';
-    const symbol = input('asset').value === 'ommm' ? 'Ommm' : 'Base USDC';
+    const referralAsset = input('template').value === 'musician-referral' && editingCampaign?.template === 'musician-referral'
+      ? campaignAsset(editingCampaign) : null;
+    const symbol = referralAsset ? `Base ${referralAsset.symbol}` : input('asset').value === 'ommm' ? 'Ommm' : 'Base USDC';
     input('budget').disabled = pinner;
     input('reward').parentElement.firstChild.textContent = pinner ? 'Reward target (USD equivalent, paid in ETH)' : `Reward (${symbol})`;
     input('budget').parentElement.firstChild.textContent = pinner ? 'Total target cap (USD equivalent, paid in ETH)' : `Total campaign reward budget (${symbol})`;
@@ -366,6 +502,7 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       section.hidden = !active;
       section.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = !active; });
     }
+    refreshCompact();
   }
   function template() {
     const t = PROMOTION_TEMPLATES.find(t => t.id === input('template').value);
@@ -389,6 +526,7 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
   }
   function reset() {
     editId = '';
+    editingCampaign = null;
     form.reset();
     if (calendarOptions.calendarMode) input('template').value = calendarOptions.template || MUSICIAN_REFERRAL_PILOT.template;
     template();
@@ -430,21 +568,33 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       input('claimDeadline').value = utcToNewYorkInput(new Date(start + Date.parse(source.claimDeadline) - Date.parse(source.startsAt)).toISOString());
       templateFields();
     }
+    refreshCompact();
   }
   function render() {
     templateFields();
     root.querySelector('[data-promo-workspace]').hidden = false;
     root.querySelector('[data-promo-funding]').textContent = state.storageError ||
-      `${state.funds.map(f => `${f.slug}: ${f.error || money(f.balanceUnits, campaignAsset(f))}`).join(' · ')}. Campaign reservations are service accounting, not on-chain escrow.`;
-    const campaigns = calendarOptions.campaignId
-      ? state.campaigns.filter(c => c.id === calendarOptions.campaignId)
-      : state.campaigns.filter(c => !c.application);
+      (state.funds?.length
+        ? `${state.funds.map(f => `${f.slug}: ${f.error || money(f.balanceUnits, campaignAsset(f))}`).join(' · ')}. ETH funding is checked at publication. Campaign reservations are service accounting, not on-chain escrow.`
+        : calendarOptions.compact ? '🏦 Balance unavailable · checked before publishing. Not escrow.'
+          : 'Fund balances are unavailable in the public view. Funding is checked when publishing; campaign reservations are not on-chain escrow.');
+    const eligibleCampaigns = state.campaigns.filter(c => !c.application);
+    const campaigns = activeCampaignId
+      ? eligibleCampaigns.filter(c => c.id === activeCampaignId)
+      : calendarOptions.compact ? []
+      : eligibleCampaigns;
+    const heading = root.closest('dialog')?.querySelector('[data-promo-heading]');
+    if (heading && activeCampaignId && campaigns[0]) heading.textContent = campaigns[0].title;
     root.querySelector('[data-promo-campaigns]').innerHTML = campaigns.map(c => `<article class="promotion-card" data-campaign="${c.id}">
+      ${calendarOptions.compact ? `<details><summary>📋 ${escape(c.status)} · ${c.remainingAwards ?? 0} awards open · ${money(c.budgetUnits, campaignAsset(c))} budget</summary>` : ''}
       ${campaignCard(c)}<p>Budget: ${money(c.budgetUnits, campaignAsset(c))} · remaining: ${money(c.remainingUnits, campaignAsset(c))} · committed: ${money(c.committedUnits, campaignAsset(c))}</p>
       <p>Approved: ${money(c.approvedUnits, campaignAsset(c))} · payment pending: ${money(c.paymentPendingUnits, campaignAsset(c))} · paid: ${money(c.paidUnits, campaignAsset(c))} · ${c.applications} claims (${c.awaitingReview} awaiting review)</p>
+      ${calendarOptions.compact ? '</details>' : ''}
+      ${calendarOptions.compact && c.template === 'sponsor-match' ? '<p>Draft only · fund-to-fund delivery is not available.</p>' : ''}
       <button type="button" data-promo-edit>${c.status === 'draft' ? 'Edit draft' : 'Duplicate as draft'}</button>
       <button type="button" data-promo-share>Copy offer link</button>
       ${({ draft: ['published', 'archived'], published: ['paused', 'closed'], paused: ['published', 'closed'], closed: ['archived'], archived: [] }[c.status])
+        .filter(s => !(calendarOptions.compact && c.template === 'sponsor-match' && s === 'published'))
         .map(s => `<button type="button" data-promo-state="${s}">${{ published: 'Publish offer', paused: 'Pause offer', closed: 'Close offer', archived: 'Archive' }[s]}</button>`).join('')}
       ${c.announcement?.status === 'sent' ? `<p>Discord poster sent: <a href="${escape(c.announcement.messageUrl)}" target="_blank" rel="noopener">view message</a></p>` : ''}
       ${c.announcement?.status === 'pending' ? '<p>Discord delivery is uncertain; do not send again.</p><button type="button" data-promo-reconcile-discord>Reconcile Discord delivery</button>' : ''}
@@ -468,9 +618,11 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
           <figcaption>${escape(state.announcementPreview.sentence)}<br>${escape(state.announcementPreview.link)}</figcaption>
           <button type="button" data-promo-send-discord>Confirm — send poster to Discord</button>
         </figure>` : ''}
-      </details>` : ''}</article>`).join('') || '<p>No offers yet. Templates above save as drafts.</p>';
+      </details>` : ''}</article>`).join('') || (calendarOptions.compact
+        ? (activeCampaignId ? '<p>Campaign unavailable. Refresh and try again.</p>' : '')
+        : '<p>No offers yet. Templates above save as drafts.</p>');
     root.querySelector('[data-promo-claims]').innerHTML = state.claims
-      .filter(c => !calendarOptions.campaignId || c.campaignId === calendarOptions.campaignId).map(c => `<article class="promotion-card" data-claim="${c.id}">
+      .filter(c => calendarOptions.compact ? c.campaignId === activeCampaignId : !activeCampaignId || c.campaignId === activeCampaignId).map(c => `<article class="promotion-card" data-claim="${c.id}">
       <h4>${escape(state.campaigns.find(p => p.id === c.campaignId)?.title || c.campaignId)}</h4>
       <p>${escape(c.wallet)} · ${money(c.amountUnits, campaignAsset(state.campaigns.find(p => p.id === c.campaignId)))} · ${escape(c.fund)} · <strong>${escape(c.status)}</strong></p>
       <p class="promotion-terms">${escape(c.evidence)}</p>
@@ -498,7 +650,7 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       ${c.status === 'paid' && !c.legs ? `<a href="https://basescan.org/tx/${escape(c.txHash)}" target="_blank" rel="noopener">Confirmed payment</a>` : ''}
     </article>`).join('') || '<p>No participant claims.</p>';
     root.querySelector('[data-promo-members]').innerHTML = state.members
-      .filter(m => !calendarOptions.campaignId || m.campaignId === calendarOptions.campaignId).map(m => `<article class="promotion-card" data-member="${escape(m.wallet)}" data-member-campaign="${escape(m.campaignId)}">
+      .filter(m => calendarOptions.compact ? m.campaignId === activeCampaignId : !activeCampaignId || m.campaignId === activeCampaignId).map(m => `<article class="promotion-card" data-member="${escape(m.wallet)}" data-member-campaign="${escape(m.campaignId)}">
       <p>${escape(state.campaigns.find(c => c.id === m.campaignId)?.title || m.campaignId)} · ${escape(m.wallet)}</p>
       <p>Current referrer: ${escape(m.referrer || 'none')} · joined ${escape(m.joinedAt)}</p>
       ${m.attributionHistory.map(h => `<p>${escape(h.at)} · ${escape(h.reviewer)}: ${escape(h.from || 'none')} → ${escape(h.to || 'none')} · ${escape(h.reason)}</p>`).join('')}
@@ -521,15 +673,19 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     status.textContent = 'Working…';
     try {
       if (!isAdminWallet()) throw new Error('Connect the admin wallet');
-      await fn();
-      if (version === generation) status.textContent = 'Updated; review the delivery and payment status below.';
+      const message = await fn();
+      if (version === generation) status.textContent = typeof message === 'string' ? message
+        : calendarOptions.customOnly ? 'Ready to create a custom draft.' : 'Updated; review the delivery and payment status below.';
     } catch (error) {
       if (version === generation) status.textContent = error.message;
     } finally { busy = false; }
   }
   form.addEventListener('change', event => { if (event.target.name === 'template') template(); });
   form.addEventListener('input', () => {
-    if (input('template').value === 'pinner') input('budget').value = String(Number(input('reward').value) * Number(input('maxAwards').value));
+    if (input('template').value === 'pinner') {
+      input('budget').value = String(Number(input('reward').value) * Number(input('maxAwards').value));
+      refreshCompact();
+    }
   });
   root.addEventListener('input', event => {
     if (event.target.matches('[data-promo-poster], [data-promo-sentence]') && state?.announcementPreview) {
@@ -567,9 +723,24 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
       const custom = input('template').value === 'custom';
       const asset = custom && input('asset').value === 'ommm'
         ? campaignAsset({ asset: 'ommm', ommm: state?.features?.ommm }) : campaignAsset();
+      const referralSource = input('template').value === 'musician-referral' && editingCampaign?.template === 'musician-referral'
+        ? editingCampaign : null;
+      const amount = (name, original) => {
+        if (!referralSource || campaignAsset(referralSource).id !== 'eth') return promotionUnits(input(name).value, asset);
+        const text = input(name).value.trim();
+        if (text === promotionMoney(original, campaignAsset(referralSource)).replace(/ ETH$/, '')) return String(original);
+        const value = parseAssetAmount(text, campaignAsset(referralSource));
+        if (!value || BigInt(value) <= 0n) throw new Error('Enter a positive ETH amount with up to six decimals');
+        return value;
+      };
+      const preservedReferral = referralSource
+        ? Object.fromEntries(['asset', 'legAmounts', 'requiredVotes', 'gifts', 'curatedReferrerNames',
+          'settlementVersion', 'supporterRewards', 'fundMatchQuote']
+          .filter(key => referralSource[key] !== undefined).map(key => [key, referralSource[key]]))
+        : {};
       const campaign = { template: input('template').value, title: input('title').value,
         criteria: input('criteria').value, terms: input('terms').value,
-        rewardUnits: promotionUnits(input('reward').value, asset), budgetUnits: promotionUnits(input('budget').value, asset),
+        rewardUnits: amount('reward', referralSource?.rewardUnits), budgetUnits: amount('budget', referralSource?.budgetUnits),
         ...(custom ? { asset: asset.id, ...(asset.id === 'ommm' ? { ommm: state.features.ommm } : {}),
           gifts: [['participationGift', 'participation'], ['completionGift', 'completion']]
             .filter(([name]) => input(name).value.trim()).map(([name, trigger]) =>
@@ -589,9 +760,20 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
         ...(input('template').value === 'sponsor' ? { minPurchaseUnits: promotionUnits(input('minPurchase').value) } : {}),
         ...(input('template').value === 'sponsor-match' ? { matchTargetFund: input('matchTargetFund').value.trim(),
           minContributionUnits: promotionUnits(input('minContribution').value) } : {}),
-        ...Object.fromEntries(['startsAt', 'endsAt', 'claimDeadline'].map(k => [k, promotionInputToUtc(input(k).value)])), ...pinner };
-      await command({ action: 'save', campaignId: editId || undefined, campaign });
+        ...Object.fromEntries(['startsAt', 'endsAt', 'claimDeadline'].map(k => [k, promotionInputToUtc(input(k).value)])),
+        ...preservedReferral, ...pinner };
+      const existingIds = new Set(state.campaigns.map(item => item.id));
+      const savedId = editId;
+      const result = await command({ action: 'save', campaignId: savedId || undefined, campaign });
+      if (calendarOptions.compact) {
+        const created = result.campaigns.filter(item => !existingIds.has(item.id));
+        activeCampaignId = savedId || (created.length === 1 ? created[0].id : '');
+        if (!activeCampaignId) throw new Error('Draft was saved, but its identity could not be confirmed. Refresh the calendar before trying again.');
+        form.closest('details').open = false;
+        render();
+      }
       reset();
+      if (calendarOptions.customOnly) return 'Draft saved. Select its calendar bar to review and publish it.';
     });
   });
   root.addEventListener('click', event => {
@@ -643,9 +825,11 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
         if (target.matches('[data-promo-reconcile-discord]')) return command({ action: 'reconcile-discord', campaignId: campaign.id });
         if (target.matches('[data-promo-edit]')) {
           editId = campaign.status === 'draft' ? campaign.id : '';
+          editingCampaign = campaign;
           for (const name of ['title', 'criteria', 'terms', 'template', 'maxAwards', 'fund']) input(name).value = campaign[name];
-          input('reward').value = String(Number(campaign.rewardUnits) / 1e6);
-          input('budget').value = String(Number(campaign.budgetUnits) / 1e6);
+          const asset = campaign.template === 'musician-referral' ? campaignAsset(campaign) : undefined;
+          input('reward').value = money(campaign.rewardUnits, asset).replace(/ (?:ETH|USDC)$/, '');
+          input('budget').value = money(campaign.budgetUnits, asset).replace(/ (?:ETH|USDC)$/, '');
           if (campaign.template === 'pinner') {
             input('reward').value = String((campaign.rewardUsdCents || 500) / 100);
             input('budget').value = String((campaign.rewardUsdCents || 500) * campaign.maxAwards / 100);
@@ -653,15 +837,16 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
             input('pinnerNftContract').value = campaign.supporterRewards?.[0]?.contract || '';
             input('pinnerNftTokenId').value = campaign.supporterRewards?.[0]?.tokenId || '';
           }
-          if (campaign.template === 'musician-referral' && campaign.status !== 'draft') input('budget').value = '150';
           if (campaign.minOriginalTracks) input('minOriginalTracks').value = campaign.minOriginalTracks;
           if (campaign.requiredReferrals) input('requiredReferrals').value = campaign.requiredReferrals;
           if (campaign.activityWindow) input('activityWindow').value = campaign.activityWindow;
           if (campaign.minPurchaseUnits) input('minPurchase').value = String(Number(campaign.minPurchaseUnits) / 1e6);
           if (campaign.matchTargetFund) input('matchTargetFund').value = campaign.matchTargetFund;
           if (campaign.minContributionUnits) input('minContribution').value = String(Number(campaign.minContributionUnits) / 1e6);
+          input('curatedReferrers').value = (campaign.curatedReferrers || []).join('\n');
           templateFields();
           for (const name of ['startsAt', 'endsAt', 'claimDeadline']) input(name).value = utcToNewYorkInput(campaign[name]);
+          refreshCompact();
           form.closest('details').open = true;
           return;
         }
@@ -765,8 +950,12 @@ export function mountAdminPromotions(root, calendarOptions = {}) {
     if (version !== generation || read !== browseId || !root.isConnected) return;
     state = result;
     render();
-    status.textContent = 'Campaigns loaded. Only protected changes require an admin signature.';
+    status.textContent = calendarOptions.compact ? 'Ready · changes require a signature.' : 'Campaigns loaded. Only protected changes require an admin signature.';
   }).catch(error => { if (version === generation && read === browseId) status.textContent = error.message; });
+  return () => {
+    generation++;
+    for (const name of ['wallet-connected', 'wallet-disconnected']) document.removeEventListener(name, clear);
+  };
 }
 
 export function mountPublicPromotion() {
