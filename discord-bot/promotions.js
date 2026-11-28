@@ -7,7 +7,7 @@ import { PROMOTIONS_FUND, REFERRALS_FUND, referralCampaignTitle, PROMOTIONS_USDC
   campaignGiftWinners, musicianReferralLegs, musicianReferralConfig, SUPPORTER_REWARD, SUPPORTER_REWARD_ABI,
   campaignSupporterRewards, supporterRewardKey, REFERRAL_SETTLEMENT_VERSION, referralFundMatchUnits, referralFundMatchQueue,
   isPromotionsFund, promotionAnnouncementDraft, promotionAuthorization, promotionWorkReference,
-  PINNER_PROMOTION_DRAFT, PINNER_CAMPAIGN_VERSION, pinnerPromotionAmounts, pinnerEthAmounts, pinnerCampaignTerms,
+  PINNER_PROMOTION_DRAFT, PINNER_CAMPAIGN_VERSION, pinnerPromotionAmounts, pinnerCampaignAmounts, pinnerCampaignTerms,
   PINNER_CAMPAIGN_FUND, campaignFundFor,
   promotionSupporterRewards, pinnerCampaignFullDays } from '../js/promotions.mjs';
 import { newYorkDayPeriod } from '../js/payroll-week.mjs';
@@ -128,10 +128,10 @@ export function validatePromotionCheckpoint(value) {
     text(c.title, 'Checkpoint title', 100); text(c.criteria, 'Checkpoint criteria'); text(c.terms, 'Checkpoint terms');
     units(c.rewardUnits); units(c.budgetUnits);
     if (c.template === 'pinner' && c.qualificationVersion === PINNER_CAMPAIGN_VERSION) {
-      if (c.asset !== 'eth' || !Number.isSafeInteger(c.qualifyingDays) || c.qualifyingDays < 1 || c.qualifyingDays > 365 ||
+      if (!['eth', 'usdc'].includes(c.asset) || !Number.isSafeInteger(c.qualifyingDays) || c.qualifyingDays < 1 || c.qualifyingDays > 365 ||
           c.qualifyingDays > pinnerCampaignFullDays(c.startsAt, c.endsAt) ||
           c.fund !== PINNER_CAMPAIGN_FUND || !promotionSupporterRewards(c) ||
-          (() => { try { return c.budgetUnits !== pinnerEthAmounts(c.rewardUnits, c.maxAwards).budgetUnits; } catch { return true; } })() ||
+          (() => { try { return c.budgetUnits !== pinnerCampaignAmounts(c.rewardUnits, c.maxAwards, c.asset).budgetUnits; } catch { return true; } })() ||
           c.terms !== pinnerCampaignTerms(c) || !c.supporterToken ||
           !Array.isArray(c.supporterToken.eligibleWallets) ||
           c.supporterToken.eligibleWallets.some(w => !validWallet(w))) fail();
@@ -871,7 +871,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       catch (error) { return { slug, balanceUnits: null, error: error.message }; }
     }));
     const defaultFund = funds.find(fund => fund.slug === PROMOTIONS_FUND);
-    return structuredClone({ revision: state.revision, features: { referralSettlement: REFERRAL_SETTLEMENT_VERSION, pinnerCampaign: PINNER_CAMPAIGN_VERSION }, viewerWallet: wallet, campaigns, fundSlug: PROMOTIONS_FUND, routerAddress,
+    return structuredClone({ revision: state.revision, features: { referralSettlement: REFERRAL_SETTLEMENT_VERSION, pinnerCampaign: PINNER_CAMPAIGN_VERSION, pinnerCampaignAssets: ['eth', 'usdc'] }, viewerWallet: wallet, campaigns, fundSlug: PROMOTIONS_FUND, routerAddress,
       funds, fundBalanceUnits: defaultFund?.balanceUnits ?? null, fundingError: defaultFund?.error || '', storageError: fault,
       checkpointUri: getCheckpointUri(),
       claims: state.claims,
@@ -1061,7 +1061,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
             .flatMap(c => c.curatedReferrers || []),
           ...state.campaigns.flatMap(c => supporterEarners(state, c))])].flatMap(wallet =>
           participantStats(wallet, pinning).map(stats => ({ wallet, ...stats })));
-        return structuredClone({ ...state, features: { referralSettlement: REFERRAL_SETTLEMENT_VERSION, pinnerCampaign: PINNER_CAMPAIGN_VERSION }, routerAddress, inviters: state.inviters || [], campaigns: state.campaigns.map(c => summary(c, true)),
+        return structuredClone({ ...state, features: { referralSettlement: REFERRAL_SETTLEMENT_VERSION, pinnerCampaign: PINNER_CAMPAIGN_VERSION, pinnerCampaignAssets: ['eth', 'usdc'] }, routerAddress, inviters: state.inviters || [], campaigns: state.campaigns.map(c => summary(c, true)),
           checkpointUri: getCheckpointUri(), participantProfiles,
           notice: 'All promotion records, including drafts, evidence, referral links, activity and review notes, are public and checkpointed to IPFS. Do not submit secrets or personal information about others. Drafts are not live offers. Rewards require admin approval; budgets are earmarked, not escrowed.' });
       });
@@ -1194,15 +1194,17 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
             })();
           let qualification = {};
           if (input.template === 'pinner' && input.qualificationVersion === PINNER_CAMPAIGN_VERSION) {
-            const amounts = pinnerEthAmounts(input.rewardUnits, input.maxAwards);
+            const asset = input.asset === 'usdc' ? 'usdc' : input.asset === 'eth' ? 'eth' : null;
+            if (!asset) throw new Error('Choose ETH or USDC for the pinning bonus');
+            const amounts = pinnerCampaignAmounts(input.rewardUnits, input.maxAwards, asset);
             if (!Number.isSafeInteger(input.qualifyingDays) || input.qualifyingDays < 1 || input.qualifyingDays > 365 ||
                 input.qualifyingDays > pinnerCampaignFullDays(startsAt, endsAt)) {
               throw new Error('Choose 1–365 qualifying full New York days that fit inside the campaign timebox');
             }
             const supporterRewards = promotionSupporterRewards(input);
-            if (!supporterRewards || input.asset !== 'eth' || rewardUnits !== amounts.rewardUnits ||
-                budgetUnits !== amounts.budgetUnits) throw new Error('Invalid fixed ETH bonus amounts or optional NFT gift');
-            qualification = { asset: 'eth', qualificationVersion: PINNER_CAMPAIGN_VERSION,
+            if (!supporterRewards || rewardUnits !== amounts.rewardUnits ||
+                budgetUnits !== amounts.budgetUnits) throw new Error('Invalid fixed bonus amounts or optional NFT gift');
+            qualification = { asset, qualificationVersion: PINNER_CAMPAIGN_VERSION,
               qualifyingDays: input.qualifyingDays, supporterRewards,
               supporterToken: { status: 'payroll-queue', eligibleWallets: [] } };
           } else if (input.template === 'pinner') {

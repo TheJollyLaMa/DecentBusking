@@ -3,6 +3,7 @@ import { RADIO_PLAYLISTS } from './radio-playlists.mjs?v=20261116-longform';
 import { upsertLivePerformanceEvent, cancelLivePerformanceEvent, validateWeeklyScheduleOverrides, validateRadioProgrammingConflicts } from './radio-schedule.mjs?v=20261116-longform';
 import { openReferralCampaignEditor, referralTemplateFrom } from './referral-campaign-editor.mjs?v=20261126-eth-gifts';
 import { openPromotionCalendarEditor } from './promotions-ui.mjs?v=20261126-pinner-dashboard';
+import { openPinnerCampaignEditor } from './pinner-campaign-editor.mjs?v=20261129-pinner-uniform';
 import { PROMOTION_TEMPLATES } from './promotions.mjs?v=20261126-pinner-dashboard';
 import { openLivePerformanceCalendar, liveCalendarCancellationImpact, getLiveCalendarLedger, liveCalendarEventLifecycle } from './live-performance-admin.mjs?v=20261121-typed-review';
 
@@ -304,7 +305,9 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
       let laneRow = laneRows.findIndex(end => end < from);
       if (laneRow < 0) laneRow = laneRows.push(-1) - 1;
       laneRows[laneRow] = to;
-      const bar = button('', () => event.campaign?.template !== 'musician-referral'
+      const bar = button('', () => event.campaign?.template === 'pinner' && event.status === 'draft'
+        ? openPinnerCampaignEditor({ campaign: event.campaign })
+        : event.campaign?.template !== 'musician-referral'
         ? openPromotionCalendarEditor({ campaignId: event.id, template: event.campaign?.template, compact: true })
         : openReferralCampaignEditor({ campaign: event.campaign || {
         id: event.id, title: event.title, startsAt: event.startUtc, endsAt: event.endUtc, remainingAwards: event.remainingAwards,
@@ -433,6 +436,8 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
       if (value.startsWith('campaign:') && !source?.campaign) throw new Error('That saved campaign is unavailable. Refresh the calendar and try again.');
       if (value === 'musician-referral' || source?.campaign?.template === 'musician-referral') return openReferralCampaignEditor({
         startsAt: newYorkInputToUtc(local), template: source ? referralTemplateFrom(source.campaign) : null });
+      if (value === 'pinner' || source?.campaign?.template === 'pinner') return openPinnerCampaignEditor({
+        startsAt: newYorkInputToUtc(local), source: source?.campaign || null });
       return openPromotionCalendarEditor({ startsAt: newYorkInputToUtc(local),
         template: source?.campaign?.template || value,
         sourceCampaign: source?.campaign, compact: value !== 'custom' });

@@ -8,49 +8,52 @@ Admin DCal's campaign selector combines the presets and saved reusable campaigns
 **Custom** is last. Browsing uses public GET without signing. Custom campaigns
 reuse the promotion draft/checkpoint and protected save commands. Reusing a saved
 campaign copies offer terms into a new draft, not its claims or settlement state.
-**Pin Reward Campaign** uses verified daily pinning evidence, its own ETH bonus
-budget and optional NFT gifts. See [Admin DCal](ADMIN-DCAL.md).
+**Pin Reward Campaign** uses verified daily pinning evidence, its own ETH or USDC
+bonus budget and optional NFT gifts. See [Admin DCal](ADMIN-DCAL.md).
 
 ## Pinning bonus campaigns
 
 1. In **left ankh → Admin DCal**, select **Pin Reward Campaign** and drag its
-   text onto a calendar slot. The drop opens a proposal, not a live promise.
-2. Set the opening/closing dates, required qualifying days (1–365), a **fixed
-   ETH bonus** per finisher and maximum winners (default 0.002 ETH each, five
-   winners; total budget = bonus × winners). The live USD value is shown in
-   parentheses, e.g. `0.002 ETH ($6.70)`, everywhere the bonus appears: the
-   admin form, the public calendar and the profile campaign card. It is an
-   estimate from the Coinbase spot price; the ETH amount is the promise. While
-   typing, `≈ $…` appears directly under the bonus and budget inputs and in
-   their collapsed summaries. The default
-   31-day window permits 30 full New York days when opening partway through a
-   day. Shorter/longer campaigns are editable; required days must fit the
-   timebox. Late joiners need enough remaining full days.
-3. **🎖 Supporter gift** lists the Supporter DNFTs the connected admin wallet
-   holds on the Base Supporter contract (read on-chain via `nextTokenId`,
-   `balanceOfBatch` and one Multicall3 read of caps/metadata; capped tokens
-   whose metadata names a Supporter DNFT), with balances. It warns when the
-   wallet holds fewer copies than the award cap. **Other ERC-1155 token
-   (manual)** keeps the contract/token-ID fields for anything else. Choose
-   **No NFT gift** to offer none. One token per winner is owed separately from
-   the ETH bonus. Publishing checks admin inventory against outstanding
-   pinning-campaign promises. Tokens are not escrowed or minted: they stay in
-   the admin wallet until approved delivery through Payroll.
+   text onto a calendar slot. The drop opens the same blob popout as the
+   Referral Campaign, not the verbose custom form, and nothing is saved until
+   you press a button. Clicking a pinner **draft** bar reopens that same draft
+   in the popout; published pinner campaigns open their management view.
+   Rows: ✏️ Title · 🟢 Start · 🏁 End · 📌 Pinning requirements · 🎁 The gift ·
+   🏦 Fund, with ⏳ Claims close (default end + 7 days) under **Advanced**.
+2. **📌 Pinning requirements** is separate from the gift. Required days
+   default to 90% of the timebox's full America/New_York days, rounded up
+   (`pinnerDefaultQualifyingDays`; e.g. 6 of 6, 27 of 30). The value is
+   editable (1 to the number of full days), and **↺ 90%** restores the
+   suggestion. Moving the dates refills the suggestion unless you have edited
+   the days. A day counts when the node passes 90% of at least 20 independent
+   spot checks. The award cap (first finishers win) is also set here.
+3. **🎁 The gift** pays a **fixed bonus in ETH or USDC** (pill toggle; switching
+   converts at the live rate), default 0.002 ETH or $5 each, five winners;
+   total budget = bonus × winners. ETH shows the live USD estimate, e.g.
+   `0.002 ETH ($6.70)`; the ETH amount is the promise. **🎖 Supporter gift**
+   lists the Supporter DNFTs the connected admin wallet holds on the Base
+   Supporter contract (read on-chain via `nextTokenId`, `balanceOfBatch` and
+   one Multicall3 read of caps/metadata), with balances, and warns when the
+   wallet holds fewer copies than the award cap. **Other ERC-1155 token**
+   keeps manual contract/token-ID entry. One token per winner is owed
+   separately from the bonus. Tokens are not escrowed or minted: they stay in
+   the admin wallet until approved delivery through Payroll, and activation
+   checks inventory against outstanding pinning promises.
 4. Every pin reward campaign draws from the standing **`dbusk-pinner-campaigns`**
-   allocation; the fund field is locked to it. The popout reads Base and shows
-   whether the fund exists, is active and has enough free ETH after other
-   pinner campaigns' reservations. **⚸ Create pinner campaign fund**,
-   **Restore fund** or **Deposit ETH** opens Admin DCal → Fund Allocations with
-   the slug selected or prefilled (also available there as **📌 Prepare pinner
-   campaign fund**). Fund Allocations also lists the pinner campaign and
-   referral funds as **not created yet · ⚸ Create on Base** until they exist.
-   **💾 Save draft · then fund if short** saves the draft, then offers either to
-   open fund creation (if the fund is missing/archived) or to deposit exactly
-   the ETH shortfall from the admin wallet (`fundNative`, separate wallet
-   confirmation; earmarked and admin-recoverable, not escrow). Then **Publish offer**.
-   Publication requires signed review plus enough ETH for every outstanding
-   campaign budget in that fund. No quote is needed: published terms and ETH
-   amounts are immutable, with no payout-time repricing.
+   allocation, whose ETH and USDC balances are accounted separately. One
+   progressive button walks the setup and changes text as you go:
+   **⚸ Create dbusk-pinner-campaigns** (opens Fund Allocations and runs the
+   metadata signature and Create Fund transaction; the popout updates when it
+   lands) → **▶ Fund <shortfall> & Activate** (saves edits, deposits exactly the
+   shortfall after other pinner campaigns' reservations, `fundNative` for ETH
+   or approve + deposit for USDC, then signs activation) → **▶ Sign & Activate**
+   when the fund already covers it. **💾 Save draft / Save changes** saves
+   without activating, and later saves update the same draft rather than
+   creating another. **🗑 Discard draft** archives a draft so it leaves the
+   calendar. The fund is earmarked and admin-recoverable, not escrow.
+   Activation requires a signed review plus enough of that asset for every
+   outstanding campaign budget in that fund. No quote is needed: published
+   terms and amounts are immutable, with no payout-time repricing.
 5. The published offer appears on **right ankh → DCal**. Opening it leads to
    registration and the existing node setup/enrollment dialog. A listener or
    musician signs acceptance of the campaign terms, enrolls their own
@@ -89,7 +92,8 @@ Reusing a saved campaign copies its terms into a new draft, not participants,
 claims, receipts or earned NFT state.
 
 Deploy the matching worker before the UI. `/api/promotions` advertises
-`features.pinnerCampaign: "pinner-eth-v2"` (fixed ETH bonus, dedicated fund);
+`features.pinnerCampaign: "pinner-eth-v2"` (fixed bonus, dedicated fund) and
+`features.pinnerCampaignAssets: ["eth","usdc"]` (USDC pinner bonuses);
 the editor refuses a pinning save against an older worker. Existing legacy pinner drafts restore as draft-only:
 edit/save them to explicitly choose the new timebox and terms. Daily summaries
 are durably stored in the existing pinner checkpoint before weekly hot-check
@@ -170,7 +174,7 @@ In **Left ankh → Admin DCal → Fund Allocations**, create and deposit native 
 controls. Creation, token approval if needed, and deposit are separate wallet
 actions. The admin may instead choose a dedicated slug beginning
 `dbusk-promotionals-` and create/fund it using the custom fund selector. Each
-source is accounted independently. Pin reward campaigns use the dedicated ETH
+source is accounted independently. Pin reward campaigns use the dedicated ETH/USDC
 allocation `dbusk-pinner-campaigns` (see above), not `dbusk-promotionals`.
 Playback, Top 10, weekly pinner (`dbusk-pinners`), live-performer,
 and repo-development funds cannot be selected as promotional reward sources.
@@ -346,7 +350,7 @@ The six templates start as drafts: album onboarding, referral rush, sponsor
 scout, band-buddy onboarding, first-sponsor match, and village listening
 session. Dropping a preset on Admin DCal opens a compact campaign editor;
 clicking its calendar bar opens its details and actions in the same style.
-Pin Reward Campaign also uses this editor. Saved campaigns can be dropped
+Pin Reward Campaign drafts use their own blob popout (above); published ones use this editor's management view. Opening a draft's bar edits that draft in place. Saved campaigns can be dropped
 again to create a new draft with the same terms. The full promotions workspace
 is used to create a new Custom campaign. The compact editor adapts the existing
 `mountAdminPromotions` form, signed commands and referral-blob styles rather

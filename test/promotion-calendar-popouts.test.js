@@ -56,7 +56,7 @@ test('calendar campaign popouts preserve preset terms and use the public unsigne
     window.commands = [];
     window.mockState = { revision: 1, campaigns: [source], members: [], claims: [],
       funds: [{ slug: 'dbusk-promotionals', balanceUnits: '1000000000' }],
-      features: { pinnerCampaign: 'pinner-eth-v2' } };
+      features: { pinnerCampaign: 'pinner-eth-v2', pinnerCampaignAssets: ['eth', 'usdc'] } };
     window.DecentConfig = { ipfsUploadServiceUrl: 'http://worker.test' };
     window._wallet = { address: '0x807061DF657A7697c04045dA7d16D941861cAABc',
       signer: { signMessage: async () => 'signature', provider: { getNetwork: async () => ({ chainId: 8453 }) } } };
@@ -108,7 +108,6 @@ test('calendar campaign popouts preserve preset terms and use the public unsigne
     ['Bring your album', 'album', 'minOriginalTracks'], ['Referral rush', 'referral', 'requiredReferrals'],
     ['Sponsor scout', 'sponsor', 'minPurchase'], ['Bring a band buddy', 'buddy', null],
     ['First sponsor match', 'sponsor-match', 'matchTargetFund'], ['Village listening session', 'session', null],
-    ['Pin Reward Campaign', 'pinner', 'qualifyingDays'],
   ]) {
     await drop(label);
     const dialog = page.locator('dialog[open]');
@@ -118,20 +117,6 @@ test('calendar campaign popouts preserve preset terms and use the public unsigne
     assert.equal(await dialog.locator('[name=template]').inputValue(), template);
     assert.ok((await dialog.locator('[name=startsAt]').inputValue()).endsWith('T10:00'));
     if (field) assert.equal(await dialog.locator(`[name=${field}]`).isEnabled(), true);
-    if (template === 'pinner') {
-      assert.equal(await dialog.locator('[name=fund]').inputValue(), 'dbusk-pinner-campaigns');
-      assert.equal(await dialog.locator('[name=fund]').evaluate(el => el.readOnly), true);
-      await dialog.locator('summary').filter({ hasText: 'Fixed bonus per finisher (Base ETH)' }).click();
-      await dialog.locator('[name=reward]').fill('0.003');
-      assert.match(await dialog.locator('summary').filter({ hasText: 'Total bonus budget' }).textContent(), /0\.015/);
-      await page.waitForFunction(() => /0\.003 ETH \(\$9\.00\) each · total 0\.015 ETH \(\$45\.00\)/.test(document.querySelector('dialog[open] [data-promo-pinner-usd]')?.textContent));
-      await page.waitForFunction(() => /dbusk-pinner-campaigns/.test(document.querySelector('dialog[open] [data-promo-pinner-fund]')?.textContent));
-      assert.equal(await dialog.locator('[data-inline-usd=reward]').textContent(), '≈ $9.00');
-      assert.match(await dialog.locator('summary').filter({ hasText: 'Total bonus budget' }).textContent(), /0\.015 · ≈ \$45\.00/);
-      assert.match(await dialog.locator('[data-promo-save]').textContent(), /then fund if short/);
-      await page.waitForFunction(() => /manual fields/.test(document.querySelector('dialog[open] [data-promo-supporter-status]')?.textContent));
-      assert.equal(await dialog.locator('[data-promo-supporter-pick] option').first().textContent(), 'No NFT gift');
-    }
     await dialog.locator('form button:not([type])').first().click();
     await page.waitForFunction(value => window.commands.some(c => c.action === 'save' && c.campaign.template === value), template);
     if (template === 'sponsor-match') {
@@ -140,22 +125,36 @@ test('calendar campaign popouts preserve preset terms and use the public unsigne
     } else await dialog.locator('[data-promo-state=published]').waitFor();
     const saved = await page.evaluate(value => window.commands.find(c => c.action === 'save' && c.campaign.template === value), template);
     if (template === 'referral') assert.equal(saved.campaign.requiredReferrals, 2);
-    if (template === 'pinner') {
-      assert.equal(saved.campaign.qualificationVersion, 'pinner-eth-v2');
-      assert.equal(saved.campaign.fund, 'dbusk-pinner-campaigns');
-      assert.equal(saved.campaign.rewardUnits, '3000000000000000');
-      assert.equal(saved.campaign.budgetUnits, '15000000000000000');
-      assert.equal(saved.campaign.qualifyingDays, 30);
-      assert.equal(saved.campaign.asset, 'eth');
-      assert.equal(saved.campaign.rewardUsdCents, undefined);
-      assert.equal(saved.campaign.draftQuote, undefined);
-      await dialog.locator('[data-promo-state=published]').click();
-      await page.waitForFunction(() => window.commands.some(c => c.action === 'status' && c.status === 'published'));
-      const updates = await page.evaluate(() => window.commands.filter(c => c.action === 'save' && c.campaign.template === 'pinner'));
-      assert.equal(updates.length, 1, 'fixed ETH bonuses publish without a quote re-save');
-    }
     await close();
   }
+  await drop('Pin Reward Campaign');
+  const pinner = page.locator('dialog[open]');
+  assert.ok(await pinner.evaluate(el => el.classList.contains('referral-blob') && el.classList.contains('pinner-blob')));
+  assert.equal(await pinner.locator('[data-promo-template], [name=template]').count(), 0, 'no verbose custom form');
+  assert.match(await pinner.getByRole('button', { name: 'Pinning requirements' }).textContent(), /^📌\s*6 of 6 full days pinned/);
+  assert.doesNotMatch(await pinner.getByRole('button', { name: 'The gift' }).textContent(), /days/);
+  await pinner.getByRole('button', { name: 'Pinning requirements' }).click();
+  await pinner.getByLabel('Required qualifying days').fill('3');
+  await pinner.getByRole('button', { name: 'Use the suggested 90% of full days' }).click();
+  assert.equal(await pinner.getByLabel('Required qualifying days').inputValue(), '6');
+  await pinner.getByRole('button', { name: 'The gift' }).click();
+  await pinner.getByRole('button', { name: 'Pay the bonus in USDC' }).click();
+  await pinner.getByLabel('Bonus per finisher (USDC)').fill('4');
+  assert.match(await pinner.locator('.rc-advanced summary').textContent(), /claims close/);
+  await pinner.getByRole('button', { name: 'Save this draft without activating' }).click();
+  await page.waitForFunction(() => window.commands.some(c => c.action === 'save' && c.campaign.template === 'pinner'));
+  await pinner.getByLabel('Bonus per finisher (USDC)').fill('5');
+  await pinner.getByRole('button', { name: 'Save this draft without activating' }).click();
+  await page.waitForFunction(() => window.commands.filter(c => c.action === 'save' && c.campaign.template === 'pinner').length === 2);
+  const pinnerSaves = await page.evaluate(() => window.commands.filter(c => c.action === 'save' && c.campaign.template === 'pinner'));
+  assert.equal(pinnerSaves[0].campaignId, undefined);
+  assert.ok(pinnerSaves[1].campaignId, 'the second save updates the same draft instead of creating another');
+  assert.deepEqual(pinnerSaves.map(c => [c.campaign.asset, c.campaign.rewardUnits, c.campaign.qualifyingDays, c.campaign.fund]),
+    [['usdc', '4000000', 6, 'dbusk-pinner-campaigns'], ['usdc', '5000000', 6, 'dbusk-pinner-campaigns']]);
+  assert.equal(await page.evaluate(() => window.mockState.campaigns.filter(c => c.template === 'pinner').length), 1);
+  await pinner.getByRole('button', { name: 'Archive this draft so it leaves the calendar' }).click();
+  await page.waitForFunction(() => window.commands.some(c => c.action === 'status' && c.status === 'archived'));
+  await page.waitForSelector('dialog.pinner-blob', { state: 'detached' });
   await drop('↻ Saved rush');
   assert.equal(await page.locator('dialog[open] [name=requiredReferrals]').inputValue(), '4');
   assert.equal(await page.locator('dialog[open] [name=activityWindow]').inputValue(), 'offer-window');
