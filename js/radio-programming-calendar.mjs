@@ -305,7 +305,7 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
       if (laneRow < 0) laneRow = laneRows.push(-1) - 1;
       laneRows[laneRow] = to;
       const bar = button('', () => event.campaign?.template !== 'musician-referral'
-        ? openPromotionCalendarEditor({ campaignId: event.id })
+        ? openPromotionCalendarEditor({ campaignId: event.id, template: event.campaign?.template, compact: true })
         : openReferralCampaignEditor({ campaign: event.campaign || {
         id: event.id, title: event.title, startsAt: event.startUtc, endsAt: event.endUtc, remainingAwards: event.remainingAwards,
       } }));
@@ -430,11 +430,12 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
     }
     function openCampaign(value, local) {
       const source = value.startsWith('campaign:') ? (data().promotionEvents || []).find(c => c.id === value.slice(9)) : null;
-      if (value === 'musician-referral' || source?.campaign.template === 'musician-referral') return openReferralCampaignEditor({
+      if (value.startsWith('campaign:') && !source?.campaign) throw new Error('That saved campaign is unavailable. Refresh the calendar and try again.');
+      if (value === 'musician-referral' || source?.campaign?.template === 'musician-referral') return openReferralCampaignEditor({
         startsAt: newYorkInputToUtc(local), template: source ? referralTemplateFrom(source.campaign) : null });
       return openPromotionCalendarEditor({ startsAt: newYorkInputToUtc(local),
-        template: source?.campaign.template || value,
-        sourceCampaign: source?.campaign });
+        template: source?.campaign?.template || value,
+        sourceCampaign: source?.campaign, compact: value !== 'custom' });
     }
   }
   function updateNow() {

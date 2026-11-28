@@ -319,7 +319,15 @@ checkpoint recovery without real transfers.
 
 The six templates start as drafts: album onboarding, referral rush, sponsor
 scout, band-buddy onboarding, first-sponsor match, and village listening
-session. The steward edits the title, criteria, rights/privacy/dispute/refund
+session. Dropping a preset on Admin DCal opens a compact campaign editor;
+clicking its calendar bar opens its details and actions in the same style.
+Pin Reward Campaign also uses this editor. Saved campaigns can be dropped
+again to create a new draft with the same terms. The full promotions workspace
+is used to create a new Custom campaign. The compact editor adapts the existing
+`mountAdminPromotions` form, signed commands and referral-blob styles rather
+than introducing a second promotions backend. It shows an unavailable balance
+until the service supplies one; publication still performs the existing funding
+and qualification checks. The steward edits the title, criteria, rights/privacy/dispute/refund
 terms, reward, budget, award cap, dedicated source, dates, and deadline. Album
 offers require an explicit minimum original-track count; sponsor scout requires
 a minimum paid DVert purchase. Referral offers set a required count from 2–100
@@ -379,9 +387,9 @@ and musician-pilot votes are tallied as distinct play IDs. The radio bar shows
 the wallet and, for the musician pilot, progress such as 🎯 3/10. A pass proves
 wallet ownership, not a unique human; payouts still require admin review.
 
-## $150 musician referral pilot template
+## $150 Referral Campaign template
 
-The **First musician referral pilot** is an extension of this same promotions
+The **Referral Campaign** is an extension of this same promotions
 journal, not a separate service. Its default configuration is six
 conversions, $25 per conversion and $150 total; the calendar editor can change
 the total, legs and vote count (see above). Qualification is all-or-nothing:

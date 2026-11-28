@@ -180,7 +180,7 @@ export const PROMOTION_ACTIVITY_WINDOWS = [
 export const MUSICIAN_REFERRAL_PILOT = Object.freeze({
   template: 'musician-referral',
   id: 'musician-referral-pilot-v1',
-  title: 'First musician referral pilot',
+  title: 'Referral Campaign',
   maxConversions: 6,
   requiredVotes: 10,
   rewardUnits: '25000000',
