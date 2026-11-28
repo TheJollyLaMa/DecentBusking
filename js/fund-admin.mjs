@@ -2,7 +2,7 @@ import { isAdminWallet } from './admin-access.mjs';
 import { acceptsEth, contributionAmount, contributionJournalKey, contributionUnits, createContributionController,
   loadContributionFunds, SETTLEMENT_ROUTER_ADDRESS, verifyContributionReceipt } from './fund-contribution.mjs?v=20261124-admin-funds';
 import { renderFundBalanceChart } from './fund-visual.mjs?v=20261124-fund-bunny';
-import { REFERRALS_FUND } from './promotions.mjs?v=20261126-eth-gifts';
+import { REFERRALS_FUND, PINNER_CAMPAIGN_FUND } from './promotions.mjs?v=20261126-eth-gifts';
 export { SETTLEMENT_ROUTER_ADDRESS };
 
 export const FUND_ADMIN_ABI = [
@@ -128,7 +128,7 @@ export function mountFundAdmin({ context, selected, select, create, isBusy, setB
     try {
       const { router, config } = await context();
       await refreshSelected();
-      for (const id of ['admin-fund-new', 'admin-fund-referrals']) document.getElementById(id).disabled = isBusy();
+      for (const id of ['admin-fund-new', 'admin-fund-referrals', 'admin-fund-pinner-campaigns']) document.getElementById(id).disabled = isBusy();
       const apply = next => {
         if (version !== generation || !isAdminWallet()) return;
         funds = next;
@@ -257,10 +257,23 @@ export function mountFundAdmin({ context, selected, select, create, isBusy, setB
   });
   document.getElementById('admin-fund-refresh').addEventListener('click', refresh);
   document.getElementById('admin-fund-new').addEventListener('click', () => { if (!isBusy()) create(''); });
-  document.getElementById('admin-fund-referrals').addEventListener('click', () => {
+  const prepare = slug => {
     if (isBusy()) return;
-    if (funds.some(fund => fund.slug === REFERRALS_FUND)) select(REFERRALS_FUND);
-    else create(REFERRALS_FUND);
+    if (funds.some(fund => fund.slug === slug)) select(slug);
+    else create(slug);
+  };
+  document.getElementById('admin-fund-referrals').addEventListener('click', () => prepare(REFERRALS_FUND));
+  document.getElementById('admin-fund-pinner-campaigns').addEventListener('click', () => prepare(PINNER_CAMPAIGN_FUND));
+  // Campaign editors ask for a fund by slug; open Admin DCal → Fund Allocations, verify on Base, then select or prefill creation.
+  document.addEventListener('prepare-settlement-fund', async event => {
+    const slug = event.detail?.slug;
+    if (![REFERRALS_FUND, PINNER_CAMPAIGN_FUND].includes(slug) || !isAdminWallet()) return;
+    const modal = section.closest('dialog');
+    if (modal && !modal.open) document.dispatchEvent(new Event('open-radio-programming'));
+    section.open = true;
+    section.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    await refresh();
+    prepare(slug);
   });
   document.getElementById('router-deposit-native').addEventListener('click', () => act('fund'));
   document.getElementById('router-recover-native').addEventListener('click', () => act('recover'));

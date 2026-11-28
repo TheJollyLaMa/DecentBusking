@@ -32,3 +32,12 @@ export function weiToUsdText(wei, rate) {
   const usd = Number(BigInt(wei || 0)) / 1e18 * rate;
   return `≈ $${usd.toLocaleString('en-US', { minimumFractionDigits: usd < 100 ? 2 : 0, maximumFractionDigits: 2 })}`;
 }
+
+// "0.002 ETH ($6.70)": the ETH amount is the promise; the parenthetical is a live estimate.
+export function ethWithUsd(wei, rate = cachedEthUsd()) {
+  const units = BigInt(wei || 0);
+  const fraction = (units % 10n ** 18n).toString().padStart(18, '0').slice(0, 6).replace(/0+$/, '');
+  const eth = `${units / 10n ** 18n}${fraction ? `.${fraction}` : ''} ETH`;
+  const usd = weiToUsdText(units, rate).replace(/^≈ /, '');
+  return usd ? `${eth} (${usd})` : eth;
+}

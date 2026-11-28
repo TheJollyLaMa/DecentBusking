@@ -1,4 +1,5 @@
 import { promotionLink, campaignAsset, formatAssetUnits, CAMPAIGN_GIFT_ICONS, CAMPAIGN_GIFT_LABELS } from './promotions.mjs?v=20261126-eth-gifts';
+import { cachedEthUsd, ethWithUsd, loadEthUsd } from './eth-usd-quote.mjs?v=20261128-pinner-eth';
 
 const short = wallet => `${wallet.slice(0, 6)}…${wallet.slice(-4)}`;
 
@@ -203,7 +204,8 @@ export function renderPinnerCampaignCard(stats, { doc = document, now = Date.now
   const card = el(doc, 'article', 'inbox-referral inbox-pinner');
   card.dataset.campaignId = stats.campaignId;
   const asset = campaignAsset(stats);
-  const money = units => formatAssetUnits(units || 0, asset);
+  const money = units => asset.id === 'eth' ? ethWithUsd(units || 0) : formatAssetUnits(units || 0, asset);
+  const priced = [];
   const unavailable = stats.completedDays === null || stats.nodeStatus === 'unavailable';
   const done = Math.min(stats.completedDays || 0, stats.qualifyingDays);
   const started = now >= Date.parse(stats.startsAt);
@@ -221,12 +223,18 @@ export function renderPinnerCampaignCard(stats, { doc = document, now = Date.now
             : stats.rank ? `Finished · rank ${stats.rank}; first ${stats.maxAwards} win`
               : `Keep pinning · ${stats.qualifyingDays - done} days to go`;
   const facts = el(doc, 'div', 'inbox-facts');
-  facts.append(el(doc, 'span', '', `🎁 ${money(stats.rewardUnits)} bonus`),
+  const fact = (className, label, units, suffix = '') => {
+    const span = el(doc, 'span', className, `${label} ${money(units)}${suffix}`);
+    priced.push(() => { span.textContent = `${label} ${money(units)}${suffix}`; });
+    return span;
+  };
+  facts.append(fact('', `🎁 Pin ${stats.qualifyingDays} days → get`, stats.rewardUnits),
     el(doc, 'span', '', `🏅 first ${stats.maxAwards}`),
     el(doc, 'span', stats.nodeStatus === 'active' ? 'is-glow' : '', `🛰 node ${unavailable ? 'unverified' : stats.nodeStatus}`));
   for (const [key, label] of [['pendingUnits', '⏳'], ['approvedUnits', '✓'], ['paidUnits', '💸']]) {
-    if (BigInt(stats[key] || 0) > 0n) facts.append(el(doc, 'span', 'is-glow', `${label} ${money(stats[key])}`));
+    if (BigInt(stats[key] || 0) > 0n) facts.append(fact('is-glow', label, stats[key]));
   }
+  if (asset.id === 'eth' && !cachedEthUsd()) void loadEthUsd().then(rate => { if (rate) priced.forEach(paint => paint()); }).catch(() => {});
   for (const token of stats.nftGifts || []) facts.append(el(doc, 'span', token.status === 'delivered' ? 'is-glow' : '', `🎖 NFT #${token.tokenId} · ${token.status}`));
   body.append(ring(doc, unavailable ? 0 : done / Math.max(1, stats.qualifyingDays), `${unavailable ? '—' : done}/${stats.qualifyingDays}`),
     el(doc, 'div', 'inbox-ring-label', next), facts);

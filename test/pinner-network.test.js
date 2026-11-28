@@ -159,7 +159,7 @@ test('campaign qualification preserves real daily probes across weekly payroll, 
     startsAt: '2026-11-23T12:00:00Z', joinedAt: '2026-11-23T12:00:00Z',
     endsAt: '2026-12-04T05:00:00Z', qualifyingDays: 2 };
   const { createPromotions } = await load('discord-bot/promotions.js');
-  const { PINNER_CAMPAIGN_VERSION, pinnerPromotionAmounts, promotionAuthorization } = await load('js/promotions.mjs');
+  const { PINNER_CAMPAIGN_VERSION, pinnerEthAmounts, promotionAuthorization } = await load('js/promotions.mjs');
   let campaignCheckpoint;
   const promotional = createPromotions({ ownerWallet: h.owner.address, routerAddress: h.router.target, provider: {},
     restore: async () => campaignCheckpoint, save: async value => { campaignCheckpoint = structuredClone(value); return `ipfs://${cid}`; },
@@ -170,11 +170,10 @@ test('campaign qualification preserves real daily probes across weekly payroll, 
     body.signature = await signer.signMessage(promotionAuthorization(body));
     return promotional.execute(body, origin);
   };
-  const draftQuote = { ethUsdMicros: '4000000000', quotedAt: request.joinedAt };
   const draft = (await execute({ action: 'save', campaign: { template: 'pinner',
     qualificationVersion: PINNER_CAMPAIGN_VERSION, asset: 'eth', title: 'Node bonus', criteria: 'Pin community music',
-    terms: 'Generated fixed terms', fund: 'dbusk-promotionals', maxAwards: 5, qualifyingDays: 2,
-    rewardUsdCents: 500, supporterRewards: [], draftQuote, ...pinnerPromotionAmounts(draftQuote.ethUsdMicros),
+    terms: 'Generated fixed terms', maxAwards: 5, qualifyingDays: 2,
+    supporterRewards: [], ...pinnerEthAmounts('1250000000000000', 5),
     startsAt: request.startsAt, endsAt: request.endsAt, claimDeadline: '2026-12-11T05:00:00Z' } })).campaigns[0];
   await execute({ action: 'status', campaignId: draft.id, status: 'published' });
   await execute({ action: 'join', campaignId: draft.id, acceptTerms: true, termsVersion: 1 }, h.member);
@@ -209,7 +208,7 @@ test('campaign qualification preserves real daily probes across weekly payroll, 
   await execute({ action: 'review', claimId: claim.id, decision: 'approved', reason: 'Independent probes verified' });
   assert.equal((await promotional.publicState()).participantProfiles[0].approvedUnits, draft.rewardUnits);
   assert.equal(h.network.getState().receipts[0].allocation.fundSlug, 'dbusk-pinners');
-  assert.equal(campaignCheckpoint.claims[0].fund, 'dbusk-promotionals');
+  assert.equal(campaignCheckpoint.claims[0].fund, 'dbusk-pinner-campaigns');
   assert.ok(h.snapshot().checks.every(check => Date.parse(check.at) >= Date.parse(progress.completedAt)));
   const restored = createPinnerNetwork(h.options);
   await restored.initialize();

@@ -15,8 +15,12 @@ budget and optional NFT gifts. See [Admin DCal](ADMIN-DCAL.md).
 
 1. In **left ankh → Admin DCal**, select **Pin Reward Campaign** and drag its
    text onto a calendar slot. The drop opens a proposal, not a live promise.
-2. Set the opening/closing dates, required qualifying days (1–365), USD bonus
-   target and maximum winners (default $5 each, five winners). The default
+2. Set the opening/closing dates, required qualifying days (1–365), a **fixed
+   ETH bonus** per finisher and maximum winners (default 0.002 ETH each, five
+   winners; total budget = bonus × winners). The live USD value is shown in
+   parentheses, e.g. `0.002 ETH ($6.70)`, everywhere the bonus appears: the
+   admin form, the public calendar and the profile campaign card. It is an
+   estimate from the Coinbase spot price; the ETH amount is the promise. The default
    31-day window permits 30 full New York days when opening partway through a
    day. Shorter/longer campaigns are editable; required days must fit the
    timebox. Late joiners need enough remaining full days.
@@ -24,12 +28,16 @@ budget and optional NFT gifts. See [Admin DCal](ADMIN-DCAL.md).
    ERC-1155 contract and token ID; one token per winner is owed separately from
    the ETH bonus. Publishing checks admin inventory against outstanding
    pinning-campaign promises. Tokens are not escrowed or minted.
-4. Save the draft, fund its dedicated `dbusk-promotionals` allocation with ETH
-   using the existing Fund Allocations controls, then **Publish offer**.
-   Publication refreshes the ETH/USD spot quote, shows exact fixed ETH units,
-   and requires signed review plus enough funds for every outstanding campaign
-   budget in the same fund/asset. The saved quote expires after five minutes;
-   published terms and ETH amounts are immutable, with no payout-time repricing.
+4. Every pin reward campaign draws from the standing **`dbusk-pinner-campaigns`**
+   allocation; the fund field is locked to it. The popout reads Base and shows
+   whether the fund exists, is active and has enough free ETH after other
+   pinner campaigns' reservations. **⚸ Create pinner campaign fund**,
+   **Restore fund** or **Deposit ETH** opens Admin DCal → Fund Allocations with
+   the slug selected or prefilled (also available there as **📌 Prepare pinner
+   campaign fund**). Save the draft, deposit ETH, then **Publish offer**.
+   Publication requires signed review plus enough ETH for every outstanding
+   campaign budget in that fund. No quote is needed: published terms and ETH
+   amounts are immutable, with no payout-time repricing.
 5. The published offer appears on **right ankh → DCal**. Opening it leads to
    registration and the existing node setup/enrollment dialog. A listener or
    musician signs acceptance of the campaign terms, enrolls their own
@@ -60,14 +68,16 @@ budget and optional NFT gifts. See [Admin DCal](ADMIN-DCAL.md).
 
 **Weekly pinning rewards remain separate:** normal USDC awards from
 `dbusk-pinners` continue under their existing weekly checks and weighting.
-Campaign gifts use `dbusk-promotionals`, never the weekly pot. Separate
+Campaign bonuses use `dbusk-pinner-campaigns`, never the weekly pot. Musician
+referral campaigns use `dbusk-referrals`; `dbusk-promotionals` (or a
+`dbusk-promotionals-*` fund) is for other one-off offers. Separate
 campaigns may reward the same pinner for their own qualifying timeboxes.
 Reusing a saved campaign copies its terms into a new draft, not participants,
 claims, receipts or earned NFT state.
 
 Deploy the matching worker before the UI. `/api/promotions` advertises
-`features.pinnerCampaign: "pinner-days-v1"`; the editor refuses a pinning save
-against an older worker. Existing legacy pinner drafts restore as draft-only:
+`features.pinnerCampaign: "pinner-eth-v2"` (fixed ETH bonus, dedicated fund);
+the editor refuses a pinning save against an older worker. Existing legacy pinner drafts restore as draft-only:
 edit/save them to explicitly choose the new timebox and terms. Daily summaries
 are durably stored in the existing pinner checkpoint before weekly hot-check
 pruning, so progress survives payroll rollover/restarts. An older worker cannot
@@ -147,7 +157,9 @@ In **Left ankh → Admin DCal → Fund Allocations**, create and deposit native 
 controls. Creation, token approval if needed, and deposit are separate wallet
 actions. The admin may instead choose a dedicated slug beginning
 `dbusk-promotionals-` and create/fund it using the custom fund selector. Each
-source is accounted independently. Playback, Top 10, pinner, live-performer,
+source is accounted independently. Pin reward campaigns use the dedicated ETH
+allocation `dbusk-pinner-campaigns` (see above), not `dbusk-promotionals`.
+Playback, Top 10, weekly pinner (`dbusk-pinners`), live-performer,
 and repo-development funds cannot be selected as promotional reward sources.
 
 Musician referral campaigns always use **Referrals (`dbusk-referrals`)**. Create
