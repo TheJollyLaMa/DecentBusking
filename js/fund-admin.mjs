@@ -3,6 +3,7 @@ import { acceptsEth, contributionAmount, contributionJournalKey, contributionUni
   loadContributionFunds, SETTLEMENT_ROUTER_ADDRESS, verifyContributionReceipt } from './fund-contribution.mjs?v=20261124-admin-funds';
 import { renderFundBalanceChart } from './fund-visual.mjs?v=20261124-fund-bunny';
 import { REFERRALS_FUND, PINNER_CAMPAIGN_FUND } from './promotions.mjs?v=20261126-eth-gifts';
+const CAMPAIGN_FUNDS = [{ slug: PINNER_CAMPAIGN_FUND, label: '📌 Pinner campaigns' }, { slug: REFERRALS_FUND, label: '🤝 Referrals' }];
 export { SETTLEMENT_ROUTER_ADDRESS };
 
 export const FUND_ADMIN_ABI = [
@@ -87,7 +88,7 @@ export function mountFundAdmin({ context, selected, select, create, isBusy, setB
   const status = document.getElementById('admin-fund-status');
   const actionStatus = document.getElementById('admin-fund-action-status');
   const actionDialog = document.getElementById('router-action-dialog');
-  let funds = [], asset = 'eth', view = 'bars', generation = 0, controller;
+  let funds = [], loaded = false, asset = 'eth', view = 'bars', generation = 0, controller;
   const setStatus = (text, error = false) => { actionStatus.textContent = text; actionStatus.classList.toggle('error', error); };
   const clearProof = () => {
     const proof = document.getElementById('admin-fund-proof');
@@ -120,6 +121,22 @@ export function mountFundAdmin({ context, selected, select, create, isBusy, setB
       archive.append(button);
     }
     if (!archive.childElementCount) archive.textContent = 'No archived project funds.';
+    // Campaign funds are fixed by their templates; show them before they exist on Base so they can be created.
+    if (!loaded) return;
+    const missing = CAMPAIGN_FUNDS.filter(({ slug }) => !funds.some(fund => fund.slug === slug));
+    if (!missing.length) return;
+    const list = document.createElement('div');
+    list.className = 'admin-fund-missing';
+    for (const { slug, label } of missing) {
+      const row = document.createElement('p');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.createFund = slug;
+      button.textContent = '⚸ Create on Base';
+      row.append(`${label} · ${slug} · not created yet — 0 ETH `, button);
+      list.append(row);
+    }
+    chart.append(list);
   };
   const refresh = async () => {
     const version = ++generation;
@@ -132,6 +149,7 @@ export function mountFundAdmin({ context, selected, select, create, isBusy, setB
       const apply = next => {
         if (version !== generation || !isAdminWallet()) return;
         funds = next;
+        loaded = true;
         for (const fund of next) select(fund.slug, { rememberOnly: true });
         render();
       };
@@ -244,6 +262,8 @@ export function mountFundAdmin({ context, selected, select, create, isBusy, setB
   section.addEventListener('click', event => {
     const button = event.target.closest('[data-select-fund]');
     if (button && !isBusy()) select(button.dataset.selectFund);
+    const missing = event.target.closest('[data-create-fund]');
+    if (missing && !isBusy()) create(missing.dataset.createFund);
   });
   document.getElementById('admin-fund-view').addEventListener('click', event => {
     view = view === 'bars' ? 'pie' : 'bars';
@@ -275,6 +295,7 @@ export function mountFundAdmin({ context, selected, select, create, isBusy, setB
     await refresh();
     prepare(slug);
   });
+  document.addEventListener('settlement-fund-changed', () => { if (section.open && isAdminWallet()) refresh(); });
   document.getElementById('router-deposit-native').addEventListener('click', () => act('fund'));
   document.getElementById('router-recover-native').addEventListener('click', () => act('recover'));
   document.getElementById('router-fund-active').addEventListener('click', () => act('status'));
@@ -287,6 +308,7 @@ export function mountFundAdmin({ context, selected, select, create, isBusy, setB
   for (const type of ['wallet-connected', 'wallet-disconnected']) document.addEventListener(type, () => {
     ++generation;
     funds = [];
+    loaded = false;
     clearProof();
     document.getElementById('admin-fund-archive-list').textContent = 'Open or refresh to verify archived funds.';
     if (actionDialog.open) actionDialog.close('cancel');
