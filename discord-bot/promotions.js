@@ -3,13 +3,14 @@ import { Contract, Interface, id, verifyMessage, isAddress } from 'ethers';
 import { PAYMENT_EVENT_ABI } from './payment-ledger.js';
 import { currentPayrollPeriod } from '../js/payroll-week.mjs';
 import { PROMOTIONS_FUND, REFERRALS_FUND, referralCampaignTitle, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS,
-  MUSICIAN_REFERRAL_PILOT, isMusicianReferralCampaign, CAMPAIGN_ASSETS, campaignAsset, campaignGifts, campaignGiftReserveUnits,
+  MUSICIAN_REFERRAL_PILOT, isMusicianReferralCampaign, CAMPAIGN_ASSETS, campaignAsset, configuredOmmmAsset, campaignGifts, campaignGiftReserveUnits,
   campaignGiftWinners, musicianReferralLegs, musicianReferralConfig, SUPPORTER_REWARD, SUPPORTER_REWARD_ABI,
   campaignSupporterRewards, supporterRewardKey, REFERRAL_SETTLEMENT_VERSION, referralFundMatchUnits, referralFundMatchQueue,
   isPromotionsFund, promotionAnnouncementDraft, promotionAuthorization, promotionWorkReference,
   PINNER_PROMOTION_DRAFT, PINNER_CAMPAIGN_VERSION, pinnerPromotionAmounts, pinnerCampaignTerms,
   promotionSupporterRewards, pinnerCampaignFullDays } from '../js/promotions.mjs';
 import { newYorkDayPeriod } from '../js/payroll-week.mjs';
+import { FIRST_PROJECT_VERSION, FIRST_PROJECT_FUND, validateFirstProjectCampaign } from './first-project.js';
 
 const address = value => {
   if (!isAddress(value) || /^0x0{40}$/i.test(value)) throw new Error('A valid nonzero wallet is required');
@@ -126,6 +127,8 @@ export function validatePromotionCheckpoint(value) {
         !Number.isSafeInteger(c.maxAwards) || c.maxAwards < 1 || c.maxAwards > 10000) fail();
     text(c.title, 'Checkpoint title', 100); text(c.criteria, 'Checkpoint criteria'); text(c.terms, 'Checkpoint terms');
     units(c.rewardUnits); units(c.budgetUnits);
+    if (c.template === 'first-project') validateFirstProjectCampaign(c);
+    else if (c.application !== undefined || c.fund === FIRST_PROJECT_FUND) fail();
     if (c.template === 'pinner' && c.qualificationVersion === PINNER_CAMPAIGN_VERSION) {
       if (c.asset !== 'eth' || !Number.isSafeInteger(c.qualifyingDays) || c.qualifyingDays < 1 || c.qualifyingDays > 365 ||
           c.qualifyingDays > pinnerCampaignFullDays(c.startsAt, c.endsAt) ||
@@ -162,8 +165,14 @@ export function validatePromotionCheckpoint(value) {
         !Array.isArray(c.supporterToken.eligibleWallets) ||
         c.supporterToken.eligibleWallets.some(w => !validWallet(w)))) fail();
     if (c.curatedReferrers && c.curatedReferrers.some(w => !validWallet(w))) fail();
-    if (c.asset !== undefined && (!['usdc', 'eth'].includes(c.asset) || c.asset === 'eth' && !isMusicianReferralCampaign(c) && c.template !== 'pinner')) fail();
-    if (c.gifts !== undefined && (!isMusicianReferralCampaign(c) || JSON.stringify(campaignGifts(c.gifts)) !== JSON.stringify(c.gifts))) fail();
+    if (c.asset !== undefined && (!['usdc', 'eth', 'ommm'].includes(c.asset) ||
+        c.asset === 'eth' && !isMusicianReferralCampaign(c) && c.template !== 'pinner' ||
+        c.asset === 'ommm' && c.template !== 'custom')) fail();
+    campaignAsset(c);
+    if (c.asset !== 'ommm' && c.ommm !== undefined) fail();
+    if (c.gifts !== undefined && (!(isMusicianReferralCampaign(c) || c.template === 'custom') ||
+        JSON.stringify(campaignGifts(c.gifts)) !== JSON.stringify(c.gifts) ||
+        c.template === 'custom' && (c.gifts.length && c.maxAwards > 100 || c.gifts.some(g => g.supporter || g.trigger === 'top')))) fail();
     validateReferralSettlement(c);
     if (c.giftAwards !== undefined) {
       if (!Array.isArray(c.giftAwards) || c.giftAwards.length > 200 || !validDate(c.giftsAwardedAt)) fail();
@@ -171,7 +180,8 @@ export function validatePromotionCheckpoint(value) {
       for (const award of c.giftAwards) {
         const gift = c.gifts?.find(item => item.trigger === award?.trigger);
         if (!award || !gift || award.id !== `gift-${award.trigger}` || !validWallet(award.wallet) ||
-            !c.curatedReferrers.includes(award.wallet) || awarded.has(`${award.id}:${award.wallet}`) ||
+            !(c.template === 'custom' ? value.claims.some(claim => claim.campaignId === c.id && claim.wallet === award.wallet && held(claim))
+              : c.curatedReferrers.includes(award.wallet)) || awarded.has(`${award.id}:${award.wallet}`) ||
             !/^(?:0|[1-9]\d{0,29})$/.test(award.amountUnits || '') || BigInt(award.amountUnits) > BigInt(gift.amountUnits) ||
             !['approved', 'payment-pending', 'paid', 'supporter-only'].includes(award.status) ||
             (award.status === 'supporter-only') !== (award.amountUnits === '0') ||
@@ -296,6 +306,14 @@ export function validatePromotionCheckpoint(value) {
         c.status === 'paid' && !conversion && (!c.txHash || !Number.isSafeInteger(c.paymentBlockNumber) || c.paymentBlockNumber < 0 ||
           !/^0x[0-9a-f]{64}$/i.test(c.paymentBlockHash || '') || !validDate(c.paidAt))) fail();
     text(c.evidence, 'Checkpoint evidence');
+    if (campaign.template === 'first-project') {
+      const q = c.qualification;
+      if (c.application !== 'decentcanopy' || q?.version !== FIRST_PROJECT_VERSION ||
+          q.wallet !== c.wallet || !/^[a-zA-Z0-9_-]{1,50}$/.test(q.projectKey || '') ||
+          q.projectId !== `decent-project:${c.wallet}:${q.projectKey}` || q.projectHash !== id(q.projectId) ||
+          !/^0x[0-9a-f]{64}$/.test(q.mintTxHash || '') ||
+          !/^(0|[1-9]\d{0,77})$/.test(q.listingId || '')) fail();
+    } else if (c.application !== undefined) fail();
     if (campaign.template === 'pinner') {
       const q = c.qualification;
       if (campaign.qualificationVersion !== PINNER_CAMPAIGN_VERSION || !q ||
@@ -399,8 +417,9 @@ export function validatePromotionCheckpoint(value) {
       transactionHashes.add(hash);
     }
     if (held(c)) {
-      if (!conversion && campaign.template !== 'pinner' && heldWallets.has(c.wallet)) fail();
-      if (!conversion && campaign.template !== 'pinner') heldWallets.add(c.wallet);
+      const walletScope = `${campaign.application || 'decentbusking'}:${c.wallet}`;
+      if (!conversion && campaign.template !== 'pinner' && heldWallets.has(walletScope)) fail();
+      if (!conversion && campaign.template !== 'pinner') heldWallets.add(walletScope);
       const reserved = reservations.get(c.campaignId) || { count: 0, units: 0n };
       reserved.count++;
       reserved.units += BigInt(c.amountUnits);
@@ -439,9 +458,11 @@ export function validatePromotionCheckpoint(value) {
 const validateCheckpoint = validatePromotionCheckpoint;
 
 export function createPromotions({ restore, save, getCheckpointUri = () => '', provider, routerAddress, ownerWallet,
-  voteOnRadio, readPlaylist = () => [], readFunding, readSupporterInventory, readPinnerProgress, announcements, siteUrl, devertContractAddress = '', now = Date.now, verifySignature = verifyMessage }) {
+  voteOnRadio, readPlaylist = () => [], readFunding, readSupporterInventory, readPinnerProgress, readFirstProject, ommmAddress,
+  announcements, siteUrl, devertContractAddress = '', now = Date.now, verifySignature = verifyMessage }) {
   const owner = address(ownerWallet);
   const router = new Contract(routerAddress, PROMOTIONS_ROUTER_ABI, provider);
+  const ommmAsset = ommmAddress ? configuredOmmmAsset(ommmAddress) : null;
   let state = { schemaVersion: 1, revision: 0, campaigns: [], claims: [], members: [], votes: [] };
   let initialization;
   let fault = '';
@@ -533,7 +554,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
     const special = isMusicianReferralCampaign(campaign);
     return { ...offer, ...(admin && announcement ? { announcement } : {}),
       ...(special ? { supporterToken: { ...campaign.supporterToken, eligibleWallets: supporterEarners(state, campaign) } } : {}),
-      ...(isMusicianReferralCampaign(campaign) ? { giftReserveUnits: giftReserve(campaign).toString(),
+      ...(isMusicianReferralCampaign(campaign) || campaign.template === 'custom' ? { giftReserveUnits: giftReserve(campaign).toString(),
         giftPaidUnits: giftPaid(campaign).toString() } : {}),
       committedUnits: committed.toString(), approvedUnits: special ? legTotal('approved').toString() : total('approved').toString(),
       paymentPendingUnits: special ? legTotal('payment-pending').toString() : total('payment-pending').toString(),
@@ -550,7 +571,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
   }
   const open = campaign => campaign.status === 'published' && Date.parse(campaign.startsAt) <= now() && now() < Date.parse(campaign.endsAt);
   // Each fund holds one balance per asset, so commitments only compete within the same fund and asset.
-  const sameBucket = (a, b) => a.fund === b.fund && campaignAsset(a).id === campaignAsset(b).id;
+  const sameBucket = (a, b) => a.fund === b.fund && campaignAsset(a).address === campaignAsset(b).address;
   const giftReserve = c => c.giftAwards ? c.giftAwards.reduce((n, a) => n + BigInt(a.amountUnits), 0n) : campaignGiftReserveUnits(c);
   const giftPaid = c => (c.giftAwards || []).filter(a => a.status === 'paid').reduce((n, a) => n + BigInt(a.amountUnits), 0n);
   const reservedIn = (next, campaign) => next.claims.filter(c => held(c) &&
@@ -559,6 +580,10 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
     next.campaigns.filter(c => sameBucket(c, campaign)).flatMap(c => c.giftAwards || [])
       .filter(a => a.status !== 'paid').reduce((n, a) => n + BigInt(a.amountUnits), 0n);
   async function assertPublishable(next, campaign) {
+    if (campaign.template === 'first-project' && !readFirstProject) {
+      throw new Error('First Project is unavailable until the deployed creator collection and seller listings are configured and verified');
+    }
+    if (campaign.template === 'first-project') await readFirstProject.ready?.();
     if (campaign.template === 'pinner') {
       if (campaign.qualificationVersion !== PINNER_CAMPAIGN_VERSION) throw new Error('Legacy pinner campaign is draft-only: edit and save the campaign timebox and bonus terms before publishing');
       if (!readPinnerProgress) throw new Error('Independent pinning qualification is not configured');
@@ -608,6 +633,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
   }
   async function funding(fundSlug = PROMOTIONS_FUND, asset = CAMPAIGN_ASSETS.usdc) {
     if (!isPromotionsFund(fundSlug)) throw new Error('A dedicated Promotionals fund is required');
+    if (asset.id === 'ommm' && (!ommmAsset || asset.address !== ommmAsset.address)) throw new Error('This campaign’s shared Ommm deployment is unavailable; never substitute USDC or an old token');
     if (readFunding) return readFunding(fundSlug, asset.id);
     if (Number((await provider.getNetwork()).chainId) !== 8453) throw new Error('Promotions require Base');
     if (asset.id === 'eth') {
@@ -621,14 +647,22 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
       }
       return balance < actual ? balance : actual;
     }
-    const token = new Contract(PROMOTIONS_USDC, ['function balanceOf(address) view returns (uint256)', 'function decimals() view returns (uint8)'], provider);
+    const token = new Contract(asset.address, ['function balanceOf(address) view returns (uint256)', 'function decimals() view returns (uint8)'], provider);
+    if (asset.id === 'ommm') {
+      const shared = new Contract(asset.address, ['function asset() view returns(address)', 'function INITIAL_PRICE() view returns(uint256)',
+        'function MAX_DROP_BPS() view returns(uint256)', 'function prototypeRetired() view returns(bool)', 'function paused() view returns(bool)'], provider);
+      if (lower(await shared.asset()) !== lower(PROMOTIONS_USDC) || await shared.INITIAL_PRICE() !== 100n ||
+          await shared.MAX_DROP_BPS() !== 1000n || await shared.prototypeRetired() || await shared.paused()) {
+        throw new Error('Shared Ommm v1 backing/economics are invalid or the token is unavailable');
+      }
+    }
     const fundId = id(fundSlug);
     const [fund, balance, actual, paused, role, decimals] = await Promise.all([
-      router.funds(fundId), router.fundBalances(fundId, PROMOTIONS_USDC), token.balanceOf(routerAddress),
+      router.funds(fundId), router.fundBalances(fundId, asset.address), token.balanceOf(routerAddress),
       router.paused(), router.hasRole(await router.DEFAULT_ADMIN_ROLE(), owner), token.decimals(),
     ]);
-    if (!fund.exists || !fund.active || paused || !role || Number(decimals) !== 6) {
-      throw new Error('Create and activate Promotionals in Settlements Router; verify owner role, USDC and unpaused router');
+    if (!fund.exists || !fund.active || paused || !role || Number(decimals) !== asset.decimals || !await router.approvedAssets(asset.address)) {
+      throw new Error(`Create and activate Promotionals in Settlements Router; verify owner role, approved ${asset.symbol} and unpaused router`);
     }
     return balance < actual ? balance : actual;
   }
@@ -867,13 +901,19 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
         votedDuringOffer: activeDuringOffer.has(`${member.campaignId}:${member.wallet}`),
         ...(referralCounts.get(member.campaignId) || { registered: 0, activeThisWeek: 0, activeDuringOffer: 0 }) };
     }) : [];
-    const fundSlugs = admin ? [...new Set([PROMOTIONS_FUND, REFERRALS_FUND, ...state.campaigns.map(c => c.fund)])] : [];
-    const funds = await Promise.all(fundSlugs.map(async slug => {
-      try { return { slug, balanceUnits: (await funding(slug)).toString(), error: '' }; }
-      catch (error) { return { slug, balanceUnits: null, error: error.message }; }
+    const fundBuckets = admin ? [...new Map([
+      { fund: PROMOTIONS_FUND }, { fund: REFERRALS_FUND }, ...state.campaigns,
+    ].map(c => [`${c.fund}:${campaignAsset(c).address}`, c])).values()] : [];
+    const funds = await Promise.all(fundBuckets.map(async c => {
+      const asset = campaignAsset(c);
+      const bucket = { slug: c.fund, asset: asset.id, ...(asset.id === 'ommm' ? { ommm: asset } : {}) };
+      try { return { ...bucket, balanceUnits: (await funding(c.fund, asset)).toString(), error: '' }; }
+      catch (error) { return { ...bucket, balanceUnits: null, error: error.message }; }
     }));
-    const defaultFund = funds.find(fund => fund.slug === PROMOTIONS_FUND);
-    return structuredClone({ revision: state.revision, features: { referralSettlement: REFERRAL_SETTLEMENT_VERSION, pinnerCampaign: PINNER_CAMPAIGN_VERSION }, viewerWallet: wallet, campaigns, fundSlug: PROMOTIONS_FUND, routerAddress,
+    const defaultFund = funds.find(fund => fund.slug === PROMOTIONS_FUND && fund.asset === 'usdc');
+    return structuredClone({ revision: state.revision, features: { referralSettlement: REFERRAL_SETTLEMENT_VERSION, pinnerCampaign: PINNER_CAMPAIGN_VERSION,
+      firstProject: readFirstProject ? FIRST_PROJECT_VERSION : null, supporterContracts: readFirstProject?.deployment || null,
+      ommm: ommmAsset }, viewerWallet: wallet, campaigns, fundSlug: PROMOTIONS_FUND, routerAddress,
       funds, fundBalanceUnits: defaultFund?.balanceUnits ?? null, fundingError: defaultFund?.error || '', storageError: fault,
       checkpointUri: getCheckpointUri(),
       claims: state.claims,
@@ -1078,7 +1118,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
         const play = text(playId, 'Play ID', 200);
         const next = structuredClone(state);
         const results = next.campaigns.filter(campaign => open(campaign) &&
-          campaign.template !== 'pinner' &&
+          campaign.template !== 'pinner' && campaign.template !== 'first-project' &&
           next.members.some(m => m.wallet === member && m.campaignId === campaign.id))
           .map(campaign => ({ campaign, outcome: qualifyCampaignVote(next, campaign, { wallet: member, voterId, playId: play, duplicate }) }));
         if (results.some(item => item.outcome === 'counted')) await persist(next);
@@ -1111,7 +1151,11 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
         if (fault) throw new Error(fault);
         const next = structuredClone(state);
         const at = new Date(now()).toISOString();
-        let campaign = next.campaigns.find(c => c.id === command.campaignId);
+        const referencedCampaignId = command.campaignId || next.claims.find(c => c.id === command.claimId)?.campaignId;
+        let campaign = next.campaigns.find(c => c.id === referencedCampaignId);
+        if (campaign && (campaign.application || undefined) !== body.application) {
+          throw new Error('Campaign belongs to a different application; use its own signed flow');
+        }
         const adminActions = ['save', 'run', 'amend', 'curate-referrer', 'correct-inviter', 'status', 'review', 'correct-attribution', 'prepare-payment', 'release-payment-preparation',
           'reconcile', 'reconcile-funding-leg', 'preview-discord', 'send-discord', 'reconcile-discord',
           'award-gifts', 'prepare-gift', 'reconcile-gift', 'release-gift-preparation',
@@ -1184,8 +1228,11 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           if (!Number.isSafeInteger(input.maxAwards) || input.maxAwards < 1 || input.maxAwards > 10000) throw new Error('Max awards must be 1-10000');
           const rewardUnits = units(input.rewardUnits), budgetUnits = units(input.budgetUnits);
           if (BigInt(budgetUnits) < BigInt(rewardUnits)) throw new Error('Budget must cover at least one reward');
-          const fund = input.template === MUSICIAN_REFERRAL_PILOT.template ? REFERRALS_FUND : input.fund || PROMOTIONS_FUND;
+          const fund = input.template === 'first-project' ? FIRST_PROJECT_FUND :
+            input.template === MUSICIAN_REFERRAL_PILOT.template ? REFERRALS_FUND : input.fund || PROMOTIONS_FUND;
           if (!isPromotionsFund(fund)) throw new Error('Use a dedicated dbusk-promotionals fund, not artist, pinner or repo funds');
+          if ((input.template === 'first-project') !== (body.application === 'decentcanopy') ||
+              input.template !== 'first-project' && fund === FIRST_PROJECT_FUND) throw new Error('Canopy funds and First Project terms are restricted to the Canopy campaign flow');
           if (new Set([...next.campaigns.map(c => c.fund), fund]).size > 20) throw new Error('At most 20 dedicated promotional funds are supported');
           const curatedReferrers = input.curatedReferrers === undefined
             ? campaign?.curatedReferrers || []
@@ -1195,7 +1242,10 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
               return [...new Set(input.curatedReferrers.map(address))];
             })();
           let qualification = {};
-          if (input.template === 'pinner' && input.qualificationVersion === PINNER_CAMPAIGN_VERSION) {
+          if (input.template === 'first-project') {
+            validateFirstProjectCampaign({ ...input, fund });
+            qualification = { application: 'decentcanopy', asset: 'usdc', qualificationVersion: FIRST_PROJECT_VERSION };
+          } else if (input.template === 'pinner' && input.qualificationVersion === PINNER_CAMPAIGN_VERSION) {
             const amounts = pinnerPromotionAmounts(input.draftQuote?.ethUsdMicros, input);
             if (!Number.isSafeInteger(input.qualifyingDays) || input.qualifyingDays < 1 || input.qualifyingDays > 365 ||
                 input.qualifyingDays > pinnerCampaignFullDays(startsAt, endsAt)) {
@@ -1271,6 +1321,17 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
             if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(target) || target === fund) throw new Error('Choose a different valid artist fund');
             qualification = { matchTargetFund: target, minContributionUnits: units(input.minContributionUnits) };
           }
+          if (input.template === 'custom') {
+            const asset = input.asset ?? campaign?.asset ?? 'usdc';
+            if (!['usdc', 'ommm'].includes(asset)) throw new Error('Custom rewards support Base USDC or configured shared Ommm');
+            if (asset === 'ommm' && !ommmAsset) throw new Error('Shared Ommm v1 is not configured; do not use the old DLang prototypes');
+            if (asset === 'ommm' && input.ommm && lower(input.ommm.address) !== ommmAsset.address) throw new Error('Campaign uses a different shared Ommm deployment');
+            const gifts = campaignGifts(input.gifts ?? campaign?.gifts ?? []);
+            if (!gifts || gifts.some(g => g.supporter || g.trigger === 'top') || gifts.length && input.maxAwards > 100) {
+              throw new Error('Custom gifts support funded participation/completion token gifts, with up to 100 participants');
+            }
+            qualification = { ...qualification, asset, ...(asset === 'ommm' ? { ommm: ommmAsset } : {}), gifts };
+          } else if (input.asset === 'ommm') throw new Error('Shared Ommm currently uses custom promotional campaigns; ETH/USDC referral matching is unchanged');
           const saved = { id: campaign?.id || randomUUID(), status: 'draft', version: 1,
             title: running ? text(referralCampaignTitle(input.title), 'Title', 100) : text(input.title, 'Title', 100),
             template: input.template, criteria: text(input.criteria, 'Qualification terms'), terms: text(input.terms, 'Limits, privacy, disputes and refund terms'),
@@ -1349,6 +1410,9 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           if (!campaign || !open(campaign)) throw new Error('Promotion is not accepting participants');
           if (next.members.some(m => m.wallet === wallet && m.campaignId === campaign.id)) throw new Error('Already registered; referral attribution cannot be changed');
           if (command.acceptTerms !== true || command.termsVersion !== campaign.version) throw new Error('Accept the current published terms before registering');
+          if (campaign.template === 'first-project' && next.members.filter(m => m.campaignId === campaign.id).length >= 12) {
+            throw new Error('First Project participant capacity reached: twelve registrations maximum');
+          }
           const referrer = command.referrer ? address(command.referrer) : '';
           if (next.members.length >= 10000) throw new Error('Promotion participant capacity reached');
           if (referrer && next.members.some(m => m.wallet === wallet)) throw new Error('Only new promotion participants can be referrals');
@@ -1387,6 +1451,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           if (next.votes.length >= 30000) throw new Error('Promotion activity capacity reached');
           if (!campaign || !open(campaign) || !next.members.some(m => m.wallet === wallet && m.campaignId === campaign.id)) throw new Error('Join an open promotion first');
           if (campaign.template === 'pinner') throw new Error('Pinning campaigns qualify through independent node checks, not song votes');
+          if (campaign.template === 'first-project') throw new Error('First Project requires public project and mint/listing evidence, not song votes');
           if (!/^[a-zA-Z0-9_-]{16,128}$/.test(command.voterId || '') || ![1, -1].includes(command.vote)) throw new Error('Invalid promotion vote');
           const subjectWallet = isMusicianReferralCampaign(campaign) ? address(command.subjectWallet) : '';
           if (subjectWallet && subjectWallet !== wallet) {
@@ -1415,6 +1480,12 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           const claim = { id: randomUUID(), campaignId: campaign.id, wallet, fund: campaign.fund, amountUnits: campaign.rewardUnits,
             status: 'submitted', evidence: campaign.template === 'pinner' ? 'Independently verified pinning days inside the campaign timebox'
               : text(command.evidence, 'Evidence'), createdAt: at, termsVersion: campaign.version, history: [] };
+          if (campaign.template === 'first-project') {
+            if (!readFirstProject) throw new Error('First Project verification is unavailable');
+            claim.application = 'decentcanopy';
+            claim.qualification = await readFirstProject({ wallet, projectKey: command.projectKey,
+              mintTxHash: command.mintTxHash, listingId: command.listingId, campaign, joinedAt: member.joinedAt });
+          }
           if (campaign.template === 'referral') claim.qualification = referralEvidence(next, claim, campaign);
           if (campaign.template === 'pinner') claim.qualification = pinnerEvidence(next, claim, campaign);
           if (isMusicianReferralCampaign(campaign)) {
@@ -1568,6 +1639,13 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
               throw new Error('Do not reverse a pinning award after its NFT transfer is pending or delivered');
             }
             if (command.decision === 'approved') {
+              if (campaign.template === 'first-project') {
+                if (command.confirmParticipantReview !== true) throw new Error('Review the participant and project before approving the First Project reward; wallets do not prove unique people');
+                if (!readFirstProject) throw new Error('First Project verification is unavailable');
+                const member = next.members.find(m => m.wallet === claim.wallet && m.campaignId === campaign.id);
+                claim.qualification = await readFirstProject({ ...claim.qualification, wallet: claim.wallet,
+                  campaign, joinedAt: member.joinedAt });
+              }
               if (campaign.template === 'referral') claim.qualification = referralEvidence(next, claim, campaign);
               if (isMusicianReferralCampaign(campaign)) claim.qualification = musicianReferralEvidence(next, claim, campaign);
               if (campaign.template === 'pinner') claim.qualification = pinnerEvidence(next, claim, campaign);
@@ -1585,6 +1663,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
               // No automatic stacking of the same participant's promotional rewards.
               if (!isMusicianReferralCampaign(campaign) && campaign.template !== 'pinner' &&
                   next.claims.some(c => c.id !== claim.id && c.wallet === claim.wallet && held(c) &&
+                    (c.application || 'decentbusking') === (campaign.application || 'decentbusking') &&
                     next.campaigns.find(p => p.id === c.campaignId)?.template !== 'pinner')) throw new Error('Participant already has another approved promotional reward; review stacking outside this pilot');
               const subjects = new Set([claim.subjectWallet, ...(campaign.template === 'referral' ? claim.qualification.wallets : [])].filter(Boolean));
               if (subjects.size && next.claims.some(c => c.id !== claim.id && held(c) &&
@@ -1605,6 +1684,12 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
                 ? { newAdvertiserReviewed: true, refundAndDisputeReviewed: true } : {}) });
           } else if (command.action === 'prepare-payment') {
             if (claim.status !== 'approved') throw new Error('Reward is not approved or already has an unresolved payment');
+            if (campaign.template === 'first-project') {
+              if (!readFirstProject) throw new Error('First Project verification is unavailable');
+              const member = next.members.find(m => m.wallet === claim.wallet && m.campaignId === campaign.id);
+              claim.qualification = await readFirstProject({ ...claim.qualification, wallet: claim.wallet,
+                campaign, joinedAt: member.joinedAt });
+            }
             const leg = isMusicianReferralCampaign(campaign)
               ? claim.legs.find(item => item.id === command.legId && item.kind === 'wallet')
               : null;
@@ -1652,7 +1737,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
             await reconcile(next, claim, command.txHash, leg);
           }
         } else if (command.action === 'award-gifts') {
-          if (!campaign || !isMusicianReferralCampaign(campaign) || !campaign.gifts?.length) throw new Error('This campaign has no gifts');
+          if (!campaign || !(isMusicianReferralCampaign(campaign) || campaign.template === 'custom') || !campaign.gifts?.length) throw new Error('This campaign has no gifts');
           if (campaign.giftAwards) throw new Error('Gifts are already awarded');
           const campaignClaims = next.claims.filter(c => c.campaignId === campaign.id);
           if (now() < Date.parse(campaign.claimDeadline) && campaignClaims.filter(held).length < campaign.maxAwards) {

@@ -758,6 +758,44 @@ Everyone is welcome: code, testing, documentation, art, accessibility, and ideas
 
 Contributor rewards may be available in ART or USDC from the Base `dbusk-repo-dev` fund. See [Contributor Payroll](docs/PAYROLL.md) and the [Contributor Request form](https://github.com/TheJollyLaMa/DecentBusking/issues/new?template=whitelist-request.yml).
 
+## Shared Ommm promotions and Canopy First Project (not activated)
+
+Custom promotional campaigns can use the shared Base Ommm v1 as their reward and
+same-token participation/completion gifts. Amounts use exact eighteen-decimal units;
+gift reserves are additional to the reward budget. Ommm does not enter the existing
+ETH/USDC musician-referral conversion/matching flow. Unknown assets and all three old
+Ommm prototypes are rejected, never silently treated as USDC.
+
+Set `OMMM_V1_ADDRESS` only after separately approved shared-token deployment and
+router asset/fund authorization. Fund summaries distinguish actual token addresses.
+The optional ArtFi `OmmmSettlementFundingAdapter` credits named allowlisted router
+funds from its own Ommm pool; it does not pay participants or consume DLang's learning
+allowance. Actual contract-backed local rehearsal verifies mint-time price invariance,
+independent learning allowance, the on-chain 10% dilution threshold and rollback.
+No shared Ommm deployment or production DLang manifest switch is implied.
+
+Canopy First Project reuses this worker's durable promotion journal, with a distinct
+signed authorization domain, `decentcanopy-promotionals` allocation and once-per-wallet
+work reference across campaigns. Twelve registrations maximum; up to twelve reviewed
+five-USDC rewards. Qualification checks the current signed Canopy publication, actual
+post-registration v0.4 mint, current creator/project approvals and active seller listing
+at claim, review and payment preparation. A human-review acknowledgment is mandatory;
+wallets do not establish unique people. Canopy offers are excluded from Busking's
+normal calendar and promotional templates.
+
+Reuse: unchanged canonical Canopy `creator-records.js` at
+`e9fceef06afb381ec93164e08ea4c0cc440394b8`, with LICENSE/NOTICE; existing promotion
+engine and extracted `routerPayout` from this uncommitted branch, base `1c3a7a6`.
+Current local receiving tests include the twelve/thirteenth registration boundary,
+exact Ommm rewards/gifts and cross-app mint/list/five-USDC settlement.
+
+Deploy/configure the new collection/listings first; upgrade this worker while
+preserving its journal, set `SUPPORTER_CREATOR_COLLECTION_ADDRESS` and
+`SUPPORTER_SELLER_LISTINGS_ADDRESS`, allow the actual Canopy/Market ENS or IPFS origins
+through `IPFS_ALLOWED_ORIGINS`, then configure matching frontend addresses. The shared
+GitHub Pages origin is already permitted. Radio-only origins do not authorize
+promotion mutations. Funding and publication remain explicit later actions.
+
 ## Run Locally
 
 ```sh
