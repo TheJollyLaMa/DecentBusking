@@ -263,7 +263,7 @@ export function mountFundAdmin({ context, selected, select, create, isBusy, setB
     const button = event.target.closest('[data-select-fund]');
     if (button && !isBusy()) select(button.dataset.selectFund);
     const missing = event.target.closest('[data-create-fund]');
-    if (missing && !isBusy()) create(missing.dataset.createFund);
+    if (missing && !isBusy()) create(missing.dataset.createFund, { auto: true });
   });
   document.getElementById('admin-fund-view').addEventListener('click', event => {
     view = view === 'bars' ? 'pie' : 'bars';
@@ -277,10 +277,10 @@ export function mountFundAdmin({ context, selected, select, create, isBusy, setB
   });
   document.getElementById('admin-fund-refresh').addEventListener('click', refresh);
   document.getElementById('admin-fund-new').addEventListener('click', () => { if (!isBusy()) create(''); });
-  const prepare = slug => {
+  const prepare = (slug, options) => {
     if (isBusy()) return;
     if (funds.some(fund => fund.slug === slug)) select(slug);
-    else create(slug);
+    else create(slug, options);
   };
   document.getElementById('admin-fund-referrals').addEventListener('click', () => prepare(REFERRALS_FUND));
   document.getElementById('admin-fund-pinner-campaigns').addEventListener('click', () => prepare(PINNER_CAMPAIGN_FUND));
@@ -293,7 +293,7 @@ export function mountFundAdmin({ context, selected, select, create, isBusy, setB
     section.open = true;
     section.scrollIntoView({ block: 'start', behavior: 'smooth' });
     await refresh();
-    prepare(slug);
+    prepare(slug, { auto: true });
   });
   document.addEventListener('settlement-fund-changed', () => { if (section.open && isAdminWallet()) refresh(); });
   document.getElementById('router-deposit-native').addEventListener('click', () => act('fund'));

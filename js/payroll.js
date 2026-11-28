@@ -33,7 +33,7 @@ import { repositoryWorkReferenceText } from './repository-payroll-status.mjs?v=2
 import { loadSupporterPayroll } from './supporter-payroll.mjs?v=20261123-supporter-queue';
 import { loadReferralMatchPayroll } from './referral-match-payroll.mjs?v=20261126-referral-match';
 import { loadPinnerPayroll } from './pinner-rewards-ui.mjs?v=20261126-pinner-dashboard';
-import { FUND_ADMIN_ABI, SETTLEMENT_ROUTER_ADDRESS, verifyFundAdmin, confirmFundAction, mountFundAdmin } from './fund-admin.mjs?v=20261124-admin-funds';
+import { FUND_ADMIN_ABI, SETTLEMENT_ROUTER_ADDRESS, verifyFundAdmin, confirmFundAction, mountFundAdmin } from './fund-admin.mjs?v=20261128-fund-create';
 
 function _displayTokenAmount(units, currency, decimals) {
   return currency === 'USDC' ? formatUsdcUnits(units) : ethers.formatUnits(units, decimals);
@@ -129,7 +129,8 @@ function _selectAdminFund(slug, { rememberOnly = false } = {}) {
   select.dispatchEvent(new Event('change'));
 }
 
-function _prepareAdminFund(slug) {
+// auto: campaign editors and Fund Allocations rows run metadata → creation in one pass so a signed upload never strands a fund half-made.
+async function _prepareAdminFund(slug, { auto = false } = {}) {
   if (!isAdminWallet() || _settling) return;
   const select = document.getElementById('router-fund-select');
   select.value = CUSTOM_FUND_OPTION;
@@ -137,6 +138,11 @@ function _prepareAdminFund(slug) {
   for (const id of ['router-fund-name', 'router-fund-purpose', 'router-fund-website']) document.getElementById(id).value = '';
   select.dispatchEvent(new Event('change'));
   document.getElementById(slug ? 'router-fund-name' : 'router-custom-fund-slug').focus();
+  if (auto && slug) await _saveAndCreateFund();
+}
+
+async function _saveAndCreateFund() {
+  if (await _saveFundMetadata()) await _createSettlementFund();
 }
 
 function _selectedFundSlug() {
@@ -195,6 +201,7 @@ async function _saveFundMetadata() {
   if (_settling || !isAdminWallet() || document.getElementById('router-fund-select').value !== CUSTOM_FUND_OPTION) return;
   if (!form.reportValidity()) return;
   const revision = _fundMetadataRevision;
+  let saved = false;
   try {
     const draft = _customFundDraft();
     const routerAddress = _payrollAssetConfig?.routerAddress;
@@ -225,13 +232,15 @@ async function _saveFundMetadata() {
     if (!unchanged()) throw new Error('Fund details or wallet changed during upload; save metadata again');
     if (!/^ipfs:\/\/[^\s/]+(?:\/[^\s]*)?$/.test(uri)) throw new Error('IPFS upload returned an invalid URI');
     document.getElementById('router-fund-metadata').value = uri;
-    _setStatus(status, 'Metadata saved to IPFS. Ready for the separate Create Fund on Base confirmation.');
+    _setStatus(status, 'Metadata saved to IPFS. Step 3: confirm the Create Fund on Base transaction — the fund does not exist until it confirms.');
+    saved = true;
   } catch (error) {
     _setStatus(status, error.message || 'Metadata upload failed; retry saving', true);
   } finally {
     _settling = false;
     await _refreshSettlementFund();
   }
+  return saved;
 }
 
 function _reviewKey(category, week) {
@@ -1605,7 +1614,10 @@ async function _createSettlementFund() {
   try {
     const slug = _selectedFundSlug();
     const metadataUri = document.getElementById('router-fund-metadata').value.trim();
-    if (!await confirmFundAction({ title: `Create ${slug}`, description: `Create an empty Base allocation using the saved public metadata: ${metadataUri}. This does not deposit money or publish a campaign. Fund IDs are permanent; archive rather than delete.` })) return;
+    if (!await confirmFundAction({ title: `Create ${slug}`, description: `Create an empty Base allocation using the saved public metadata: ${metadataUri}. This does not deposit money or publish a campaign. Fund IDs are permanent; archive rather than delete.` })) {
+      _setStatus(status, `${slug} is NOT created yet. Metadata is saved; click Create Fund on Base to finish.`, true);
+      return;
+    }
     button.disabled = true;
     _setStatus(status, `Creating ${slug} on Base — confirm the fund creation transaction in your wallet...`);
     const signer = await _getSigner(BASE_CHAIN_ID);
@@ -1623,6 +1635,7 @@ async function _createSettlementFund() {
     await _refreshSettlementFund();
     _setStatus(status, result.alreadyExists ? `${slug} already exists; no creation transaction sent.`
       : `${slug} created. Empty fund; no ETH or USDC deposited.${result.txHash ? ` Transaction: ${result.txHash}` : ''}`);
+    document.dispatchEvent(new CustomEvent('settlement-fund-changed', { detail: { slug, created: true } }));
   } catch (error) {
     _setStatus(status, error.message || 'Fund creation failed', true);
   } finally {
@@ -1756,7 +1769,7 @@ export function initPayroll() {
   });
   document.getElementById('router-custom-fund-form')?.addEventListener('submit', event => {
     event.preventDefault();
-    _saveFundMetadata();
+    _saveAndCreateFund();
   });
   for (const id of ['router-fund-name', 'router-fund-purpose', 'router-fund-website']) {
     document.getElementById(id)?.addEventListener('input', () => {
